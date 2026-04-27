@@ -1,0 +1,7 @@
+[Unit]
+Description=awiki lint pass
+
+[Service]
+Type=oneshot
+WorkingDirectory=/ABSOLUTE/PATH/TO/WIKI
+ExecStart=/usr/bin/just lint

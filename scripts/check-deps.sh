@@ -57,6 +57,15 @@ for opt in qmd git-crypt age entr fswatch pdftotext; do
   fi
 done
 
+# Optional Python module: pyyaml (used by tests/scheduled_test.bats to validate
+# scheduled/github-action.yml.example). Warn but do not fail.
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  echo "OK|pyyaml (optional)"
+else
+  echo "OPTIONAL-MISSING|pyyaml"
+  echo "  install: pip3 install pyyaml" >&2
+fi
+
 if [[ "$ERRORS" -gt 0 ]]; then
   echo "DEPS-SUMMARY|errors=$ERRORS" >&2
   exit 1

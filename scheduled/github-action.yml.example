@@ -1,0 +1,36 @@
+name: awiki-ci
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 9 * * *'
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+      - name: Install hugo extended
+        run: |
+          curl -fsSL https://github.com/gohugoio/hugo/releases/download/v0.120.4/hugo_extended_0.120.4_linux-amd64.tar.gz | tar xz -C /tmp
+          sudo mv /tmp/hugo /usr/local/bin/hugo
+      - name: Install bats-core (pinned)
+        run: |
+          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.10.0.tar.gz | tar xz -C /tmp
+          sudo /tmp/bats-core-1.10.0/install.sh /usr/local
+      - name: Optional unlock for encrypted wikis
+        if: ${{ env.GIT_CRYPT_KEY != '' }}
+        env:
+          GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y git-crypt
+          echo "$GIT_CRYPT_KEY" | base64 -d > /tmp/git-crypt-key
+          git-crypt unlock /tmp/git-crypt-key
+          rm /tmp/git-crypt-key
+      - run: just check-deps
+      - run: just lint
+      - run: just test

@@ -89,6 +89,10 @@ Three pre-built templates under `deploy/`:
 
 **Encrypted wikis:** if you ran `just encrypt-init` with git-crypt, set the `GIT_CRYPT_KEY` repo secret to the base64-encoded export of `secrets/.git-crypt-key`. Each template will unlock the tree before building. **If unlock fails or the secret is missing on a wiki with encryption enabled, the build fails closed — no plaintext fallback.**
 
+## Example
+
+Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog.
+
 ## License
 
 Choose your own per-clone. Template ships without a LICENSE file.

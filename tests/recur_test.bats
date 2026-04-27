@@ -64,3 +64,106 @@ EOF
   # Page on disk unchanged.
   grep -c '^- \[ \]' content/projects/garden.md | grep -qx 0
 }
+
+@test "action-recur: every:1m clamps 2026-01-31 to 2026-02-28" {
+  mkdir -p content/projects
+  cat > content/projects/billing.md <<'EOF'
+---
+title: "Billing"
+type: project
+status: active
+last_updated: 2026-01-31
+draft: false
+---
+
+## Done
+
+- [x] file VAT @computer every:1m due:2026-01-31 done:2026-01-31 ^v01
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+v01	x	file VAT	content/projects/billing.md	10	computer		    	1m	2026-01-31				billing	public
+EOF
+  run bash scripts/action-recur.sh content/projects/billing.md
+  [ "$status" -eq 0 ]
+  grep -q '^- \[ \] file VAT @computer every:1m due:2026-02-28 \^v01~2$' content/projects/billing.md
+}
+
+@test "action-recur: every:1m on 2026-03-15 -> 2026-04-15 (no clamp)" {
+  mkdir -p content/projects
+  cat > content/projects/billing.md <<'EOF'
+---
+title: "Billing"
+type: project
+status: active
+last_updated: 2026-03-15
+draft: false
+---
+
+## Done
+
+- [x] file VAT @computer every:1m due:2026-03-15 done:2026-03-15 ^v02
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+v02	x	file VAT	content/projects/billing.md	10	computer		    	1m	2026-03-15				billing	public
+EOF
+  run bash scripts/action-recur.sh content/projects/billing.md
+  [ "$status" -eq 0 ]
+  grep -q '^- \[ \] file VAT @computer every:1m due:2026-04-15 \^v02~2$' content/projects/billing.md
+}
+
+@test "action-recur: every:1m on 2024-01-31 -> 2024-02-29 (leap year)" {
+  mkdir -p content/projects
+  cat > content/projects/billing.md <<'EOF'
+---
+title: "Billing"
+type: project
+status: active
+last_updated: 2024-01-31
+draft: false
+---
+
+## Done
+
+- [x] file VAT @computer every:1m due:2024-01-31 done:2024-01-31 ^v03
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+v03	x	file VAT	content/projects/billing.md	10	computer		    	1m	2024-01-31				billing	public
+EOF
+  run bash scripts/action-recur.sh content/projects/billing.md
+  [ "$status" -eq 0 ]
+  grep -q '^- \[ \] file VAT @computer every:1m due:2024-02-29 \^v03~2$' content/projects/billing.md
+}
+
+@test "action-recur: every:1w on 2026-05-04 -> 2026-05-11" {
+  seed_weekly_done_a05
+  run bash scripts/action-recur.sh content/projects/garden.md
+  [ "$status" -eq 0 ]
+  grep -q '^- \[ \] water plants @home every:1w due:2026-05-11 \^a05~2$' content/projects/garden.md
+}
+
+@test "action-recur: every:3d on 2026-04-27 -> 2026-04-30" {
+  mkdir -p content/projects
+  cat > content/projects/study.md <<'EOF'
+---
+title: "Study"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+## Done
+
+- [x] review flashcards @computer every:3d due:2026-04-27 done:2026-04-27 ^s01
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+s01	x	review flashcards	content/projects/study.md	10	computer		    	3d	2026-04-27				study	public
+EOF
+  run bash scripts/action-recur.sh content/projects/study.md
+  [ "$status" -eq 0 ]
+  grep -q '^- \[ \] review flashcards @computer every:3d due:2026-04-30 \^s01~2$' content/projects/study.md
+}

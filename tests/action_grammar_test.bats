@@ -175,3 +175,44 @@ teardown() {
   run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months not-a-date 1'
   [ "$status" -ne 0 ]
 }
+
+@test "awiki_recur_compute_due: weekly = +7d" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-05-04 weekly'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-05-11" ]
+}
+
+@test "awiki_recur_compute_due: 1w = +7d" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-05-04 1w'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-05-11" ]
+}
+
+@test "awiki_recur_compute_due: daily = +1d" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-04-27 daily'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-04-28" ]
+}
+
+@test "awiki_recur_compute_due: 3d = +3d" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-04-27 3d'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-04-30" ]
+}
+
+@test "awiki_recur_compute_due: monthly clamps last-day" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-01-31 monthly'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-02-28" ]
+}
+
+@test "awiki_recur_compute_due: 1m clamps last-day in leap year" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2024-01-31 1m'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2024-02-29" ]
+}
+
+@test "awiki_recur_compute_due: rejects bad token" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_recur_compute_due 2026-04-27 banana'
+  [ "$status" -ne 0 ]
+}

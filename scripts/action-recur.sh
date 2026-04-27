@@ -119,10 +119,52 @@ recur_one_page_locked() {
   bash "$SCRIPT_DIR/log-append.sh" recur "page=$page"
 }
 
-# Phase 18a.4 onward: real arithmetic + chain logic. Skeleton stub:
+# Compute the would-be page contents on stdout. Single-pass over the file.
+# Preserves all non-action content verbatim. For each [x] every:... line,
+# prepends an open instance line if not already present in the chain.
 recur_compute_new_contents() {
   local page="$1"
-  cat "$page"   # no-op until task 18a.4
+  awiki_recur_emit_pass "$page"
+}
+
+awiki_recur_emit_pass() {
+  local page="$1"
+
+  # Collect existing chain state on this page: lines of "<base>\t<n>".
+  local chains
+  chains="$(awiki_collect_chain_state "$page")"
+
+  # Stream the page; emit open-copy line above each [x] every:... line.
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if awiki_is_completed_recurring_action "$line"; then
+      local base every done_date next_due next_n new_id new_line
+      base="$(awiki_extract_chain_base "$line")"
+      every="$(awiki_extract_tail_key "$line" every)"
+      done_date="$(awiki_extract_tail_key "$line" done)"
+      [[ -z "$done_date" ]] && done_date="$(date -u +%Y-%m-%d)"
+      next_due="$(awiki_recur_compute_due "$done_date" "$every")"
+      next_n="$(awiki_recur_next_instance_n "$chains" "$base")"
+      # Idempotence: if next_n already exists, emit nothing extra.
+      if awiki_recur_chain_has "$chains" "$base" "$next_n"; then
+        printf '%s\n' "$line"
+        continue
+      fi
+      # Cap check: refuse-to-emit at chain length >= 200.
+      if [[ "$next_n" -ge 200 ]]; then
+        echo "action-recur: chain ^${base} reached 200 instances; refusing to emit (exit 6)" >&2
+        exit 6
+      fi
+      new_id="${base}${AWIKI_RECUR_SEP}${next_n}"
+      new_line="$(awiki_build_open_copy "$line" "$next_due" "$new_id")"
+      printf '%s\n' "$new_line"
+      printf '%s\n' "$line"
+      # Update local chain state for any subsequent [x] in same chain on this page.
+      chains="${chains}"$'\n'"${base}"$'\t'"${next_n}"
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$page"
 }
 
 main "$@"

@@ -231,3 +231,212 @@ PY
   s6_teardown_repo
   [[ "$output" != *"LINT|WARN"*"S6"* ]]
 }
+
+# === S7: feedback_count metric (info, >20 warning) ==========================
+
+@test "S7: feedback_count appears in synth-lint summary" {
+  REPO_TOP="$(git rev-parse --show-toplevel)"
+  WORK="$(mktemp -d)"
+  cp -r "$FIXTURES"/* "$WORK/"
+  cp -r "$FIXTURES/.awiki" "$WORK/.awiki"
+  pushd "$WORK" >/dev/null
+  cat > content/synthesis/feedback-count.md <<'EOF'
+---
+title: "Test Page"
+date: 2026-04-27
+last_updated: 2026-04-27
+last_generated: 2026-04-27T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [s1, s2]
+sources: ["[[s1]]", "[[s2]]"]
+draft: false
+---
+
+Lead.
+
+## Feedback
+
+- one
+- two
+- three
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- claim [[s1]]
+
+## Key Findings
+- finding [[s2]]
+
+## Open Questions
+- q
+
+## Evidence
+> "verbatim quote text from source" — [[s1]]
+
+<!-- END GENERATED -->
+EOF
+
+  run bash "$REPO_TOP/scripts/lint.sh" --only=synth --file=content/synthesis/feedback-count.md content
+  popd >/dev/null
+  rm -rf "$WORK"
+  [[ "$output" == *"feedback_count=3"* ]]
+  [[ "$output" == *"LINT|INFO"*"S7"* ]]
+}
+
+@test "S7: more than 20 feedback bullets emits warning" {
+  REPO_TOP="$(git rev-parse --show-toplevel)"
+  WORK="$(mktemp -d)"
+  cp -r "$FIXTURES"/* "$WORK/"
+  cp -r "$FIXTURES/.awiki" "$WORK/.awiki"
+  pushd "$WORK" >/dev/null
+  {
+    cat <<'EOF'
+---
+title: "Heavy Feedback"
+date: 2026-04-27
+last_updated: 2026-04-27
+last_generated: 2026-04-27T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [s1, s2]
+sources: ["[[s1]]", "[[s2]]"]
+draft: false
+---
+
+Lead.
+
+## Feedback
+
+EOF
+    for i in $(seq 1 21); do echo "- bullet $i"; done
+    cat <<'EOF'
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- claim [[s1]]
+
+## Key Findings
+- finding [[s2]]
+
+## Open Questions
+- q
+
+## Evidence
+> "verbatim quote text from source" — [[s1]]
+
+<!-- END GENERATED -->
+EOF
+  } > content/synthesis/heavy-feedback.md
+
+  run bash "$REPO_TOP/scripts/lint.sh" --only=synth --file=content/synthesis/heavy-feedback.md content
+  popd >/dev/null
+  rm -rf "$WORK"
+  [[ "$output" == *"feedback_count=21"* ]]
+  [[ "$output" == *"LINT|WARN"*"S7"*"exceeds"* ]]
+}
+
+# === S8: feedback bullet wikilinks must be in resolved scope (warning) =====
+
+@test "S8: feedback bullet with out-of-scope wikilink emits warning" {
+  REPO_TOP="$(git rev-parse --show-toplevel)"
+  WORK="$(mktemp -d)"
+  cp -r "$FIXTURES"/* "$WORK/"
+  cp -r "$FIXTURES/.awiki" "$WORK/.awiki"
+  pushd "$WORK" >/dev/null
+  cat > content/synthesis/oos-feedback.md <<'EOF'
+---
+title: "Out-of-scope feedback test"
+date: 2026-04-27
+last_updated: 2026-04-27
+last_generated: 2026-04-27T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [s1, s2]
+sources: ["[[s1]]", "[[s2]]"]
+draft: false
+---
+
+Lead.
+
+## Feedback
+
+- Tighten TL;DR.
+- Add coverage of [[s3]] — under-cited.
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- claim [[s1]]
+
+## Key Findings
+- finding [[s2]]
+
+## Open Questions
+- q
+
+## Evidence
+> "verbatim quote text from source" — [[s1]]
+
+<!-- END GENERATED -->
+EOF
+
+  run bash "$REPO_TOP/scripts/lint.sh" --only=synth --file=content/synthesis/oos-feedback.md content
+  popd >/dev/null
+  rm -rf "$WORK"
+  [[ "$output" == *"LINT|WARN"*"S8"*"out-of-scope"*"s3"* ]]
+}
+
+@test "S8: feedback bullet with in-scope wikilink does NOT warn" {
+  REPO_TOP="$(git rev-parse --show-toplevel)"
+  WORK="$(mktemp -d)"
+  cp -r "$FIXTURES"/* "$WORK/"
+  cp -r "$FIXTURES/.awiki" "$WORK/.awiki"
+  pushd "$WORK" >/dev/null
+  cat > content/synthesis/in-scope-feedback.md <<'EOF'
+---
+title: "In-scope feedback test"
+date: 2026-04-27
+last_updated: 2026-04-27
+last_generated: 2026-04-27T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [s1, s2]
+sources: ["[[s1]]", "[[s2]]"]
+draft: false
+---
+
+Lead.
+
+## Feedback
+
+- Add coverage of [[s1]] — in-scope, no warning expected.
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- claim [[s1]]
+
+## Key Findings
+- finding [[s2]]
+
+## Open Questions
+- q
+
+## Evidence
+> "verbatim quote text from source" — [[s1]]
+
+<!-- END GENERATED -->
+EOF
+
+  run bash "$REPO_TOP/scripts/lint.sh" --only=synth --file=content/synthesis/in-scope-feedback.md content
+  popd >/dev/null
+  rm -rf "$WORK"
+  [[ "$output" != *"LINT|WARN"*"S8"* ]]
+}

@@ -13,9 +13,9 @@
 #   S4 citation slug in scope (error)           — task 14.6
 #   S5 scope drift (warning, skip query-scope)  — task 14.7
 #   S6 hand-edit inside markers (warning)       — task 14.8
+#   S7 feedback_count metric (info, >20 warn)   — task 15.3
+#   S8 out-of-scope feedback wikilink (warn)    — task 15.4
 #   S9 aggregate evidence words (error)         — task 14.10
-#
-# S7/S8 are deferred to phase 15.
 
 # Guard: only re-source ok if functions already defined.
 if declare -F synth_lint_file >/dev/null 2>&1; then
@@ -459,6 +459,93 @@ synth_check_s9() {
   fi
 }
 
+# --- S7: feedback_count metric (info; warning when >20) ---------------------
+# Surfaces the bullet count under ## Feedback in the synth-lint summary.
+# Threshold lives here as a constant.
+SYNTH_S7_THRESHOLD=20
+
+synth_check_s7() {
+  local page="$1"
+  local count
+  count="$(awk '
+    /^## Feedback[[:space:]]*$/ { in_block=1; next }
+    in_block && /^## / { in_block=0 }
+    in_block && /^<!-- BEGIN GENERATED/ { in_block=0 }
+    in_block && /^- / { n++ }
+    END { print n+0 }
+  ' "$page")"
+
+  printf 'LINT|INFO|%s|S7: feedback_count=%s\n' "$page" "$count"
+  INFOS=$((INFOS + 1))
+
+  if (( count > SYNTH_S7_THRESHOLD )); then
+    printf 'LINT|WARN|%s|S7: feedback_count=%s exceeds %s; consider scope refactor or page split\n' \
+      "$page" "$count" "$SYNTH_S7_THRESHOLD"
+    WARNS=$((WARNS + 1))
+  fi
+}
+
+# --- S8: feedback bullet wikilinks must be in resolved scope (warning) ------
+# Reuses synth_resolve_scope_slugs to build the in-scope slug set, then scans
+# ## Feedback bullets for [[slug]] occurrences and warns when a slug is
+# absent from the resolved set. Skipped for query-scoped pages (resolution is
+# non-deterministic) and for pages whose scope cannot be parsed.
+synth_check_s8() {
+  local page="$1"
+  local content_dir="${2:-content}"
+
+  # Detect scope kind (skip query-scope; cannot deterministically resolve).
+  local scope_kind=""
+  local in_fm=0 in_scope=0
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == "---" ]] && in_fm=$((in_fm + 1)) && continue
+    [[ "$in_fm" -ne 1 ]] && continue
+    if [[ "$line" =~ ^scope:[[:space:]]*$ ]]; then in_scope=1; continue; fi
+    if [[ "$in_scope" -eq 1 ]]; then
+      if [[ "$line" =~ ^[^[:space:]] ]]; then in_scope=0; continue; fi
+      [[ "$line" =~ ^[[:space:]]+tag:    ]] && scope_kind="tag"
+      [[ "$line" =~ ^[[:space:]]+slugs:  ]] && scope_kind="slugs"
+      [[ "$line" =~ ^[[:space:]]+query:  ]] && scope_kind="query"
+    fi
+  done < "$page"
+  [[ "$scope_kind" = "query" ]] && return 0
+
+  local resolved_slugs
+  resolved_slugs="$(synth_resolve_scope_slugs "$page" "$content_dir")"
+  [[ -n "$resolved_slugs" ]] || return 0
+
+  # Extract every [[slug]] inside ## Feedback bullets.
+  local fb_slugs
+  fb_slugs="$(awk '
+    /^## Feedback[[:space:]]*$/ { in_block=1; next }
+    in_block && /^## / { in_block=0 }
+    in_block && /^<!-- BEGIN GENERATED/ { in_block=0 }
+    in_block && /^- / {
+      line = $0
+      while (match(line, /\[\[[a-z0-9][a-z0-9-]*(\|[^]]*)?\]\]/)) {
+        wl = substr(line, RSTART, RLENGTH)
+        sub(/^\[\[/, "", wl)
+        sub(/\]\]$/, "", wl)
+        sub(/\|.*$/, "", wl)
+        print wl
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+  ' "$page" | sort -u)"
+
+  [[ -z "$fb_slugs" ]] && return 0
+
+  while IFS= read -r feedback_slug; do
+    [[ -z "$feedback_slug" ]] && continue
+    if ! grep -qxF "$feedback_slug" <<<"$resolved_slugs"; then
+      printf 'LINT|WARN|%s|S8: feedback references out-of-scope page %s; widen scope or remove bullet\n' \
+        "$page" "$feedback_slug"
+      WARNS=$((WARNS + 1))
+    fi
+  done <<<"$fb_slugs"
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -480,6 +567,8 @@ synth_lint_file() {
   synth_check_s4 "$page" "$content_dir"
   synth_check_s5 "$page" "$content_dir"
   synth_check_s6 "$page"
+  synth_check_s7 "$page"
+  synth_check_s8 "$page" "$content_dir"
   synth_check_s9 "$page"
 }
 

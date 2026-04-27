@@ -127,6 +127,37 @@ export -f phase_index should_skip_phase
 
 # === Subcommand dispatch (recovery flows) ===
 
+# --gc: rotate cache, keep current pin + immediate previous.
+if [[ $GC -eq 1 ]]; then
+  CUR_COMMIT=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
+  python3 "$HELPERS/cache_rotate.py" --cache-dir "$REPO_ROOT/.awiki/template-cache" --current "$CUR_COMMIT"
+  echo "info: cache GC complete (kept current + previous)"
+  exit 0
+fi
+
+# --status: print pin/version/repo, plus any drift, pending prompts, in-progress phase.
+if [[ $STATUS -eq 1 ]]; then
+  COMMIT=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
+  VERSION=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" version)
+  REPO_URL=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" repo)
+  ORIG_REPO=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" original_repo 2>/dev/null || echo "$REPO_URL")
+  echo "version: $VERSION"
+  echo "commit:  $COMMIT"
+  echo "repo:    $REPO_URL"
+  if [[ -n "$ORIG_REPO" && "$REPO_URL" != "$ORIG_REPO" ]]; then
+    echo "original_repo: $ORIG_REPO  (DIFFERS — source was changed)"
+  fi
+  if [[ -d "$REPO_ROOT/.awiki/pending-prompts" ]] && [[ -n "$(ls -A "$REPO_ROOT/.awiki/pending-prompts" 2>/dev/null)" ]]; then
+    echo "pending prompts:"
+    ls -1 "$REPO_ROOT/.awiki/pending-prompts/"
+  fi
+  if [[ -f "$REPO_ROOT/.awiki/template-cache/_fetch/.update-state.json" ]]; then
+    PHASE=$(python3 "$HELPERS/state.py" get "$REPO_ROOT/.awiki/template-cache/_fetch/.update-state.json" phase 2>/dev/null || echo "?")
+    echo "in-progress update: phase=$PHASE"
+  fi
+  exit 0
+fi
+
 # --rerun-bootstrap-step <id>: replay one (often dangerous) bootstrap step on a dedicated
 # branch. Refuses if there's any in-progress update (state file, update branch, or
 # pending prompts).

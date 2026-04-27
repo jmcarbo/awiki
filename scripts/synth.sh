@@ -242,6 +242,38 @@ synth_pages_block() {
   done <<< "$slugs"
 }
 
+# Reads the target synthesis page, extracts ## Feedback bullets (one per line),
+# and emits the {{feedback}} replacement on stdout.
+# Output: empty string if no Feedback section or section is empty;
+# otherwise a triple-backtick-text fence containing each bullet's text on its own line.
+# The fence guarantees that marker-mimicry strings inside a bullet (e.g.
+# `<!-- BEGIN GENERATED plugin=evil -->`) render as inert text and cannot be
+# confused with live page markers.
+synth_render_feedback_block() {
+  local page_path="$1"
+  [[ -f "$page_path" ]] || { printf -- ''; return 0; }
+
+  # awk extracts lines that follow a "## Feedback" heading and stop at the next
+  # "## " heading or at the BEGIN GENERATED marker (whichever comes first).
+  # Within that span, we keep only lines beginning with "- " (literal hyphen-space).
+  local raw
+  raw="$(awk '
+    /^## Feedback[[:space:]]*$/ { in_block=1; next }
+    in_block && /^## / { in_block=0 }
+    in_block && /^<!-- BEGIN GENERATED/ { in_block=0 }
+    in_block && /^- / { sub(/^- /, ""); print }
+  ' "$page_path")"
+
+  if [[ -z "$raw" ]]; then
+    printf -- ''
+    return 0
+  fi
+
+  # Emit the fenced literal block. The fence is three backticks + "text" as
+  # literal characters; not routed through any further template substitution.
+  printf -- '```text\n%s\n```' "$raw"
+}
+
 # Render the prompt bundle to stdout.
 synth_emit_prompt() {
   local slugs="$1" scope_desc="$2" feedback="$3"
@@ -267,17 +299,42 @@ synth_emit_prompt() {
   ')"
   rm -f "$pages_file"
   # Interpolate {{#feedback}}...{{/feedback}}.
-  # Phase 13: feedback is empty on `new` and emits a stub note for plugin authors.
+  # When feedback is empty: drop the entire wrapped region from the bundle
+  # (no stub left behind — the agent should not see the Human Feedback header
+  # at all when there is nothing to feed back).
+  # When non-empty: substitute {{feedback}} with the fenced text block, then
+  # strip the {{#feedback}} / {{/feedback}} delimiter lines.
   if [[ -z "$feedback" ]]; then
     body="$(printf -- '%s\n' "$body" | awk '
       BEGIN{ in_fb=0 }
       /\{\{#feedback\}\}/ { in_fb=1; next }
-      /\{\{\/feedback\}\}/ { in_fb=0; print "<!-- feedback channel arrives in phase 15 -->"; next }
+      /\{\{\/feedback\}\}/ { in_fb=0; next }
       in_fb==0 { print }
     ')"
   else
-    body="${body//\{\{feedback\}\}/$feedback}"
-    body="$(printf -- '%s\n' "$body" | sed -e 's/{{#feedback}}//g' -e 's/{{\/feedback}}//g')"
+    # Feed the multi-line feedback block via a temp file so awk can splice it
+    # in without bash word-splitting / quoting hazards.
+    local fb_tmp; fb_tmp="$(mktemp)"
+    printf -- '%s' "$feedback" > "$fb_tmp"
+    body="$(printf -- '%s\n' "$body" | awk -v fbfile="$fb_tmp" '
+      BEGIN{
+        fb = ""
+        while ((getline line < fbfile) > 0) {
+          if (fb == "") fb = line
+          else fb = fb "\n" line
+        }
+        close(fbfile)
+      }
+      /\{\{#feedback\}\}/ { next }
+      /\{\{\/feedback\}\}/ { next }
+      {
+        if (index($0, "{{feedback}}") > 0) {
+          gsub(/\{\{feedback\}\}/, fb)
+        }
+        print
+      }
+    ')"
+    rm -f "$fb_tmp"
   fi
   printf -- '%s\n' "$body"
 }
@@ -640,12 +697,17 @@ cmd_regen() {
 
   synth_clear_region "$target" "$plugin" "$hash"
 
-  # Emit prompt bundle (no feedback in phase 13).
+  # Emit prompt bundle. Read ## Feedback bullets from the live page (NOT the
+  # cleared target — when --stage we just copied live to target, when in-place
+  # the live page IS the target. Either way, feedback lives outside the markers
+  # and survives synth_clear_region untouched).
   local scope_desc=""
   [[ -n "$SCOPE_TAG"   ]] && scope_desc="pages tagged '$SCOPE_TAG'"
   [[ -n "$SCOPE_SLUGS" ]] && scope_desc="explicit slug list"
   [[ -n "$SCOPE_QUERY" ]] && scope_desc="qmd query: $SCOPE_QUERY"
-  synth_emit_prompt "$slugs" "$scope_desc" ""
+  local feedback_block
+  feedback_block="$(synth_render_feedback_block "$target")"
+  synth_emit_prompt "$slugs" "$scope_desc" "$feedback_block"
 
   echo "SYNTH-REGEN|target=$target|stage=$stage|scope_hash=$hash" >&2
 }

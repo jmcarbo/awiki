@@ -5,6 +5,7 @@ FIX=0
 ONLY=""
 ONLY_FILE=""
 HUGO_CHECK=0
+ALIAS_BUILD_ONLY=0
 CONTENT_DIR="content"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -12,10 +13,19 @@ while [[ $# -gt 0 ]]; do
     --only=*) ONLY="${1#--only=}"; shift ;;
     --file=*) ONLY_FILE="${1#--file=}"; shift ;;
     --hugo-check) HUGO_CHECK=1; shift ;;
+    --alias-build-only) ALIAS_BUILD_ONLY=1; shift ;;
     --) shift; break ;;
     *) CONTENT_DIR="$1"; shift ;;
   esac
 done
+
+# Fast pre-commit shortcut: rebuild only the alias / slug / title maps under
+# .awiki/maps/ and exit. Delegates to scripts/build.sh --maps-only so the
+# canonical map-building logic stays in one place.
+if [[ "$ALIAS_BUILD_ONLY" -eq 1 ]]; then
+  AWIKI_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  exec bash "$AWIKI_SCRIPTS_DIR/build.sh" --maps-only
+fi
 
 # Resolve repo root + scripts dir for task-rule helpers.
 AWIKI_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

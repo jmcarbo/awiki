@@ -234,6 +234,75 @@ step_encryption() {
   esac
 }
 
+# Step 6: pre-commit hook installer (idempotent via marker line).
+# Honors AWIKI_TASK_INIT_ASSUME_YES / AWIKI_TASK_INIT_ASSUME_NO so it can
+# run non-interactively under tests / CI. The marker `# task-layer` keeps
+# re-runs idempotent and lets the installer detect prior task-layer
+# installation cleanly. If a non-task-layer pre-commit hook already exists
+# (e.g. from v1 phase 12's `install-hooks.sh`), the installer appends
+# rather than overwrites.
+step_precommit() {
+  local HOOK=".git/hooks/pre-commit"
+  local HOOK_DIR
+  HOOK_DIR="$(dirname "$HOOK")"
+
+  # No git directory? Nothing to install — skip with note.
+  if [[ ! -d .git ]]; then
+    note "skip pre-commit (not a git repo)"
+    return 0
+  fi
+  mkdir -p "$HOOK_DIR"
+
+  local MARKER="# task-layer"
+
+  if [[ -f "$HOOK" ]] && grep -qE "^${MARKER}\$" "$HOOK"; then
+    note "skip pre-commit (# task-layer marker already present)"
+    return 0
+  fi
+
+  local answer=""
+  if [[ "${AWIKI_TASK_INIT_ASSUME_YES:-0}" == "1" ]]; then
+    answer="y"
+  elif [[ "${AWIKI_TASK_INIT_ASSUME_NO:-0}" == "1" ]]; then
+    answer="n"
+  else
+    echo "Install task-aware pre-commit hook (runs alias-build lint + action-scan)? (Y/n) "
+    read -r answer || answer="y"
+    answer="${answer:-y}"
+  fi
+
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) note "skip pre-commit (declined)"; return 0 ;;
+  esac
+
+  if [[ ! -f "$HOOK" ]]; then
+    cat > "$HOOK" <<'HOOKEOF'
+#!/usr/bin/env bash
+set -e
+
+# task-layer
+# (Inserted by scripts/task-init.sh — do not remove the marker line above.)
+bash scripts/lint.sh --alias-build-only
+bash scripts/action-scan.sh
+HOOKEOF
+  else
+    # Append to existing hook. Ensure the file ends with a newline first.
+    if [[ "$(tail -c1 "$HOOK")" != $'\n' ]]; then
+      printf '\n' >> "$HOOK"
+    fi
+    cat >> "$HOOK" <<'HOOKEOF'
+
+# task-layer
+# (Inserted by scripts/task-init.sh — do not remove the marker line above.)
+bash scripts/lint.sh --alias-build-only
+bash scripts/action-scan.sh
+HOOKEOF
+  fi
+  chmod +x "$HOOK"
+  note "installed task-layer pre-commit hook at $HOOK"
+}
+
 main() {
   note "start"
 
@@ -245,6 +314,7 @@ main() {
   step_encryption
   step_config
   step_state_files
+  step_precommit
 
   # Logging (best-effort; no failure if log-append is absent).
   if [[ -x scripts/log-append.sh ]]; then

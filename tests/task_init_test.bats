@@ -124,3 +124,43 @@ teardown() {
   run grep '^custom: yes$' content/contexts/phone.md
   [ "$status" -eq 0 ]
 }
+
+@test "task-init appends task-layer block to WIKI.md" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  run grep '^<!-- BEGIN task-layer -->$' WIKI.md
+  [ "$status" -eq 0 ]
+  run grep '^<!-- END task-layer -->$' WIKI.md
+  [ "$status" -eq 0 ]
+}
+
+@test "task-init WIKI.md block contains expected sections" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  run grep -F 'Task Layer (opt-in)' WIKI.md
+  [ "$status" -eq 0 ]
+  run grep -F '## Task Layer' WIKI.md
+  [ "$status" -eq 0 ]
+  run grep -F 'T15' WIKI.md
+  [ "$status" -eq 0 ]
+}
+
+@test "task-init does not double-append if marker already present" {
+  bash scripts/task-init.sh
+  bash scripts/task-init.sh
+  run grep -c '^<!-- BEGIN task-layer -->$' WIKI.md
+  [[ "$output" == "1" ]]
+}
+
+@test "task-init prints WARN if marker present but body modified" {
+  bash scripts/task-init.sh
+  # Add stray text inside the block (simulate user customization).
+  awk '/^<!-- BEGIN task-layer -->$/ {print; print "MY CUSTOM TEXT"; next} {print}' WIKI.md > WIKI.md.tmp
+  mv WIKI.md.tmp WIKI.md
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN"* ]] || [[ "$output" == *"customized"* || "$output" == *"customised"* ]]
+  # Block is still there, MY CUSTOM TEXT preserved.
+  run grep -F 'MY CUSTOM TEXT' WIKI.md
+  [ "$status" -eq 0 ]
+}

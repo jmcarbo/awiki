@@ -159,9 +159,42 @@ CTX
   done
 }
 
+step_wiki_md() {
+  if [[ ! -f "$WIKI_MD" ]]; then
+    warn "WIKI.md not found at repo root; skipping task-layer block patch"
+    return 0
+  fi
+  if [[ ! -f "$TEMPLATE" ]]; then
+    warn "template missing: $TEMPLATE; skipping"
+    return 0
+  fi
+
+  if grep -q '^<!-- BEGIN task-layer -->$' "$WIKI_MD"; then
+    # Marker present. Compute reference template content between markers
+    # and current file content between markers. If they differ, warn and skip.
+    local tmpl_body cur_body
+    tmpl_body="$(awk '/^<!-- BEGIN task-layer -->$/{f=1} f{print} /^<!-- END task-layer -->$/{f=0}' "$TEMPLATE")"
+    cur_body="$(awk '/^<!-- BEGIN task-layer -->$/{f=1} f{print} /^<!-- END task-layer -->$/{f=0}' "$WIKI_MD")"
+    if [[ "$tmpl_body" != "$cur_body" ]]; then
+      warn "WIKI.md task-layer block has been customised; skipping (manual reconciliation required)"
+    else
+      note "skip WIKI.md (block already up to date)"
+    fi
+    return 0
+  fi
+
+  # Append a blank line then the block.
+  {
+    printf -- '\n'
+    cat "$TEMPLATE"
+  } >> "$WIKI_MD"
+  note "appended task-layer block to WIKI.md"
+}
+
 main() {
   note "start"
   step_pages
+  step_wiki_md
   step_config
   step_state_files
   note "done"

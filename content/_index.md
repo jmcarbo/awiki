@@ -6,7 +6,10 @@ draft: false
 
 # Welcome
 
-This wiki was scaffolded from the awiki template. After bootstrap, this paragraph will be replaced by your wiki's purpose and entry-point links.
+This is your awiki. Browse:
 
-- [Catalog](/catalog/) — full content listing.
-- [Log](/log/) — chronological activity log.
+- [[catalog]] — full content listing.
+- [[log]] — chronological activity log.
+- Sections: entities, concepts, topics, sources, synthesis.
+
+Edit this page manually after BOOTSTRAP runs.

@@ -717,6 +717,8 @@ USAGE
     exit 1
   fi
   local sub="$1"; shift
+  # Skip a leading "--" sent by justfile recipes that use it as a flag-terminator.
+  if [[ "${1:-}" == "--" ]]; then shift; fi
   case "$sub" in
     list)         cmd_list "$@" ;;
     resolve)      cmd_resolve "$@" ;;

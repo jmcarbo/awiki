@@ -32,6 +32,28 @@ rename old new:
 delete slug:
     bash scripts/delete-page.sh {{slug}}
 
+# === synthesis ===
+synth plugin topic *args:
+    bash scripts/synth.sh new -- {{plugin}} {{topic}} {{args}}
+
+synth-regen slug *args:
+    bash scripts/synth.sh regen -- {{slug}} {{args}}
+
+synth-finalize slug:
+    bash scripts/synth.sh finalize -- {{slug}}
+
+synth-accept-stage slug:
+    bash scripts/synth.sh accept-stage -- {{slug}}
+
+synth-refine slug *note:
+    bash scripts/synth.sh refine -- {{slug}} "{{note}}"
+
+synth-list:
+    bash scripts/synth.sh list
+
+synth-resolve slug:
+    bash scripts/synth.sh resolve -- {{slug}}
+
 # === hugo ===
 serve:
     bash scripts/serve.sh

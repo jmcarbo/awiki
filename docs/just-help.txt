@@ -127,3 +127,15 @@ TASK LAYER (phase 16)
                                 Example: just capture "call dentist"
                                 Reports applied rules to stderr as
                                 SANITIZATION-APPLIED|<rule1>,<rule2>,...
+
+TASK LAYER (phase 17)
+  just scan                     Run scripts/action-scan.sh: walk content/**/*.md,
+                                emit .awiki/maps/actions.tsv (canonical) +
+                                .awiki/maps/actions-rejected.tsv (lint sidecar).
+                                Read-only; takes shared lock.
+  just agenda                   Run scan + scripts/agenda.sh: regenerate the 5
+                                managed-region pages under content/agenda/
+                                (next-actions, today, waiting, someday,
+                                stuck-projects). Atomic write; takes exclusive
+                                lock. Privacy filter excludes source_kind=private
+                                actions; emits "_N hidden_" placeholder.

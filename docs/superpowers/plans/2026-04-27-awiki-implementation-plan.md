@@ -63,17 +63,90 @@ find content raw scripts tests docs themes deploy scheduled examples mcp .awiki 
      -type d -empty -exec touch {}/.gitkeep \;
 ```
 
-- [ ] **Step 4: Verify layout**
-
-Run: `find content raw scripts tests docs themes deploy scheduled examples mcp -type d | sort`
-
-Expected: tree matches the spec's Repository Layout.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Seed system pages (`_index.md`, `catalog.md`, `log.md`)**
 
 ```bash
-git add content raw scripts tests docs themes deploy scheduled examples mcp .awiki
-git commit -m "chore: scaffold awiki directory layout"
+cat > content/_index.md <<'EOF'
+---
+title: "awiki"
+type: section-index
+draft: false
+---
+
+# Welcome
+
+This wiki was scaffolded from the awiki template. After bootstrap, this paragraph will be replaced by your wiki's purpose and entry-point links.
+
+- [Catalog](/catalog/) — full content listing.
+- [Log](/log/) — chronological activity log.
+EOF
+
+cat > content/catalog.md <<'EOF'
+---
+title: "Catalog"
+type: catalog
+draft: false
+---
+
+# Catalog
+
+LLM-maintained index of every page. Updated on every ingest.
+
+## Entities
+
+(empty)
+
+## Concepts
+
+(empty)
+
+## Topics
+
+(empty)
+
+## Sources
+
+(empty)
+
+## Synthesis
+
+(empty)
+EOF
+
+cat > content/log.md <<'EOF'
+---
+title: "Log"
+type: log
+draft: true
+---
+
+# Log
+
+Append-only chronological record. One H2 per entry. BOOTSTRAP appends the first entry.
+EOF
+```
+
+- [ ] **Step 5: Verify layout**
+
+Run: `find content raw scripts tests docs themes deploy scheduled examples mcp -type d | sort && ls content/`
+
+Expected: tree matches spec's Repository Layout; `_index.md`, `catalog.md`, `log.md` present.
+
+- [ ] **Step 6: Raw originals dir**
+
+```bash
+mkdir -p raw/processed/_originals
+touch raw/processed/_originals/.gitkeep
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add content raw scripts tests docs themes deploy scheduled examples mcp .awiki layouts 2>/dev/null || true
+mkdir -p layouts/shortcodes
+touch layouts/shortcodes/.gitkeep
+git add content raw scripts tests docs themes deploy scheduled examples mcp .awiki layouts
+git commit -m "chore: scaffold awiki directory layout with seeded system pages"
 ```
 
 ## Task 1.2: `.gitignore`
@@ -101,6 +174,7 @@ raw/processed/*
 !raw/processed/.gitkeep
 content/private/**
 raw/processed/private/**
+raw/processed/_originals/**
 
 # secrets — deny all, allow only public keys
 secrets/**
@@ -133,6 +207,7 @@ git commit -m "chore: add default .gitignore with private-by-default patterns"
 # git-crypt patterns activated by scripts/encrypt-init.sh
 # Uncomment after running `just encrypt-init`:
 # raw/processed/private/** filter=git-crypt diff=git-crypt
+# raw/processed/_originals/** filter=git-crypt diff=git-crypt
 # content/private/** filter=git-crypt diff=git-crypt
 # secrets/** filter=git-crypt diff=git-crypt
 
@@ -341,7 +416,12 @@ After encrypt-init, run `git status` and verify expected encrypted-vs-cleartext 
 
 Ask: "Track ingested sources in git? (y/N)". Default N.
 
-If y: remove the line `raw/processed/*` from `.gitignore` (and the `!raw/processed/.gitkeep` exception). Add the literal `raw/processed/.gitkeep` is already tracked, so nothing else to do.
+If y: edit `.gitignore` and remove these two lines:
+```
+raw/processed/*
+!raw/processed/.gitkeep
+```
+The `_originals/` and `private/` exceptions remain ignored (still privacy-protected).
 
 Note to user: tracking sources may include copyrighted material. History-rewrite cost is non-trivial if revoked.
 
@@ -349,13 +429,16 @@ Note to user: tracking sources may include copyrighted material. History-rewrite
 
 Ask: "Hugo theme? (default: hugo-book)"
 
-Add the chosen theme as a git submodule under `themes/<theme-name>/`:
+The default `hugo-book` submodule is already present from the template. Skip the add step if the user accepts the default. If the user picks an alternative:
 
 ```bash
-git submodule add https://github.com/alex-shpak/hugo-book themes/hugo-book
+git submodule deinit -f themes/hugo-book
+git rm -f themes/hugo-book
+rm -rf .git/modules/themes/hugo-book
+git submodule add <theme-url> themes/<theme-name>
 ```
 
-(Or matching URL for the chosen theme.)
+After switching, also rewrite `theme = "hugo-book"` in `hugo.toml` to the chosen theme name.
 
 ## Step 6: Publish log?
 
@@ -385,11 +468,28 @@ Add this to ~/.zshrc or ~/.bashrc:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Step 9: Wire qmd MCP server (optional)
+## Step 9a: Wire qmd MCP server (optional)
 
 Ask: "Wire qmd MCP server into your agent harness? (y/N)" — only if `.awiki/qmd-status=ok`.
 
-If y: detect agent harness (Claude Code: look for `.claude/`; Codex: look for `.codex/`). Patch the appropriate config file to register qmd's MCP server. Print verification instructions.
+If y: run `bash scripts/wire-qmd-mcp.sh`. Print verification instructions.
+
+## Step 9b: Wire awiki wiki-ops MCP server (optional)
+
+Ask: "Wire awiki wiki-ops MCP server (ingest/lint/query/update_catalog)? (y/N)".
+
+If y, install Node deps and wire:
+
+```bash
+( cd mcp/awiki-server && npm install --silent )
+bash scripts/wire-awiki-mcp.sh
+```
+
+The wire script registers the awiki server in:
+- Claude Code: project-level `./.mcp.json` (created if absent).
+- Codex: `./.codex/config.toml` `[mcp.servers.awiki]` block.
+
+Verify registration by listing tools in the next agent session. The MCP tools are: `ingest_source`, `lint`, `query_wiki`, `update_catalog`.
 
 ## Step 10: Initial log entry
 
@@ -1398,8 +1498,11 @@ apply_fixes() {
   local page="$1"
   if ! grep -q '^last_updated:' "$page"; then
     today="$(date '+%Y-%m-%d')"
-    sed -i.bak -E "s/^(date: .*)\$/\\1\\nlast_updated: $today/" "$page"
-    rm -f "$page.bak"
+    # Portable insertion: use awk (handles BSD/GNU sed differences in \n).
+    awk -v today="$today" '
+      /^date: / { print; print "last_updated: " today; next }
+      { print }
+    ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
     echo "FIX|$page|added last_updated: $today"
   fi
 }
@@ -1556,7 +1659,7 @@ git commit -m "docs: record wikilink rendering decision"
 baseURL = 'https://example.com/'
 title = 'awiki'
 theme = 'hugo-book'
-contentDir = '../.awiki/build-content'
+contentDir = '.awiki/build-content'
 
 [markup]
   [markup.goldmark]
@@ -1569,6 +1672,8 @@ contentDir = '../.awiki/build-content'
 [params]
   BookSection = 'docs'
 ```
+
+Hugo is invoked from the repo root with `hugo --source .` (default). `contentDir` is relative to repo root and points at the preprocessor's output. `.awiki/build-content/` must exist before Hugo runs — `scripts/build.sh` creates it.
 
 - [ ] **Step 2: Commit**
 
@@ -1839,21 +1944,132 @@ git commit -m "feat: add serve script with watcher fallback"
 
 **Files:** Modify: `scripts/build.sh` (extend), Create: `content/_index.md`
 
-- [ ] **Step 1: Extend `build.sh` to call hugo build when `--full` passed**
+- [ ] **Step 1: Rewrite `scripts/build.sh` with proper arg parsing + `--full` flag**
 
-Append to `scripts/build.sh` (before `echo BUILD-OK`):
+Replace the entire file with:
 
 ```bash
-if [[ "${1:-}" == "--full" ]]; then
-  hugo --source . --destination public --minify
+cat > scripts/build.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+MAPS_ONLY=0
+FULL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --maps-only) MAPS_ONLY=1; shift ;;
+    --full) FULL=1; shift ;;
+    -*) echo "unknown flag: $1" >&2; exit 1 ;;
+    *) echo "unexpected positional: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ "$MAPS_ONLY" -eq 1 && "$FULL" -eq 1 ]]; then
+  echo "--maps-only and --full are mutually exclusive" >&2
+  exit 1
 fi
+
+CONTENT_DIR="content"
+BUILD_DIR=".awiki/build-content"
+MAPS_DIR=".awiki/maps"
+mkdir -p "$MAPS_DIR" "$BUILD_DIR"
+
+SLUG_MAP="$MAPS_DIR/slug-to-path.tsv"
+ALIAS_MAP="$MAPS_DIR/alias-to-slug.tsv"
+TITLE_MAP="$MAPS_DIR/slug-to-title.tsv"
+
+: > "$SLUG_MAP"
+: > "$ALIAS_MAP"
+: > "$TITLE_MAP"
+
+while IFS= read -r -d '' page; do
+  rel="${page#$CONTENT_DIR/}"
+  slug="$(basename "$page" .md)"
+  printf '%s\t%s\n' "$slug" "$rel" >> "$SLUG_MAP"
+
+  in_fm=0
+  while IFS= read -r line; do
+    [[ "$line" == "---" ]] && { in_fm=$((in_fm + 1)); continue; }
+    [[ "$in_fm" -ge 2 ]] && break
+    if [[ "$line" =~ ^title:[[:space:]]*\"?([^\"]+)\"?[[:space:]]*$ ]]; then
+      printf '%s\t%s\n' "$slug" "${BASH_REMATCH[1]}" >> "$TITLE_MAP"
+    fi
+    if [[ "$line" =~ ^aliases:[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
+      raw="${BASH_REMATCH[1]}"
+      IFS=',' read -ra parts <<< "$raw"
+      for p in "${parts[@]}"; do
+        a="$(echo "$p" | sed -E 's/^[ "'\'']+|[ "'\'']+$//g')"
+        [[ -z "$a" ]] && continue
+        printf '%s\t%s\n' "$a" "$slug" >> "$ALIAS_MAP"
+      done
+    fi
+  done < "$page"
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+if [[ "$MAPS_ONLY" -eq 1 ]]; then
+  echo "BUILD-OK|maps-only=1"
+  exit 0
+fi
+
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+
+while IFS= read -r -d '' page; do
+  rel="${page#$CONTENT_DIR/}"
+  out="$BUILD_DIR/$rel"
+  mkdir -p "$(dirname "$out")"
+
+  python3 - "$page" "$out" "$SLUG_MAP" "$ALIAS_MAP" "$TITLE_MAP" <<'PY'
+import re, sys, os
+src, out, slug_map, alias_map, title_map = sys.argv[1:6]
+def load(path):
+    d = {}
+    for line in open(path):
+        line = line.rstrip('\n')
+        if '\t' in line:
+            k, v = line.split('\t', 1)
+            d[k] = v
+    return d
+slugs = load(slug_map)
+aliases = load(alias_map)
+titles = load(title_map)
+text = open(src).read()
+def repl(m):
+    inner = m.group(1)
+    if '|' in inner:
+        target, display = inner.split('|', 1)
+    else:
+        target = display = inner
+    rel = slugs.get(target)
+    resolved_slug = target
+    if not rel:
+        resolved_slug = aliases.get(target, '')
+        rel = slugs.get(resolved_slug, '')
+    if not rel:
+        return m.group(0)
+    section, _ = os.path.split(rel)
+    if display == target:
+        display = titles.get(resolved_slug, target)
+    url = '/' + section + '/' + os.path.splitext(os.path.basename(rel))[0] + '/'
+    return f'[{display}]({url})'
+text = re.sub(r'\[\[([^\]]+)\]\]', repl, text)
+open(out, 'w').write(text)
+PY
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+echo "BUILD-OK|content=$CONTENT_DIR|build=$BUILD_DIR"
+
+if [[ "$FULL" -eq 1 ]]; then
+  hugo --minify --destination public
+  echo "HUGO-OK|out=public"
+fi
+EOF
+chmod +x scripts/build.sh
 ```
 
-Also add CLI parsing at top to handle `--full` separately from `--maps-only`.
+This replaces the earlier task 3.3 version once `--full` lands. Hugo is invoked from repo root (no `--source` flag needed); `hugo.toml`'s `contentDir = '.awiki/build-content'` does the redirection.
 
-(For brevity, full rewrite of arg-parse omitted here — implementation detail, exit non-zero on conflicting flags.)
-
-- [ ] **Step 2: Write `content/_index.md`**
+- [ ] **Step 2: Update `_index.md` to be appropriate for the seeded version (already created in Phase 1; only edit if Phase 1 placeholder needs polish)**
 
 ```bash
 cat > content/_index.md <<'EOF'
@@ -1875,16 +2091,25 @@ Edit this page manually after BOOTSTRAP runs.
 EOF
 ```
 
-- [ ] **Step 3: Smoke test**
+- [ ] **Step 3: Update `justfile` build recipe to pass `--full`**
+
+Edit `justfile`, change the `build` recipe to:
+
+```just
+build:
+    bash scripts/build.sh --full
+```
+
+- [ ] **Step 4: Smoke test**
 
 Run: `just build && ls public/`
 Expected: `public/index.html` exists.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/build.sh content/_index.md
-git commit -m "feat: hugo build via build.sh --full; add _index.md landing"
+git add scripts/build.sh content/_index.md justfile
+git commit -m "feat: hugo build via build.sh --full; refine _index.md landing"
 ```
 
 ## Task 3.6: Phase 3 merge
@@ -2084,17 +2309,15 @@ if ! command -v qmd >/dev/null 2>&1; then
   exit 1
 fi
 
-# Detect harness
+# Detect harness — prefer codex if both present (last-write wins)
 TARGET=""
-if [[ -d .claude ]]; then TARGET="claude"; fi
+if [[ -d .claude || -f CLAUDE.md ]]; then TARGET="claude"; fi
 if [[ -d .codex ]]; then TARGET="codex"; fi
 
 case "$TARGET" in
   claude)
-    CONFIG=".claude/.mcp.json"
-    mkdir -p .claude
+    CONFIG="./.mcp.json"   # Claude Code reads project-level MCP from repo root
     if [[ ! -f "$CONFIG" ]]; then echo '{"mcpServers": {}}' > "$CONFIG"; fi
-    # JSON merge via python (universal)
     python3 - "$CONFIG" <<'PY'
 import json, sys
 path = sys.argv[1]
@@ -2106,18 +2329,21 @@ data.setdefault("mcpServers", {})["qmd"] = {
 json.dump(data, open(path, "w"), indent=2)
 PY
     echo "WIRED|claude|$CONFIG"
+    exit 0
     ;;
   codex)
     CONFIG=".codex/config.toml"
     mkdir -p .codex
-    cat >> "$CONFIG" <<'TOML'
+    if ! grep -q '^\[mcp.servers.qmd\]' "$CONFIG" 2>/dev/null; then
+      cat >> "$CONFIG" <<'TOML'
 
 [mcp.servers.qmd]
 command = "qmd"
 args = ["mcp", "--root", "content/"]
 TOML
+    fi
     echo "WIRED|codex|$CONFIG"
-    exit 1
+    exit 0
     ;;
   *)
     echo "No agent harness detected (.claude or .codex). Run from a configured project." >&2
@@ -2185,20 +2411,22 @@ case "$MODE" in
     fi
     git-crypt init
 
-    # Activate patterns in .gitattributes (uncomment)
-    sed -i.bak \
-      -e 's|^# raw/processed/private/|raw/processed/private/|' \
-      -e 's|^# content/private/|content/private/|' \
-      -e 's|^# secrets/|secrets/|' \
-      .gitattributes
-    rm -f .gitattributes.bak
+    # Activate patterns in .gitattributes (portable across BSD/GNU sed via awk)
+    awk '
+      /^# raw\/processed\/private\// { sub(/^# /, ""); print; next }
+      /^# raw\/processed\/_originals\// { sub(/^# /, ""); print; next }
+      /^# content\/private\// { sub(/^# /, ""); print; next }
+      /^# secrets\// { sub(/^# /, ""); print; next }
+      { print }
+    ' .gitattributes > .gitattributes.tmp && mv .gitattributes.tmp .gitattributes
 
     # Atomically remove the gitignore lines for private paths so encrypted commits work
-    sed -i.bak \
-      -e '/^content\/private\/\*\*$/d' \
-      -e '/^raw\/processed\/private\/\*\*$/d' \
-      .gitignore
-    rm -f .gitignore.bak
+    awk '
+      /^content\/private\/\*\*$/ { next }
+      /^raw\/processed\/private\/\*\*$/ { next }
+      /^raw\/processed\/_originals\/\*\*$/ { next }
+      { print }
+    ' .gitignore > .gitignore.tmp && mv .gitignore.tmp .gitignore
 
     mkdir -p secrets
     git-crypt export-key secrets/.git-crypt-key
@@ -2286,7 +2514,20 @@ E
 Inside the per-page-checks loop, after the empty-page check, add:
 
 ```bash
-  if grep -q 'tags:.*\bprivate\b' "$page" && [[ "$page" != *"/private/"* ]]; then
+  # Parse the tags: line as a YAML list, check for an exact 'private' token.
+  has_private_tag=0
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^tags:[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
+      raw="${BASH_REMATCH[1]}"
+      IFS=',' read -ra parts <<< "$raw"
+      for p in "${parts[@]}"; do
+        token="$(echo "$p" | sed -E 's/^[ "'\'']+|[ "'\'']+$//g')"
+        if [[ "$token" == "private" ]]; then has_private_tag=1; fi
+      done
+    fi
+  done < "$page"
+
+  if [[ "$has_private_tag" -eq 1 && "$page" != *"/private/"* ]]; then
     echo "LINT|WARN|$page|private tag outside private path"
     WARNS=$((WARNS + 1))
   fi
@@ -2423,37 +2664,248 @@ E
 EOF
 ```
 
-- [ ] **Step 2: Add orphan check + system-page exemption to `scripts/lint.sh`
+- [ ] **Step 2: Add orphan check + system-page exemption to `scripts/lint.sh`**
 
-Add to lint.sh per-page loop:
+Insert this block after the alias-collision check, before the `LINT-SUMMARY` line:
 
 ```bash
-  type_field=$(awk '/^type:/{print $2; exit}' "$page" | tr -d '"')
+# Orphan check: count inbound wikilinks per slug; warn if zero.
+declare -A INBOUND
+while IFS= read -r -d '' page; do
+  while read -r link; do
+    target="${link%%|*}"
+    INBOUND[$target]=$((${INBOUND[$target]:-0} + 1))
+    # Also credit the alias's resolved slug, if any
+    resolved="${ALIAS_TO_SLUG[$target]:-}"
+    if [[ -n "$resolved" ]]; then
+      INBOUND[$resolved]=$((${INBOUND[$resolved]:-0} + 1))
+    fi
+  done < <(grep -oE '\[\[[^]]+\]\]' "$page" | sed -E 's/^\[\[|\]\]$//g')
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+while IFS= read -r -d '' page; do
+  slug="$(basename "$page" .md)"
+  type_field="$(awk -F'[:[:space:]]+' '/^type:/{print $2; exit}' "$page" | tr -d '"')"
   if [[ "$type_field" =~ ^(log|catalog|section-index)$ ]]; then
-    continue   # system page; skip orphan check
+    continue
   fi
+  if [[ "${INBOUND[$slug]:-0}" -eq 0 ]]; then
+    echo "LINT|INFO|$page|orphan: no inbound wikilinks"
+    INFOS=$((INFOS + 1))
+  fi
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 ```
 
-(Plus full orphan logic — counts inbound wikilinks per slug; warns if zero.)
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run tests (PASS expected)**
 
 ```bash
-git add scripts/lint.sh
-git commit -m "feat: lint orphan check with exemption for system pages"
+bats tests/lint_test.bats
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add scripts/lint.sh tests/lint_test.bats
+git commit -m "feat: lint orphan check with system-page exemption"
 ```
 
 ## Task 6.4: Catalog cross-link check
 
-- [ ] **Step 1: Modify lint to verify every page in content/ has a catalog entry**
+**Files:** Modify: `scripts/lint.sh`
 
-Add: lint scans `content/catalog.md` for wikilinks; warns on pages not present.
-
-- [ ] **Step 2: Commit**
+- [ ] **Step 1: Add test**
 
 ```bash
-git add scripts/lint.sh
+cat >> tests/lint_test.bats <<'EOF'
+
+@test "lint warns on page missing from catalog" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/catalog.md" <<E
+---
+title: "Catalog"
+type: catalog
+---
+
+# Catalog
+E
+  cat > "$TMP/entities/uncatalogued.md" <<E
+---
+title: "Uncatalogued"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Uncatalogued [[uncatalogued]] self-reference for connectivity.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|WARN"*"uncatalogued.md"*"missing from catalog"* ]]
+}
+EOF
+```
+
+- [ ] **Step 2: Add catalog cross-link check to lint.sh**
+
+Insert before `LINT-SUMMARY`:
+
+```bash
+# Catalog cross-link check
+CATALOG="$CONTENT_DIR/catalog.md"
+if [[ -f "$CATALOG" ]]; then
+  declare -A IN_CATALOG
+  while read -r link; do
+    target="${link%%|*}"
+    IN_CATALOG[$target]=1
+  done < <(grep -oE '\[\[[^]]+\]\]' "$CATALOG" | sed -E 's/^\[\[|\]\]$//g')
+
+  while IFS= read -r -d '' page; do
+    slug="$(basename "$page" .md)"
+    [[ "$slug" =~ ^(_index|catalog|log)$ ]] && continue
+    type_field="$(awk -F'[:[:space:]]+' '/^type:/{print $2; exit}' "$page" | tr -d '"')"
+    if [[ "$type_field" =~ ^(log|catalog|section-index)$ ]]; then
+      continue
+    fi
+    if [[ -z "${IN_CATALOG[$slug]:-}" ]]; then
+      echo "LINT|WARN|$page|missing from catalog"
+      WARNS=$((WARNS + 1))
+    fi
+  done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+fi
+```
+
+- [ ] **Step 3: Run tests + commit**
+
+```bash
+bats tests/lint_test.bats
+git add scripts/lint.sh tests/lint_test.bats
 git commit -m "feat: lint warns on pages missing from catalog"
+```
+
+## Task 6.5: `scripts/update-catalog.sh`
+
+**Files:** Create: `scripts/update-catalog.sh`, `tests/update_catalog_test.bats`
+
+- [ ] **Step 1: Write the test**
+
+```bash
+cat > tests/update_catalog_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+setup() {
+  WORK="$(mktemp -d)/repo"
+  mkdir -p "$WORK/content/entities"
+  cat > "$WORK/content/catalog.md" <<E
+---
+title: "Catalog"
+type: catalog
+---
+
+# Catalog
+E
+  cat > "$WORK/content/entities/foo.md" <<E
+---
+title: "Foo"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body referencing [[foo]] for connectivity, sufficient length.
+E
+  cd "$WORK"
+}
+teardown() { rm -rf "$WORK"; }
+
+@test "update-catalog inserts entity entry" {
+  bash "$BATS_TEST_DIRNAME/../scripts/update-catalog.sh"
+  run grep -F '[[foo]]' content/catalog.md
+  [ "$status" -eq 0 ]
+}
+EOF
+```
+
+- [ ] **Step 2: Write `scripts/update-catalog.sh`**
+
+```bash
+cat > scripts/update-catalog.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CATALOG="content/catalog.md"
+[[ -f "$CATALOG" ]] || { echo "no catalog at $CATALOG" >&2; exit 1; }
+
+python3 - "$CATALOG" content <<'PY'
+import os, sys, re, glob, collections
+catalog_path, content_dir = sys.argv[1:3]
+
+groups = collections.OrderedDict([
+    ("entity", "Entities"),
+    ("concept", "Concepts"),
+    ("topic", "Topics"),
+    ("source", "Sources"),
+    ("synthesis", "Synthesis"),
+    ("deck", "Synthesis"),
+    ("chart", "Synthesis"),
+    ("canvas", "Synthesis"),
+])
+
+entries = collections.defaultdict(list)
+for path in sorted(glob.glob(os.path.join(content_dir, "**", "*.md"), recursive=True)):
+    rel = os.path.relpath(path, content_dir)
+    slug = os.path.splitext(os.path.basename(path))[0]
+    if slug in ("_index", "catalog", "log"):
+        continue
+    fm = {}
+    with open(path) as f:
+        text = f.read()
+    m = re.match(r"---\n(.*?)\n---", text, re.S)
+    if not m:
+        continue
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            fm[k.strip()] = v.strip().strip('"')
+    t = fm.get("type", "")
+    if t in ("log", "catalog", "section-index"):
+        continue
+    section = groups.get(t, "Misc")
+    title = fm.get("title", slug)
+    entries[section].append(f"- [[{slug}]] — {title}")
+
+# Read existing catalog body up to first ##; replace below with our generated sections.
+with open(catalog_path) as f:
+    full = f.read()
+m = re.split(r"^## ", full, count=1, flags=re.M)
+prelude = m[0].rstrip() + "\n\n"
+out = prelude
+for section in ("Entities", "Concepts", "Topics", "Sources", "Synthesis", "Misc"):
+    if entries.get(section):
+        out += f"## {section}\n\n"
+        out += "\n".join(entries[section]) + "\n\n"
+with open(catalog_path, "w") as f:
+    f.write(out.rstrip() + "\n")
+PY
+
+echo "CATALOG-OK"
+EOF
+chmod +x scripts/update-catalog.sh
+```
+
+- [ ] **Step 3: Run test + commit**
+
+```bash
+bats tests/update_catalog_test.bats
+git add scripts/update-catalog.sh tests/update_catalog_test.bats
+git commit -m "feat: add update-catalog script (rebuilds content/catalog.md from frontmatter)"
 ```
 
 ## Task 6.5: Phase 6 merge
@@ -2536,11 +2988,16 @@ NEW_PATH="$(dirname "$OLD_PATH")/$NEW.md"
 
 git mv "$OLD_PATH" "$NEW_PATH" 2>/dev/null || mv "$OLD_PATH" "$NEW_PATH"
 
-# Update all wikilinks
-find content -name '*.md' -type f -print0 | xargs -0 sed -i.bak \
-  -e "s/\[\[$OLD\]\]/[[$NEW]]/g" \
-  -e "s/\[\[$OLD|/[[$NEW|/g"
-find content -name '*.bak' -delete
+# Update all wikilinks — portable across BSD/GNU sed
+find content -name '*.md' -type f -print0 | while IFS= read -r -d '' f; do
+  awk -v old="$OLD" -v new="$NEW" '
+    {
+      gsub("\\[\\[" old "\\]\\]", "[[" new "]]")
+      gsub("\\[\\[" old "\\|", "[[" new "|")
+    }
+    { print }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
 
 bash scripts/log-append.sh rename "$OLD -> $NEW"
 echo "RENAME-OK|old=$OLD|new=$NEW"
@@ -2557,7 +3014,57 @@ git commit -m "feat: add rename script (updates all wikilinks)"
 
 ## Task 7.2: `scripts/delete-page.sh`
 
-- [ ] **Step 1: Write `scripts/delete-page.sh`**
+**Files:** Create: `scripts/delete-page.sh`, `tests/delete_page_test.bats`
+
+- [ ] **Step 1: Write the test**
+
+```bash
+cat > tests/delete_page_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+setup() {
+  WORK="$(mktemp -d)/repo"
+  mkdir -p "$WORK/content/entities"
+  cat > "$WORK/content/entities/foo.md" <<E
+---
+title: "Foo"
+type: entity
+---
+
+Body.
+E
+  cat > "$WORK/content/entities/bar.md" <<E
+---
+title: "Bar"
+type: entity
+---
+
+References [[foo]].
+E
+  printf -- "---\ntitle: Log\ntype: log\ndraft: true\n---\n" > "$WORK/content/log.md"
+  cd "$WORK"
+}
+teardown() { rm -rf "$WORK"; }
+
+@test "delete-page removes file" {
+  bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" foo
+  [ ! -f content/entities/foo.md ]
+}
+
+@test "delete-page marks wikilinks as broken" {
+  bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" foo
+  run grep -F 'broken: was [[foo]]' content/entities/bar.md
+  [ "$status" -eq 0 ]
+}
+
+@test "delete-page rejects unknown slug" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" nonexistent
+  [ "$status" -eq 2 ]
+}
+EOF
+```
+
+- [ ] **Step 2: Write `scripts/delete-page.sh`**
 
 ```bash
 cat > scripts/delete-page.sh <<'EOF'
@@ -2572,10 +3079,16 @@ PAGE="$(find content -name "$SLUG.md" -type f | head -1)"
 
 git rm "$PAGE" 2>/dev/null || rm "$PAGE"
 
-# Replace wikilinks with broken markers
-find content -name '*.md' -type f -print0 | xargs -0 sed -i.bak \
-  -e "s/\[\[$SLUG\]\]/<!-- broken: was [[$SLUG]] -->$SLUG/g"
-find content -name '*.bak' -delete
+# Replace wikilinks with broken markers — portable across BSD/GNU sed
+find content -name '*.md' -type f -print0 | while IFS= read -r -d '' f; do
+  awk -v slug="$SLUG" '
+    {
+      gsub("\\[\\[" slug "\\]\\]", "<!-- broken: was [[" slug "]] -->" slug)
+      gsub("\\[\\[" slug "\\|", "<!-- broken: was [[" slug "|... -->" slug "|")
+    }
+    { print }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
 
 bash scripts/log-append.sh delete "$SLUG (removed; wikilinks marked broken for review)"
 echo "DELETE-OK|slug=$SLUG"
@@ -2583,11 +3096,17 @@ EOF
 chmod +x scripts/delete-page.sh
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Run test (PASS)**
 
 ```bash
-git add scripts/delete-page.sh
-git commit -m "feat: add delete-page script (marks broken wikilinks)"
+bats tests/delete_page_test.bats
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add scripts/delete-page.sh tests/delete_page_test.bats
+git commit -m "feat: add delete-page script (marks broken wikilinks) + BATS test"
 ```
 
 ## Task 7.3: Phase 7 merge
@@ -2617,8 +3136,10 @@ git checkout -b phase-8-mcp-server
 mkdir -p mcp/awiki-server
 cd mcp/awiki-server
 npm init -y
-npm i @modelcontextprotocol/sdk zod
+npm i @modelcontextprotocol/sdk
 ```
+
+(Note: hand-written JSON schemas; no zod dependency. Keeps surface area small.)
 
 - [ ] **Step 2: Write `mcp/awiki-server/index.js`**
 
@@ -2626,40 +3147,77 @@ npm i @modelcontextprotocol/sdk zod
 #!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { execFileSync } from "node:child_process";
-import { z } from "zod";
+
+const TOOLS = [
+  {
+    name: "ingest_source",
+    description: "Process a source from raw/inbox/* into the wiki via scripts/ingest.sh.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Path under raw/inbox/{interactive,batch,checkpoint}/" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "lint",
+    description: "Run mechanical lint over content/. Returns LINT|... lines and a LINT-SUMMARY.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "query_wiki",
+    description: "Search wiki via qmd (BM25+vector hybrid). Falls back to grep when qmd absent.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "update_catalog",
+    description: "Rebuild content/catalog.md from on-disk pages and current frontmatter.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+];
 
 const server = new Server({ name: "awiki", version: "0.1.0" }, { capabilities: { tools: {} } });
 
-server.setRequestHandler({ method: "tools/list" }, async () => ({
-  tools: [
-    { name: "ingest_source", inputSchema: z.object({ path: z.string() }).schema },
-    { name: "lint", inputSchema: z.object({}).schema },
-    { name: "query_wiki", inputSchema: z.object({ query: z.string() }).schema },
-    { name: "update_catalog", inputSchema: z.object({}).schema },
-  ],
-}));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler({ method: "tools/call" }, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
   let out;
-  switch (name) {
-    case "ingest_source":
-      out = execFileSync("bash", ["scripts/ingest.sh", args.path], { encoding: "utf8" });
-      break;
-    case "lint":
-      out = execFileSync("bash", ["scripts/lint.sh"], { encoding: "utf8" });
-      break;
-    case "query_wiki":
-      out = execFileSync("qmd", ["search", args.query], { encoding: "utf8" });
-      break;
-    case "update_catalog":
-      out = "Catalog update is agent-driven via WIKI.md workflow; this tool is a placeholder.";
-      break;
-    default:
-      throw new Error(`unknown tool: ${name}`);
+  try {
+    switch (name) {
+      case "ingest_source":
+        if (typeof args?.path !== "string") throw new Error("path required");
+        out = execFileSync("bash", ["scripts/ingest.sh", args.path], { encoding: "utf8" });
+        break;
+      case "lint":
+        out = execFileSync("bash", ["scripts/lint.sh"], { encoding: "utf8" });
+        break;
+      case "query_wiki": {
+        if (typeof args?.query !== "string") throw new Error("query required");
+        try {
+          out = execFileSync("qmd", ["search", args.query], { encoding: "utf8" });
+        } catch {
+          out = execFileSync("grep", ["-rli", "--include=*.md", args.query, "content/"], { encoding: "utf8" });
+        }
+        break;
+      }
+      case "update_catalog":
+        out = execFileSync("bash", ["scripts/update-catalog.sh"], { encoding: "utf8" });
+        break;
+      default:
+        throw new Error(`unknown tool: ${name}`);
+    }
+    return { content: [{ type: "text", text: out }] };
+  } catch (e) {
+    return { content: [{ type: "text", text: `ERROR|${e.message}` }], isError: true };
   }
-  return { content: [{ type: "text", text: out }] };
 });
 
 const transport = new StdioServerTransport();
@@ -2694,14 +3252,19 @@ cat > scripts/wire-awiki-mcp.sh <<'EOF'
 set -euo pipefail
 
 if [[ ! -f mcp/awiki-server/index.js ]]; then
-  echo "MCP server not built. Run: cd mcp/awiki-server && npm i" >&2
+  echo "MCP server not built. Run: cd mcp/awiki-server && npm install" >&2
   exit 1
 fi
 
-mkdir -p .claude
-[[ -f .claude/.mcp.json ]] || echo '{"mcpServers": {}}' > .claude/.mcp.json
+TARGET=""
+if [[ -d .claude || -f CLAUDE.md ]]; then TARGET="claude"; fi
+if [[ -d .codex ]]; then TARGET="codex"; fi
 
-python3 - .claude/.mcp.json <<'PY'
+case "$TARGET" in
+  claude)
+    CONFIG="./.mcp.json"
+    [[ -f "$CONFIG" ]] || echo '{"mcpServers": {}}' > "$CONFIG"
+    python3 - "$CONFIG" <<'PY'
 import json, sys, os
 path = sys.argv[1]
 data = json.load(open(path))
@@ -2711,8 +3274,27 @@ data.setdefault("mcpServers", {})["awiki"] = {
 }
 json.dump(data, open(path, "w"), indent=2)
 PY
+    echo "WIRED|claude|$CONFIG"
+    ;;
+  codex)
+    CONFIG=".codex/config.toml"
+    mkdir -p .codex
+    if ! grep -q '^\[mcp.servers.awiki\]' "$CONFIG" 2>/dev/null; then
+      ABS_PATH="$(cd mcp/awiki-server && pwd)/index.js"
+      cat >> "$CONFIG" <<TOML
 
-echo "WIRED|claude|.claude/.mcp.json"
+[mcp.servers.awiki]
+command = "node"
+args = ["$ABS_PATH"]
+TOML
+    fi
+    echo "WIRED|codex|$CONFIG"
+    ;;
+  *)
+    echo "No agent harness detected (.claude or .codex). Run from a configured project." >&2
+    exit 1
+    ;;
+esac
 EOF
 chmod +x scripts/wire-awiki-mcp.sh
 ```
@@ -2724,7 +3306,60 @@ git add scripts/wire-awiki-mcp.sh
 git commit -m "feat: add awiki MCP wiring helper"
 ```
 
-## Task 8.3: Phase 8 merge
+## Task 8.3: Smoke test for awiki MCP server
+
+**Files:** Create: `tests/mcp_server_test.bats`, `tests/fixtures/mcp-list-tools.json`
+
+- [ ] **Step 1: Write the test**
+
+```bash
+cat > tests/fixtures/mcp-list-tools.json <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+EOF
+
+cat > tests/mcp_server_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+@test "awiki MCP server lists 4 tools" {
+  if [[ ! -d mcp/awiki-server/node_modules ]]; then
+    skip "run 'cd mcp/awiki-server && npm install' first"
+  fi
+  run bash -c 'cat tests/fixtures/mcp-list-tools.json | node mcp/awiki-server/index.js | head -1'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ingest_source"* ]]
+  [[ "$output" == *"lint"* ]]
+  [[ "$output" == *"query_wiki"* ]]
+  [[ "$output" == *"update_catalog"* ]]
+}
+
+@test "awiki MCP server rejects unknown tool" {
+  if [[ ! -d mcp/awiki-server/node_modules ]]; then
+    skip "run 'cd mcp/awiki-server && npm install' first"
+  fi
+  REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bogus","arguments":{}}}'
+  run bash -c "echo '$REQ' | node mcp/awiki-server/index.js"
+  [[ "$output" == *"unknown tool"* || "$output" == *"isError"* ]]
+}
+EOF
+```
+
+- [ ] **Step 2: Install deps + run test**
+
+```bash
+( cd mcp/awiki-server && npm install --silent )
+bats tests/mcp_server_test.bats
+```
+
+Expected: 2 tests pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/mcp_server_test.bats tests/fixtures/mcp-list-tools.json
+git commit -m "test: add MCP server smoke tests (tools list + unknown-tool rejection)"
+```
+
+## Task 8.4: Phase 8 merge
 
 ```bash
 git checkout main
@@ -2822,8 +3457,23 @@ jobs:
       - name: Install just
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
-      - name: Install bats
-        run: sudo apt-get update && sudo apt-get install -y bats hugo
+      - name: Install hugo extended
+        run: |
+          curl -fsSL https://github.com/gohugoio/hugo/releases/download/v0.120.4/hugo_extended_0.120.4_linux-amd64.tar.gz | tar xz -C /tmp
+          sudo mv /tmp/hugo /usr/local/bin/hugo
+      - name: Install bats-core (pinned)
+        run: |
+          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.10.0.tar.gz | tar xz -C /tmp
+          sudo /tmp/bats-core-1.10.0/install.sh /usr/local
+      - name: Optional unlock for encrypted wikis
+        if: ${{ env.GIT_CRYPT_KEY != '' }}
+        env:
+          GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y git-crypt
+          echo "$GIT_CRYPT_KEY" | base64 -d > /tmp/git-crypt-key
+          git-crypt unlock /tmp/git-crypt-key
+          rm /tmp/git-crypt-key
       - run: just check-deps
       - run: just lint
       - run: just test
@@ -2831,13 +3481,57 @@ jobs:
 
 - [ ] **Step 5: Document in README + WIKI.md**
 
-Append a "Scheduled lint" section to README pointing at these example files with copy-and-rename instructions.
+Append exact content to `README.md`:
 
-- [ ] **Step 6: Commit**
+```markdown
+## Scheduled lint
+
+Pre-built configs ship under `scheduled/`:
+
+- **macOS (launchd):** `cp scheduled/launchd.plist.example ~/Library/LaunchAgents/com.user.awiki.lint.plist`, edit the absolute path, `launchctl load ~/Library/LaunchAgents/com.user.awiki.lint.plist`.
+- **Linux (systemd):** copy `scheduled/awiki-lint.service.example` and `scheduled/awiki-lint.timer.example` to `~/.config/systemd/user/`, drop the `.example`, edit the absolute path, then `systemctl --user daemon-reload && systemctl --user enable --now awiki-lint.timer`.
+- **GitHub Actions:** `cp scheduled/github-action.yml.example .github/workflows/awiki-ci.yml`. If the repo uses git-crypt, set the `GIT_CRYPT_KEY` repo secret to the base64-encoded key; the workflow unlocks before lint/test.
+```
+
+Append exact content to `WIKI.md` section 4 (workflows), as a new sub-section "Scheduled lint":
+
+```markdown
+### 4.5 Scheduled lint
+
+If the user has installed one of the configs in `scheduled/`, lint runs automatically on a cadence. Lint output is captured to logs (`/tmp/awiki-lint.{out,err}` for launchd; `journalctl --user -u awiki-lint` for systemd; the Actions run log for CI). Agent should treat scheduled lint failures as the next-session priority.
+```
+
+- [ ] **Step 6: Add a yaml-lint smoke test for the GH Actions example**
 
 ```bash
-git add scheduled README.md WIKI.md
-git commit -m "feat: add scheduled lint configs (launchd / systemd / gh-actions)"
+cat > tests/scheduled_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+@test "github-action.yml.example is valid YAML" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 missing"
+  python3 -c "import yaml; yaml.safe_load(open('scheduled/github-action.yml.example'))"
+}
+
+@test "launchd plist parses as XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil missing"
+  run plutil -lint scheduled/launchd.plist.example
+  [ "$status" -eq 0 ]
+}
+
+@test "systemd timer has [Install] section" {
+  run grep -F '[Install]' scheduled/awiki-lint.timer.example
+  [ "$status" -eq 0 ]
+}
+EOF
+```
+
+(Add `pyyaml` to BOOTSTRAP step 0 dep check or print install hint; the test skips gracefully if missing.)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scheduled README.md WIKI.md tests/scheduled_test.bats
+git commit -m "feat: scheduled lint configs (launchd/systemd/gh-actions) + smoke tests"
 ```
 
 ## Task 9.2: Phase 9 merge
@@ -2867,7 +3561,7 @@ git checkout -b phase-10-deploy
 
 ```toml
 [build]
-  command = "just build"
+  command = "scripts/deploy-build.sh"
   publish = "public"
 
 [build.environment]
@@ -2880,11 +3574,12 @@ git checkout -b phase-10-deploy
 - [ ] **Step 2: Write `deploy/cloudflare-pages.toml`**
 
 ```toml
-# Cloudflare Pages settings (paste into project UI):
-# Build command: just build
-# Build output: public
+# Cloudflare Pages — paste into project UI:
+# Build command:    scripts/deploy-build.sh
+# Build output:     public
 # Environment vars:
 #   HUGO_VERSION = 0.120.4
+#   GIT_CRYPT_KEY = <base64> (only if wiki uses git-crypt; sets a CI-only secret)
 ```
 
 - [ ] **Step 3: Write `deploy/github-pages.yml.example`**
@@ -2911,7 +3606,16 @@ jobs:
           extended: true
       - name: Install just
         run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
-      - run: just build
+      - name: Optional unlock for encrypted wikis
+        if: ${{ secrets.GIT_CRYPT_KEY != '' }}
+        env:
+          GIT_CRYPT_KEY: ${{ secrets.GIT_CRYPT_KEY }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y git-crypt
+          echo "$GIT_CRYPT_KEY" | base64 -d > /tmp/git-crypt-key
+          git-crypt unlock /tmp/git-crypt-key
+          rm /tmp/git-crypt-key
+      - run: bash scripts/deploy-build.sh
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
@@ -2926,15 +3630,79 @@ jobs:
         id: deployment
 ```
 
-- [ ] **Step 4: README deploy section**
-
-Append "Deployment" section listing all three.
-
-- [ ] **Step 5: Commit + merge**
+- [ ] **Step 4: Write `scripts/deploy-build.sh`**
 
 ```bash
-git add deploy README.md
-git commit -m "feat: add auto-deploy templates (netlify/cf-pages/gh-pages)"
+cat > scripts/deploy-build.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Refuse to publish if encryption is configured but tree is locked.
+if [[ -d .git/git-crypt ]]; then
+  if ! git-crypt status -e 2>/dev/null | head -1 | grep -q 'encrypted:'; then
+    echo "ERROR: git-crypt initialized but tree appears locked. Set GIT_CRYPT_KEY secret and unlock before deploy." >&2
+    exit 1
+  fi
+fi
+
+bash scripts/build.sh --full
+EOF
+chmod +x scripts/deploy-build.sh
+```
+
+- [ ] **Step 5: README deploy section**
+
+Append exact content to README:
+
+```markdown
+## Deployment
+
+Three pre-built templates under `deploy/`:
+
+| Target | Files | Setup |
+|--------|-------|-------|
+| Netlify | `deploy/netlify.toml` | Copy to repo root, link the repo in the Netlify UI. |
+| Cloudflare Pages | `deploy/cloudflare-pages.toml` | Settings live in CF UI; this file documents them. |
+| GitHub Pages | `deploy/github-pages.yml.example` | `cp deploy/github-pages.yml.example .github/workflows/deploy-pages.yml` |
+
+**Encrypted wikis:** if you ran `just encrypt-init` with git-crypt, set the `GIT_CRYPT_KEY` repo secret to the base64-encoded export of `secrets/.git-crypt-key`. Each template will unlock the tree before building. **If unlock fails or the secret is missing on a wiki with encryption enabled, the build fails closed — no plaintext fallback.**
+```
+
+- [ ] **Step 6: Add validation tests**
+
+```bash
+cat > tests/deploy_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+@test "netlify.toml parses as TOML" {
+  command -v python3 >/dev/null 2>&1 || skip
+  python3 -c "import tomllib; tomllib.load(open('deploy/netlify.toml','rb'))" 2>/dev/null \
+    || python3 -c "import tomli; tomli.load(open('deploy/netlify.toml','rb'))"
+}
+
+@test "github-pages.yml.example parses as YAML" {
+  python3 -c "import yaml; yaml.safe_load(open('deploy/github-pages.yml.example'))"
+}
+
+@test "deploy-build.sh refuses locked git-crypt tree" {
+  WORK="$(mktemp -d)"
+  cp scripts/deploy-build.sh "$WORK/"
+  cd "$WORK"
+  mkdir -p .git/git-crypt
+  run bash deploy-build.sh
+  [ "$status" -ne 0 ]
+  cd - >/dev/null
+  rm -rf "$WORK"
+}
+EOF
+```
+
+- [ ] **Step 7: Commit + merge**
+
+```bash
+bats tests/deploy_test.bats
+git add deploy scripts/deploy-build.sh README.md tests/deploy_test.bats
+git commit -m "feat: add auto-deploy templates with git-crypt unlock + tests"
 git checkout main
 git merge --no-ff phase-10-deploy -m "feat: complete phase 10 deploy templates"
 git branch -d phase-10-deploy
@@ -2957,6 +3725,8 @@ git checkout -b phase-11-multimodal
 
 - [ ] **Step 1: Write `scripts/ingest-pdf.sh`**
 
+`_originals/` ALWAYS lives under `raw/processed/_originals/` (privacy-protected by gitignore + git-crypt patterns). The helper produces a markdown sidecar in the inbox, ready for `just ingest`.
+
 ```bash
 cat > scripts/ingest-pdf.sh <<'EOF'
 #!/usr/bin/env bash
@@ -2967,11 +3737,12 @@ PDF="$1"
 
 [[ "$PDF" =~ \.pdf$ ]] || { echo "not a pdf" >&2; exit 1; }
 [[ -f "$PDF" ]] || { echo "not found: $PDF" >&2; exit 1; }
+[[ "$PDF" =~ ^raw/inbox/ ]] || { echo "must be under raw/inbox/" >&2; exit 1; }
 
 OUT="${PDF%.pdf}.md"
-ORIG_DIR="$(dirname "$PDF")/_originals"
+ORIG_DIR="raw/processed/_originals"
 mkdir -p "$ORIG_DIR"
-cp "$PDF" "$ORIG_DIR/"
+cp "$PDF" "$ORIG_DIR/$(basename "$PDF")"
 
 if command -v pdftotext >/dev/null 2>&1; then
   pdftotext -layout "$PDF" - > "$OUT"
@@ -2982,7 +3753,6 @@ else
   exit 1
 fi
 
-# Inject frontmatter
 TMP="$(mktemp)"
 {
   printf -- "---\ntitle: \"%s\"\ndate: %s\nlast_updated: %s\ntype: source\ntags: [pdf]\naliases: []\nsources: []\noriginal: %s\ndraft: false\n---\n\n" \
@@ -2991,7 +3761,6 @@ TMP="$(mktemp)"
 } > "$TMP"
 mv "$TMP" "$OUT"
 
-# Remove the original PDF from inbox to avoid double-ingest
 rm "$PDF"
 
 echo "PDF-CONVERTED|in=$PDF|out=$OUT|orig=$ORIG_DIR/$(basename "$PDF")"
@@ -3000,7 +3769,7 @@ EOF
 chmod +x scripts/ingest-pdf.sh
 ```
 
-- [ ] **Step 2: Write `scripts/ingest-audio.sh` (similar, uses whisper-cpp)**
+- [ ] **Step 2: Write `scripts/ingest-audio.sh`**
 
 ```bash
 cat > scripts/ingest-audio.sh <<'EOF'
@@ -3011,17 +3780,18 @@ set -euo pipefail
 AUDIO="$1"
 
 [[ -f "$AUDIO" ]] || { echo "not found: $AUDIO" >&2; exit 1; }
+[[ "$AUDIO" =~ ^raw/inbox/ ]] || { echo "must be under raw/inbox/" >&2; exit 1; }
 command -v whisper-cpp >/dev/null 2>&1 || { echo "Install whisper.cpp" >&2; exit 1; }
+[[ -f models/ggml-base.en.bin ]] || { echo "missing models/ggml-base.en.bin (download from whisper.cpp releases)" >&2; exit 1; }
 
 OUT="${AUDIO%.*}.md"
-ORIG_DIR="$(dirname "$AUDIO")/_originals"
+ORIG_DIR="raw/processed/_originals"
 mkdir -p "$ORIG_DIR"
-cp "$AUDIO" "$ORIG_DIR/"
+cp "$AUDIO" "$ORIG_DIR/$(basename "$AUDIO")"
 
 whisper-cpp -m models/ggml-base.en.bin -otxt -f "$AUDIO"
 mv "${AUDIO}.txt" "$OUT"
 
-# Inject frontmatter (same pattern as PDF)
 TMP="$(mktemp)"
 {
   printf -- "---\ntitle: \"%s\"\ndate: %s\nlast_updated: %s\ntype: source\ntags: [audio]\naliases: []\nsources: []\noriginal: %s\ndraft: false\n---\n\n" \
@@ -3031,23 +3801,71 @@ TMP="$(mktemp)"
 mv "$TMP" "$OUT"
 
 rm "$AUDIO"
-echo "AUDIO-TRANSCRIBED|out=$OUT"
+echo "AUDIO-TRANSCRIBED|out=$OUT|orig=$ORIG_DIR/$(basename "$AUDIO")"
 echo "Now run: just ingest $OUT"
 EOF
 chmod +x scripts/ingest-audio.sh
 ```
 
-- [ ] **Step 3: Append vision-workflow doc to WIKI.md**
-
-In `WIKI.md` workflow section 4.1 ingest, add:
-
-> **Vision-aware ingest:** for sources with images, agent reads markdown text first, then loads referenced images via the agent's vision tool (Read for Claude Code; equivalent for others). Multi-pass: text-pass → image-pass → integrate. No script — agent-driven.
-
-- [ ] **Step 4: Commit + merge**
+- [ ] **Step 3: BATS test for `ingest-pdf.sh`**
 
 ```bash
-git add scripts/ingest-pdf.sh scripts/ingest-audio.sh WIKI.md
-git commit -m "feat: add PDF/audio ingest helpers + vision workflow doc"
+cat > tests/ingest_pdf_test.bats <<'EOF'
+#!/usr/bin/env bats
+
+setup() {
+  command -v pdftotext >/dev/null 2>&1 || skip "pdftotext not installed"
+  WORK="$(mktemp -d)/repo"
+  mkdir -p "$WORK/raw/inbox/interactive" "$WORK/raw/processed"
+  # Write minimal valid PDF (one-page hello). Uses python's reportlab if available, else skip.
+  if ! python3 -c "from reportlab.pdfgen import canvas" 2>/dev/null; then skip "reportlab not installed"; fi
+  python3 - "$WORK/raw/inbox/interactive/hello.pdf" <<PY
+from reportlab.pdfgen import canvas
+import sys
+c = canvas.Canvas(sys.argv[1])
+c.drawString(72, 720, "Hello PDF")
+c.showPage(); c.save()
+PY
+  cd "$WORK"
+}
+teardown() { cd - >/dev/null; rm -rf "$WORK"; }
+
+@test "ingest-pdf produces markdown with frontmatter and stashes original" {
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-pdf.sh" raw/inbox/interactive/hello.pdf
+  [ -f raw/inbox/interactive/hello.md ]
+  [ -f raw/processed/_originals/hello.pdf ]
+  [ ! -f raw/inbox/interactive/hello.pdf ]
+  run grep -E '^title: "hello"' raw/inbox/interactive/hello.md
+  [ "$status" -eq 0 ]
+}
+
+@test "ingest-pdf rejects path outside raw/inbox/" {
+  cp raw/inbox/interactive/hello.md elsewhere.pdf 2>/dev/null || true
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-pdf.sh" /tmp/elsewhere.pdf
+  [ "$status" -ne 0 ]
+}
+EOF
+```
+
+- [ ] **Step 4: Append vision-workflow doc to WIKI.md**
+
+Append exact content to `WIKI.md` after section 4.1:
+
+```markdown
+**Vision-aware ingest:** when a source contains images, the agent operates in two passes:
+1. **Text pass:** Read the markdown body alone via the Read tool.
+2. **Image pass:** Use the Read tool to view referenced images one at a time. Claude Code handles `![alt](path.png)` markdown image refs natively; for Codex / OpenCode use their equivalent vision tool.
+3. **Integrate:** combine notes from both passes when writing `content/sources/<slug>.md` and any entity/concept pages affected.
+
+No script needed — the agent decides when image content is load-bearing. For dense visual sources (slides, infographics), the agent should default to image-pass; for text-with-decorative-images, text-pass alone is sufficient.
+```
+
+- [ ] **Step 5: Commit + merge**
+
+```bash
+bats tests/ingest_pdf_test.bats || true   # optional deps may skip
+git add scripts/ingest-pdf.sh scripts/ingest-audio.sh tests/ingest_pdf_test.bats WIKI.md
+git commit -m "feat: PDF/audio ingest helpers (originals to raw/processed/_originals) + vision workflow"
 git checkout main
 git merge --no-ff phase-11-multimodal -m "feat: complete phase 11 multimodal ingest"
 git branch -d phase-11-multimodal

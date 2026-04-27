@@ -1,0 +1,12 @@
+# git-crypt patterns activated by scripts/encrypt-init.sh
+# Uncomment after running `just encrypt-init`:
+# raw/processed/private/** filter=git-crypt diff=git-crypt
+# raw/processed/_originals/** filter=git-crypt diff=git-crypt
+# content/private/** filter=git-crypt diff=git-crypt
+# secrets/** filter=git-crypt diff=git-crypt
+
+# end-of-line normalization
+* text=auto
+*.sh text eol=lf
+*.toml text eol=lf
+*.md text eol=lf

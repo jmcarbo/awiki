@@ -1,0 +1,5 @@
+name: dirform
+description: directory form, phase-14 territory
+output_type: synthesis
+required_sections: ["## X"]
+min_sources: 1

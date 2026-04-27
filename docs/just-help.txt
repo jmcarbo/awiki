@@ -1,0 +1,113 @@
+awiki — recipe reference
+
+INGEST
+  just ingest <path>            Process source from inbox.
+                                Path must be under raw/inbox/{interactive,batch,checkpoint}/.
+                                Example: just ingest raw/inbox/interactive/article.md
+  just ingest-batch-list        List files queued in raw/inbox/batch/ for agent iteration.
+
+MAINTENANCE
+  just lint                     Validate wiki integrity. Output: LINT|<level>|<file>|<msg>.
+  just lint-fix                 Auto-apply mechanical fixes only (frontmatter, whitespace).
+  just reindex                  Refresh qmd index over content/.
+  just search "<query>"         Hybrid BM25+vector search via qmd. Quote multi-word.
+  just log <action> <message>   Append timestamped entry to content/log.md.
+                                Example: just log manual "reviewed catalog"
+  just rename <old> <new>       Rename a slug, updating all wikilinks.
+                                Example: just rename foo-bar foobar
+  just delete <slug>            Remove a page, marking broken wikilinks for review.
+
+HUGO
+  just serve                    Watch + preprocess + hugo server. http://localhost:1313.
+  just build                    Preprocess + hugo build → public/.
+
+SETUP
+  just init                     Reminds you to open an agent and say "init wiki".
+  just install-qmd              Install qmd from qntx-labs fork (idempotent).
+  just encrypt-init             Set up git-crypt or age for sensitive content.
+  just check-deps               Verify required tools installed.
+
+GIT
+  just status                   Short git status.
+  just commit "<message>"       Stage all + commit. Quote multi-word messages.
+                                Example: just commit "feat: add memex page"
+
+TESTS
+  just test                     Run BATS test suite under tests/.
+
+HELP
+  just help                     This text.
+
+QUEUE SEMANTICS
+  raw/inbox/interactive/        Default; agent supervises one-at-a-time.
+  raw/inbox/batch/              Unattended bulk; agent writes batch synthesis at end.
+  raw/inbox/checkpoint/         Staged; agent writes proposal to .staged/, user approves.
+
+ARGUMENT QUOTING
+  Multi-word args MUST be quoted: `just commit "fix: foo"`, `just search "memex history"`.
+  Variadic recipes (log, rename) accept space-separated remaining args; quote if any contain spaces.
+
+## synthesis
+
+just synth <plugin> <topic-slug> --tag=<tag>
+just synth <plugin> <topic-slug> --slugs=<slug1>,<slug2>
+just synth-regen <synthesis-slug> [--force|--stage]
+just synth-finalize <synthesis-slug>
+just synth-accept-stage <synthesis-slug>
+just synth-refine <synthesis-slug> "tighten the TL;DR"
+just synth-list
+just synth-resolve <synthesis-slug>
+
+Quoting: refinement notes must be quoted because they're variadic.
+Topic slugs must match ^[a-z0-9][a-z0-9-]*$ (no leading hyphen).
+All recipes use -- to terminate flag parsing before positional args.
+
+Example end-to-end:
+
+    just synth briefing memex --tag=memex
+    # agent reads the prompt bundle and fills between markers
+    just synth-finalize memex-briefing
+    # later:
+    just synth-refine memex-briefing "shorten Key Findings to 5 bullets"
+    just synth-regen memex-briefing
+
+synth-regen <slug> [--force | --stage]
+    Re-resolve scope and re-emit prompt for an existing synthesis page.
+    --force: skip the hand-edit guard (S6 warning becomes informational).
+    --stage: write to content/synthesis/.staged/<slug>.md instead of the
+             live page. After agent fills, finalize, then accept-stage to promote.
+
+synth-accept-stage <slug>
+    Promote a staged regen into the live page. Runs lint --only=synth on the
+    staged file first; on lint failure, leaves the staged file in place and
+    exits 6 so the agent can retry.
+
+Lint: `just lint --only=synth` runs only S1-S9 synth rules. With --fix,
+it normalizes smart quotes, em-dashes, and zero-width spaces inside
+generated regions only. Marker repair, missing-section repair, and S9
+reductions are NOT auto-fixable — they require regen.
+
+# === synthesis: refine ===
+just synth-refine <slug> "<note>"
+    Append a bullet to ## Feedback in the synthesis page <slug>. Idempotent
+    on exact-duplicate bullets. Bumps frontmatter last_updated but NOT
+    last_generated. Does NOT trigger regen automatically — call
+    `just synth-regen <slug>` when ready.
+
+    QUOTING: the note must be quoted because it contains spaces.
+
+    Example:
+        just synth-refine memex-briefing "Tighten TL;DR to 15 words per bullet."
+
+    Multiple refines accumulate; the next regen sees them all (each bullet
+    rendered as one line inside a fenced ```text block in the prompt
+    bundle, immune to marker-mimicry injection). To clear addressed
+    bullets, edit content/synthesis/<slug>.md directly.
+
+SYNTHESIS-EXTRAS
+  bash scripts/synth-export-anki.sh content/synthesis/<study-guide-slug>.md
+                                Convert a study-guide synthesis page's
+                                ## Flashcards block into an Anki .apkg at
+                                .awiki/exports/<slug>.apkg. Skips gracefully
+                                (exit 0) if the optional `genanki` Python
+                                package is not installed.

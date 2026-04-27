@@ -1,0 +1,19 @@
+{
+  "name": "awiki-server",
+  "version": "0.1.0",
+  "description": "awiki MCP server: ingest_source, lint, query_wiki, update_catalog, list_synth_plugins, synthesize, finalize_synthesis",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "awiki-mcp": "./index.js"
+  },
+  "scripts": {
+    "test": "node test/validate-scope.test.mjs && node test/synthesize.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

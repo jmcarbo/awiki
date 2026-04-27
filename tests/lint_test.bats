@@ -1,0 +1,219 @@
+#!/usr/bin/env bats
+
+@test "lint detects broken wikilink" {
+  run bash scripts/lint.sh tests/fixtures/wiki-broken/content
+  [[ "$output" == *"LINT|ERROR"*"foo.md"*"broken wikilink"* ]]
+}
+
+@test "lint detects empty page" {
+  run bash scripts/lint.sh tests/fixtures/wiki-broken/content
+  [[ "$output" == *"LINT|WARN"*"empty.md"* ]]
+}
+
+@test "lint exits 2 on errors" {
+  run bash scripts/lint.sh tests/fixtures/wiki-broken/content
+  [ "$status" -eq 2 ]
+}
+
+@test "lint exits 0 on clean wiki" {
+  CLEAN="$(mktemp -d)/content"
+  mkdir -p "$CLEAN/entities"
+  cat > "$CLEAN/entities/foo.md" <<EOF2
+---
+title: "Foo"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Foo references [[bar]] across the wiki for connectivity testing purposes.
+EOF2
+  cat > "$CLEAN/entities/bar.md" <<EOF2
+---
+title: "Bar"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Bar references [[foo]] for connectivity testing in the lint suite.
+EOF2
+  run bash scripts/lint.sh "$CLEAN"
+  [ "$status" -eq 0 ]
+}
+
+@test "lint --fix adds missing last_updated" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/needs-fix.md" <<EOF2
+---
+title: "Needs Fix"
+date: 2026-01-01
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body referencing [[needs-fix]] for self-connectivity, sufficient length.
+EOF2
+  bash scripts/lint.sh --fix "$TMP" || true
+  run grep '^last_updated:' "$TMP/entities/needs-fix.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "lint warns on tags: [private] outside private/ path" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/leaky.md" <<E
+---
+title: "Leaky"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: [private]
+aliases: []
+sources: []
+draft: false
+---
+
+Body content sufficient length for non-empty check.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|WARN"*"leaky.md"*"private tag outside private path"* ]]
+}
+
+@test "lint --fix is a no-op for files lacking date: field" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  PAGE="$TMP/entities/no-date.md"
+  cat > "$PAGE" <<EOF2
+---
+title: "No Date"
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body referencing [[no-date]] for self-connectivity, sufficient length.
+EOF2
+  # Force mtime into the past so we can detect any modification.
+  touch -t 200001010000 "$PAGE"
+  MTIME_BEFORE="$(stat -f %m "$PAGE" 2>/dev/null || stat -c %Y "$PAGE")"
+  run bash scripts/lint.sh --fix "$TMP"
+  # No FIX line should be emitted for this file.
+  [[ "$output" != *"FIX|"*"no-date.md"* ]]
+  MTIME_AFTER="$(stat -f %m "$PAGE" 2>/dev/null || stat -c %Y "$PAGE")"
+  [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]
+}
+
+@test "lint flags orphan entity" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/island.md" <<E
+---
+title: "Island"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body content with sufficient length, but no inbound wikilinks anywhere.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|INFO"*"island.md"*"orphan"* ]]
+}
+
+@test "lint exempts section-index from orphan check" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/_index.md" <<E
+---
+title: "Entities"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" != *"LINT|INFO"*"_index.md"*"orphan"* ]]
+}
+
+@test "lint does not flag _index.md as duplicate slug" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities" "$TMP/concepts"
+  cat > "$TMP/entities/_index.md" <<E
+---
+title: "Entities"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  cat > "$TMP/concepts/_index.md" <<E
+---
+title: "Concepts"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" != *"duplicate slug: _index"* ]]
+}
+
+@test "lint --hugo-check runs hugo render and passes on clean content" {
+  if ! command -v hugo >/dev/null 2>&1; then
+    skip "hugo not installed"
+  fi
+  run bash scripts/lint.sh --hugo-check content
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"LINT|ERROR|hugo|"* ]]
+}
+
+@test "lint warns on page missing from catalog" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/catalog.md" <<E
+---
+title: "Catalog"
+type: catalog
+---
+
+# Catalog
+E
+  cat > "$TMP/entities/uncatalogued.md" <<E
+---
+title: "Uncatalogued"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Uncatalogued [[uncatalogued]] self-reference for connectivity.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|WARN"*"uncatalogued.md"*"missing from catalog"* ]]
+}

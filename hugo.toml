@@ -1,0 +1,16 @@
+baseURL = 'https://example.com/'
+title = 'awiki'
+theme = 'hugo-book'
+contentDir = '.awiki/build-content'
+disableKinds = ["taxonomy"]
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 4
+
+[params]
+  BookSection = 'docs'

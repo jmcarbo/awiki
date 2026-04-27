@@ -1,0 +1,12 @@
+# awiki runtime config — edit as needed
+AWIKI_LINT_AFTER_N=5
+AWIKI_STALE_DAYS=90
+AWIKI_LOG_QUERIES=0
+# Plugin post-hooks are arbitrary shell code shipped inside synthesis-plugins/*/.
+# Default off. Flip to 1 only after reviewing the post.sh of every directory-form
+# plugin you have installed. Single-file plugins (briefing, mindmap, timeline,
+# study-guide as shipped by awiki) are prompt-only and ignore this flag —
+# only directory-form plugins with post.sh are gated. The mindmap mermaid
+# validator (scripts/synth-mindmap-validate.sh) is shipped by awiki itself
+# and is also gated by this flag (it only runs when the flag is 1).
+ALLOW_PLUGIN_POST_HOOKS=0

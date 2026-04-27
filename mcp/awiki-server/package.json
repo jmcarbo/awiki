@@ -1,14 +1,14 @@
 {
   "name": "awiki-server",
   "version": "0.1.0",
-  "description": "awiki MCP server: ingest_source, lint, query_wiki, update_catalog",
+  "description": "awiki MCP server: ingest_source, lint, query_wiki, update_catalog, list_synth_plugins, synthesize, finalize_synthesis",
   "main": "index.js",
   "type": "module",
   "bin": {
     "awiki-mcp": "./index.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/validate-scope.test.mjs && node test/synthesize.test.mjs"
   },
   "keywords": [],
   "author": "",

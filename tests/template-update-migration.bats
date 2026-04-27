@@ -124,3 +124,35 @@ EOF
     "$TMP/m.sh" --repo-root "$TMP" --old-version 0.1 --new-version 0.2
   [ "$status" -ne 0 ]
 }
+
+@test "migration stage-prompt: writes into pending-dir with metadata" {
+  cd "$TMP"
+  V2="$REPO_ROOT/tests/fixtures/template-update/v2-with-llm"
+  mkdir -p pending content/notes
+  echo "## Foo" > content/notes/a.md
+  run python3 "$REPO_ROOT/scripts/_template_helpers/migration.py" stage-prompt \
+    "$V2/migrations/0002-rewrite-foo.prompt.md" \
+    --user-tree "$TMP" --pending-dir "$TMP/pending"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/pending/0002-rewrite-foo.prompt.md" ]
+  grep -q "## Resolved scope" "$TMP/pending/0002-rewrite-foo.prompt.md"
+  grep -q "content/notes/a.md" "$TMP/pending/0002-rewrite-foo.prompt.md"
+  grep -q "## Risk" "$TMP/pending/0002-rewrite-foo.prompt.md"
+}
+
+@test "migration stage-prompt: scope_glob secrets/ rejected" {
+  cd "$TMP"
+  cat > bad.prompt.md <<'EOF'
+---
+id: bad
+requires: [agent]
+scope_glob: "secrets/**"
+risk: medium
+---
+body
+EOF
+  mkdir -p pending
+  run python3 "$REPO_ROOT/scripts/_template_helpers/migration.py" stage-prompt \
+    "$TMP/bad.prompt.md" --user-tree "$TMP" --pending-dir "$TMP/pending"
+  [ "$status" -ne 0 ]
+}

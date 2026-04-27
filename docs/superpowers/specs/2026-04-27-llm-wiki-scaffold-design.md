@@ -22,8 +22,17 @@ The system is domain-agnostic, multi-agent compatible, Hugo-renderable, Obsidian
 
 - Hosted SaaS or multi-tenant deployment.
 - Full RAG pipeline with embedding store. (Index-first; qmd handles vector escalation.)
-- MCP server for wiki ops. (Future work; not blocking.)
-- Auto-deploy / CI hosting. (User wires their own.)
+- Cross-agent automated migration of wikis built under different schemas.
+
+## In-scope (delivered in v1)
+
+- MCP server for wiki ops (`mcp/awiki-server/`) exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog` over stdio. Wired into Claude Code / Codex by BOOTSTRAP step 9b.
+- Auto-deploy templates for Netlify, Cloudflare Pages, GitHub Pages (`deploy/`). Each template includes git-crypt unlock instructions for encrypted wikis.
+- Scheduled lint configurations: launchd (macOS), systemd (Linux), GitHub Actions.
+- Multimodal ingest helpers (`scripts/ingest-pdf.sh`, `scripts/ingest-audio.sh`) plus a vision workflow doc in `WIKI.md`.
+- Slug rename / page deletion scripts with broken-wikilink markers.
+- Alias resolution via lint-built map, consumed by build preprocessor and lint collision check.
+- Section indexes shipped in template (`content/<section>/_index.md`) using a `page-list` Hugo shortcode.
 
 ---
 
@@ -53,49 +62,69 @@ awiki/
 ├── README.md                   # human-facing overview
 ├── .gitignore
 ├── .gitattributes              # git-crypt patterns (commented out)
-├── hugo.toml                   # Hugo config
+├── hugo.toml                   # Hugo config (contentDir = ".awiki/build-content")
 ├── justfile                    # recipe entry-point
 ├── themes/                     # git submodule(s)
-├── content/                    # Hugo-served wiki pages (LLM-owned)
+├── layouts/                    # Hugo overrides
+│   └── shortcodes/page-list.html
+├── content/                    # LLM-owned wiki pages (preprocessor input)
 │   ├── _index.md               # Hugo home
 │   ├── catalog.md              # content catalog (LLM-maintained)
-│   ├── log.md                  # chronological log
+│   ├── log.md                  # chronological log (draft:true by default)
 │   ├── entities/
-│   ├── concepts/
-│   ├── topics/
-│   ├── sources/
-│   └── synthesis/
+│   │   └── _index.md           # section index w/ page-list shortcode
+│   ├── concepts/_index.md
+│   ├── topics/_index.md
+│   ├── sources/_index.md
+│   └── synthesis/_index.md
 ├── raw/
 │   ├── inbox/
 │   │   ├── interactive/        # supervised one-at-a-time
 │   │   ├── batch/              # unsupervised bulk
 │   │   └── checkpoint/         # staged pipeline w/ approvals
-│   ├── processed/              # post-ingest (mirrors source path)
+│   ├── processed/              # post-ingest (gitignored by default; opt-in tracking)
+│   │   └── _originals/         # binary originals from PDF/audio ingest (privacy-protected)
 │   └── assets/                 # images from clipped articles
 ├── scripts/
+│   ├── check-deps.sh
 │   ├── ingest.sh
 │   ├── lint.sh
+│   ├── build.sh                # wikilink preprocessor → .awiki/build-content
+│   ├── serve.sh                # build + watch + hugo server
 │   ├── install-qmd.sh
 │   ├── qmd-index.sh
 │   ├── encrypt-init.sh
-│   └── log-append.sh
+│   ├── log-append.sh
+│   ├── rename.sh
+│   ├── delete-page.sh
+│   ├── ingest-pdf.sh
+│   ├── ingest-audio.sh
+│   ├── wire-qmd-mcp.sh
+│   ├── wire-awiki-mcp.sh
+│   └── install-hooks.sh
+├── mcp/
+│   └── awiki-server/           # Node MCP server (ingest/lint/query/update_catalog)
+├── deploy/                     # Netlify, Cloudflare Pages, GitHub Pages templates
+├── scheduled/                  # launchd / systemd / GitHub Actions lint configs
+├── examples/
+│   └── sample-wiki/            # reference wiki for new users
+├── .obsidian/                  # vault config (committed; workspace files gitignored)
 ├── tests/
 │   ├── fixtures/
-│   ├── lint_test.sh
-│   ├── ingest_test.sh
-│   ├── log_append_test.sh
-│   └── schema_test.sh
+│   └── *.bats                  # BATS tests (one per script)
 └── docs/
     ├── just-help.txt           # extended justfile help
-    └── superpowers/specs/      # design docs
+    ├── decisions/              # spike outcomes
+    └── superpowers/{specs,plans}/
 ```
 
 Key constraints:
 - `raw/` lives outside `content/` so Hugo never publishes raw sources.
 - `raw/inbox/` is gitignored (sources may be sensitive / copyrighted).
-- `raw/processed/` is tracked → version history of what was ingested.
-- Wikilinks `[[page-slug]]` resolve via Hugo theme that supports them; Obsidian native.
-- Slugs are unique across `content/`. Lint enforces.
+- `raw/processed/` is gitignored by default; BOOTSTRAP step 4 prompts opt-in tracking. `raw/processed/_originals/` always remains private (covered by encrypt-init patterns).
+- Hugo serves `.awiki/build-content/` (gitignored), produced by `scripts/build.sh` from `content/` with wikilink rewriting. `hugo.toml` sets `contentDir = ".awiki/build-content"` (path relative to repo root); Hugo invoked with `--source .` from repo root.
+- Slugs unique across `content/`. Lint enforces.
+- Aliases resolved via lint-built map (`.awiki/maps/alias-to-slug.tsv`). Collisions are lint errors.
 
 ---
 
@@ -125,7 +154,7 @@ draft: false
 
 - Body structure: lead paragraph (≤100 words) → sections → `## Related` (wikilinks) → `## Sources`.
 - Frontmatter `sources: ["[[slug]]"]` stores wikilinks as YAML strings — they are NOT rendered as links by Obsidian or Hugo (frontmatter is data). Body `## Sources` section mirrors them as real links for human reading. Lint extracts both and validates parity.
-- `type` enum splits into **page kinds** (`entity`, `concept`, `topic`, `source`, `synthesis`, `deck`, `chart`, `canvas`) and **system pages** (`log`, `catalog`). System pages have separate validation rules and are exempt from folder-per-type and orphan checks.
+- `type` enum splits into **page kinds** (`entity`, `concept`, `topic`, `source`, `synthesis`, `deck`, `chart`, `canvas`) and **system pages** (`log`, `catalog`, `section-index`). System pages have separate validation rules and are exempt from folder-per-type and orphan checks.
 
 ### 3. Wikilink Rules
 - `[[page-slug]]` or `[[page-slug|display]]`.
@@ -165,7 +194,7 @@ Three modes distinguished by path under `raw/inbox/`:
 Markdown, comparison table, Marp slide deck, Matplotlib chart, Mermaid diagram, Obsidian canvas. All filed under `content/synthesis/` (the `synthesis/` folder is a **container** for derived/output artifacts, not a single page type). Frontmatter `type` reflects the artifact: `synthesis` (markdown analysis), `deck` (Marp), `chart` (image+caption page), `canvas` (Obsidian canvas json sidecar). The folder-per-type rule (Section 2) is relaxed for the synthesis container; lint allows mixed types under `content/synthesis/`.
 
 ### 7. Lint Checklist
-Mechanical: broken wikilinks, missing frontmatter fields, stale `last_updated` (>90d), duplicate aliases, empty pages, dangling/missing catalog entries.
+Mechanical: broken wikilinks, missing frontmatter fields, stale `last_updated` (>90d), duplicate aliases, empty pages, orphan pages (no inbound wikilinks; system pages exempt), dangling/missing catalog entries, slug uniqueness, privacy (private tag outside private path).
 Semantic (agent-driven): contradictions, stale claims vs newer sources, missing concept pages.
 
 ### 8. qmd Usage
@@ -178,18 +207,20 @@ Semantic (agent-driven): contradictions, stale claims vs newer sources, missing 
 
 Agent reads on first session. Steps:
 
-0. **Dependency check.** Run a check script: bash 4+, git, just, hugo. Optional: git-crypt, age, qmd toolchain. Print OS-specific install hints for missing required tools; halt if any required tool absent.
+0. **Dependency check.** Run `bash scripts/check-deps.sh`. Required: bash 4+, git, just, hugo, bats-core, python3. Optional: git-crypt, age, qmd toolchain, entr/fswatch, pdftotext, whisper-cpp. Print OS-specific install hints for missing required tools; halt if any required tool absent.
 1. Ask domain (personal / research / book / business / other).
 2. Ask wiki name, one-line purpose.
 3. Ask privacy level → if sensitive, run `just encrypt-init` BEFORE any first commit. Verify `git status` shows expected encrypted-vs-cleartext patterns.
-4. Ask: "Track ingested sources in git? (y/N)" — on `y`, remove `raw/processed/` from `.gitignore`. On `N`, sources stay local.
-5. Ask Hugo theme preference (default: `hugo-book`).
+4. Ask: "Track ingested sources in git? (y/N)" — on `y`, remove `raw/processed/*` (and the `.gitkeep` exception) from `.gitignore`. On `N`, sources stay local.
+5. Ask Hugo theme preference (default: `hugo-book`). If a theme other than the default is chosen, BOOTSTRAP `git submodule deinit -f themes/hugo-book && git rm -f themes/hugo-book` before adding the chosen theme. The default theme submodule is already present; skip the `git submodule add` if it already exists.
 6. Ask: "Publish log to rendered site? (y/N)" — controls `draft:` flag on `content/log.md`.
-7. Patch `WIKI.md` Identity section, `hugo.toml` site title, `content/log.md` frontmatter.
+7. Patch `WIKI.md` Identity section, `hugo.toml` site title and `baseURL`, `content/log.md` frontmatter, `content/_index.md` welcome paragraph.
 8. Run `just install-qmd` then `just reindex`. Treat install failure as non-fatal; record status in `.awiki/qmd-status`.
-9. Optionally wire qmd MCP server into agent harness.
-10. Append init entry to `log.md`.
+9a. Optionally wire qmd MCP server: ask "Wire qmd MCP server into your agent harness? (y/N)" — only if `.awiki/qmd-status=ok`. On `y`, run `bash scripts/wire-qmd-mcp.sh`.
+9b. Optionally wire awiki MCP server: ask "Wire awiki wiki-ops MCP server (ingest/lint/query/update_catalog)? (y/N)". On `y`, run `cd mcp/awiki-server && npm install && cd ../..` then `bash scripts/wire-awiki-mcp.sh`.
+10. Append init entry to `log.md` via `bash scripts/log-append.sh init "<message>"`.
 11. Stage initial commit, prompt user to review.
+12. Print smoke-test instructions from README.md.
 
 **Agent schema files** — `CLAUDE.md` and `AGENTS.md` are NOT symlinks (Windows / corporate git configs lose them). They are committed stub files containing a single line: `> Schema is in [WIKI.md](./WIKI.md). Read it before responding.` plus a one-line summary of WIKI.md sections. `lint.sh` checks the stubs are present and that WIKI.md exists; `WIKI.md` itself is the canonical source.
 
@@ -336,9 +367,10 @@ Alias collisions surface as lint errors; ambiguous aliases must be disambiguated
 
 ### Hugo config (`hugo.toml`)
 - `baseURL`, `title` patched by BOOTSTRAP.
-- `contentDir = "content"`.
-- Goldmark wikilink extension enabled.
-- `disableKinds = ["taxonomy"]` toggle in BOOTSTRAP.
+- `contentDir = ".awiki/build-content"` — Hugo reads the preprocessor's output, never raw `content/`. Path is relative to repo root; Hugo is invoked with `--source .` from repo root.
+- `themesDir = "themes"`, `theme = "hugo-book"` (BOOTSTRAP rewrites if user picks alt theme).
+- Wikilinks are NOT rendered by Hugo directly — `scripts/build.sh` rewrites them before Hugo runs.
+- `disableKinds = ["taxonomy"]` unless user opts in via BOOTSTRAP.
 
 ### Special pages
 - `content/_index.md` — Hugo home.
@@ -372,6 +404,38 @@ Source: https://github.com/qntx-labs/qmd
 
 ---
 
+## awiki MCP Wiki-Ops Server
+
+A small Node MCP server at `mcp/awiki-server/` exposes wiki operations as native agent tools. Lives in the repo so it ships with the template; the user wires it once via BOOTSTRAP step 9b.
+
+### Tools exposed
+- `ingest_source(path)` — shells to `scripts/ingest.sh <path>` and returns stdout/exit code.
+- `lint()` — shells to `scripts/lint.sh`, returns structured output and summary.
+- `query_wiki(query)` — shells to `qmd search <query>` if available, else greps `content/`.
+- `update_catalog()` — shells to `scripts/update-catalog.sh` (rebuilds `content/catalog.md` from on-disk pages and current frontmatter).
+
+### Transport & isolation
+- Stdio transport (`@modelcontextprotocol/sdk` `StdioServerTransport`).
+- Server runs in user's working directory; no network listener. Inherits user's filesystem permissions.
+- All shell-outs use `execFileSync` with argument arrays (no shell interpolation) to prevent command injection from tool arguments.
+- Tool inputs validated with JSON Schema (hand-written or via `zod-to-json-schema`); requests with malformed args return MCP error responses.
+
+### Security model
+- Server has read/write access to the repo it's launched from. It does NOT read the encryption keys directly — git-crypt key handling stays in `secrets/` outside the server's invocation path.
+- The server does not expose arbitrary file read/write — only the four wiki-ops above. Agent injecting a tool-call cannot escape via path traversal in `ingest_source` because `scripts/ingest.sh` rejects paths outside `raw/inbox/`.
+- `query_wiki` only forwards the query string to `qmd search` — no shell metacharacters interpolated.
+
+### Wiring
+- `scripts/wire-awiki-mcp.sh` registers the server in the user's agent harness:
+  - **Claude Code:** project-level `./.mcp.json` (NOT `.claude/.mcp.json`).
+  - **Codex:** `~/.codex/config.toml` `[mcp.servers.awiki]` block (project-local override under `.codex/config.toml` if user prefers).
+- Wire script is idempotent; re-running updates the entry in place.
+
+### When to use
+WIKI.md instructs the agent to prefer the MCP tools when available (faster than shelling out via Bash); falls back to bash recipes when MCP is not wired (e.g. cold-start CI).
+
+---
+
 ## Privacy & Encryption
 
 Default `.gitignore`:
@@ -389,6 +453,7 @@ raw/inbox/
 raw/processed/
 content/private/**
 raw/processed/private/**
+raw/processed/_originals/**
 
 # secrets — deny all, allow only public keys
 secrets/**
@@ -404,19 +469,18 @@ secrets/**
 ```
 
 **Important defaults:**
-- `raw/processed/` is **gitignored by default** to prevent accidental commit of copyrighted/sensitive sources. BOOTSTRAP step 3 asks: "Track ingested sources in git? (y/N)". On `y`, BOOTSTRAP removes the `raw/processed/` line from `.gitignore`. Note implications (copyright, history-rewrite cost if revoked).
-- `content/private/**` and `raw/processed/private/**` are **gitignored until `encrypt-init` runs**. `encrypt-init` removes those lines and adds matching git-crypt patterns to `.gitattributes` atomically.
+- `raw/processed/` is **gitignored by default** to prevent accidental commit of copyrighted/sensitive sources. BOOTSTRAP step 4 asks: "Track ingested sources in git? (y/N)". On `y`, BOOTSTRAP removes the `raw/processed/` line from `.gitignore` (the `_originals/` and `private/` exceptions stay ignored). Note implications (copyright, history-rewrite cost if revoked).
+- `content/private/**`, `raw/processed/private/**`, and `raw/processed/_originals/**` are **gitignored until `encrypt-init` runs**. `encrypt-init` removes those lines and adds matching git-crypt patterns to `.gitattributes` atomically.
+- `_originals/` always lives under `raw/processed/`, never under `raw/inbox/`. PDF/audio ingest helpers move the binary into `raw/processed/_originals/` after extraction. The path is referenced from the produced markdown's frontmatter `original:` field; this reference remains valid after `ingest.sh` moves the markdown.
 - `secrets/**` denies all by default with explicit `!secrets/*.pub` allowlist for committable public keys (e.g. age recipient).
-
-`raw/processed/` is tracked. If sensitive, encrypt.
 
 ### Encryption choices (opt-in via `just encrypt-init`)
 
 - **None** — public wiki.
-- **git-crypt** (recommended for personal/health/journal) — symmetric key, transparent en/decrypt at git level. Patterns cover `raw/processed/private/**`, `content/private/**`, `secrets/**`. Key exported to `secrets/.git-crypt-key` (gitignored).
+- **git-crypt** (recommended for personal/health/journal) — symmetric key, transparent en/decrypt at git level. Patterns cover `raw/processed/private/**`, `raw/processed/_originals/**`, `content/private/**`, `secrets/**`. Key exported to `secrets/.git-crypt-key` (gitignored).
 - **age** (`--age`) — asymmetric, file-level, manual. Keypair under `secrets/`. Public key committed.
 
-Lint warns if a page has `tags: [private]` or filename suggests private but path is not under `private/`.
+Lint warns if a page has `tags: [private]` or filename suggests private but path is not under `**/private/`. Match uses YAML list parsing (not regex word boundary), so `private-staging` does NOT trigger the warning while `private` and `[private, foo]` do.
 
 ---
 
@@ -500,13 +564,17 @@ Consolidated risks and mitigations (cross-references the more detailed sections)
 
 | Risk | Mitigation in v1 |
 |------|------------------|
-| User commits sensitive content before `encrypt-init` runs | `content/private/**` and `raw/processed/private/**` gitignored by default; `encrypt-init` flips them atomically with git-crypt patterns. |
+| User commits sensitive content before `encrypt-init` runs | `content/private/**`, `raw/processed/private/**`, and `raw/processed/_originals/**` gitignored by default; `encrypt-init` flips them atomically with git-crypt patterns. |
 | `raw/processed/` leaks copyrighted/PII sources | Gitignored by default; opt-in via BOOTSTRAP question. |
+| PDF/audio binary originals leak | `_originals/` lives only under `raw/processed/_originals/` and is covered by encrypt-init patterns. PDF/audio helpers refuse to write outside this path. |
 | Secrets accidentally committed | `secrets/**` gitignored with `!secrets/*.pub` allowlist. |
 | Hugo publishes private content | `content/private/**` gitignored pre-encrypt; render-time check via `lint.sh --hugo-check` warns on `tags: [private]` outside private paths. |
 | `log.md` leaks query / activity metadata | `query` not logged by default; `log.md` has `draft: true` so Hugo skips. |
 | Agent moves files into `private/` without consent | WIKI.md mandates user confirmation before any move into `private/`. |
-| Lint / build runs on encrypted (locked) tree | Documented: lint and Hugo build assume decrypted working tree; CI must unlock or skip. |
+| Lint / build runs on encrypted (locked) tree | Lint and Hugo build assume decrypted working tree. Deploy templates (`deploy/*`) include `git-crypt unlock` steps gated on a `GIT_CRYPT_KEY` secret; if unlock fails on a build that contains encrypted files, the deploy fails closed (no plaintext fallback). |
+| MCP server arg injection | `mcp/awiki-server/index.js` uses `execFileSync` with explicit argument arrays — no shell interpolation. Tool inputs validated against JSON schemas; path-traversal in `ingest_source` rejected by `ingest.sh`. |
+| MCP server unauthorized invocation | Stdio-only, no network listener. Process inherits user's filesystem permissions. Only the four wiki-ops tools exposed. |
+| Deploy CI publishes ciphertext | Each deploy template documents `GIT_CRYPT_KEY` as a required secret; absence halts the deploy with a clear error. Public wikis ship encryption-disabled by default; users opt in. |
 
 ## Dependencies & Compatibility
 
@@ -519,7 +587,12 @@ Consolidated risks and mitigations (cross-references the more detailed sections)
 | `qmd` (qntx-labs fork) | optional | n/a | non-blocking; install failure logs warning. |
 | `git-crypt` | optional | 0.7+ | required only if user picks git-crypt encryption. |
 | `age` | optional | 1.0+ | required only if user picks age encryption. |
-| `bats-core` | yes | 1.10+ | required by `just test`; BOOTSTRAP installs via brew/apt. |
+| `bats-core` | yes | 1.10+ | required by `just test`. macOS: `brew install bats-core`. Linux: download release tarball (apt's `bats` is too old). |
+| `python3` | yes | 3.8+ | wikilink preprocessor + JSON config patching. |
+| `node` | yes (phase 8 only) | 20+ | runs `mcp/awiki-server`. Skip if MCP server not wired. |
+| `entr` or `fswatch` | optional | n/a | live-reload watcher in `serve.sh`; falls back to 1s poll. |
+| `pdftotext` (poppler) | optional | n/a | `scripts/ingest-pdf.sh` (alt: `marker`). |
+| `whisper-cpp` | optional | n/a | `scripts/ingest-audio.sh`. |
 
 OS support: macOS, Linux primary. Windows via WSL2 (native git symlinks unreliable; spec uses stub files instead).
 
@@ -536,7 +609,7 @@ The full v1 scope is broken into 12 phases. Each phase produces working, testabl
 | 3 | Hugo render | 1 | `build.sh` preprocessor, slug+alias maps, `serve.sh`, `hugo.toml`, theme submodule, smoke render. |
 | 4 | qmd integration | 1 | `install-qmd.sh`, `qmd-index.sh`, MCP option, `.awiki/qmd-status`, grep fallback. |
 | 5 | Encryption | 1, 2 | `encrypt-init.sh` (git-crypt + age), atomic `.gitignore` flip, `.gitattributes` patterns, lint privacy checks. |
-| 6 | Section indexes + catalog v2 | 1, 3 | Hugo `page-list` shortcode, BOOTSTRAP scaffolds section indexes, lint exempts them, catalog cross-link checks. |
+| 6 | Section indexes + catalog v2 | 1, 3 | Hugo `page-list` shortcode, template ships per-section `_index.md` files, lint exempts system pages from orphan check, catalog cross-link check, `scripts/update-catalog.sh`. |
 | 7 | Slug rename, deletion, alias resolution | 2, 3 | `rename.sh`, `delete-page.sh`, alias map consumed by preprocessor + lint, alias-collision lint rule. |
 | 8 | MCP wiki-ops server | 2, 4 | `mcp/awiki-server` (Node) exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog`; BOOTSTRAP wiring option for Claude Code. |
 | 9 | Scheduled lint configs | 2 | `scheduled/launchd.plist.example`, `scheduled/systemd.timer.example`, `scheduled/github-action.yml.example`, README docs. |

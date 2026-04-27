@@ -156,6 +156,95 @@ bash "$SCRIPT_DIR/template-source-check.sh" "${SC_ARGS[@]}"
 echo "info: phase 0a preflight ok"
 fi  # end Phase 0a (skipped on --continue)
 
-# Phases 1, 0b, 1.5, 2, 3 — STUBBED until later tasks/phases.
+# === Phase 1: fetch ===
+FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"
+
+if should_skip_phase fetch; then
+  echo "info: resume — skipping Phase 1 (fetch already committed this cycle)"
+  # Re-derive variables from state file.
+  COMMIT_OLD=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" commit_old)
+  COMMIT_NEW=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" commit_new)
+  ANCESTOR_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_OLD"
+  NEW_MANIFEST="$FETCH_DIR/template.manifest.toml"
+else
+COMMIT_OLD=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
+ORIGINAL_REPO=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" original_repo)
+
+mkdir -p "$REPO_ROOT/.awiki/template-cache"
+if [[ -d "$FETCH_DIR/.git" ]]; then
+  # Reuse existing fetch dir: fetch updates.
+  git -C "$FETCH_DIR" fetch --depth 50 origin >/dev/null 2>&1 || true
+elif [[ -d "$FETCH_DIR" ]]; then
+  # Stale dir without .git (e.g. local copy fixture). Wipe + re-clone or copy.
+  rm -rf "$FETCH_DIR"
+fi
+
+if [[ ! -d "$FETCH_DIR/.git" ]]; then
+  if [[ "$RESOLVED_SOURCE" == /* ]] || [[ -d "$RESOLVED_SOURCE/.git" ]]; then
+    # Local path: prefer git clone if it's a repo, else snapshot copy.
+    if [[ -d "$RESOLVED_SOURCE/.git" ]]; then
+      git clone --depth 50 "$RESOLVED_SOURCE" "$FETCH_DIR" >/dev/null
+    else
+      mkdir -p "$FETCH_DIR"
+      cp -R "$RESOLVED_SOURCE/." "$FETCH_DIR/"
+      # Init a throwaway git repo so `git rev-parse` works.
+      git -C "$FETCH_DIR" init -q
+      git -C "$FETCH_DIR" add -A
+      git -C "$FETCH_DIR" -c user.email=fetch@local -c user.name=fetch commit -q -m "snapshot: $RESOLVED_SOURCE"
+    fi
+  else
+    git clone --depth 50 "$RESOLVED_SOURCE" "$FETCH_DIR" >/dev/null
+  fi
+fi
+
+# Resolve commit_new.
+if [[ -n "$REF" ]]; then
+  COMMIT_NEW=$(git -C "$FETCH_DIR" rev-parse "$REF")
+else
+  COMMIT_NEW=$(git -C "$FETCH_DIR" rev-parse HEAD)
+fi
+
+if [[ "$COMMIT_NEW" == "$COMMIT_OLD" ]]; then
+  echo "already up to date (pinned at $COMMIT_OLD)"
+  rm -rf "$FETCH_DIR"
+  exit 0
+fi
+
+# Ancestor cache check + auto-recover.
+ANCESTOR_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_OLD"
+if [[ ! -d "$ANCESTOR_DIR" ]]; then
+  echo "info: ancestor cache missing for $COMMIT_OLD; rebuilding from $ORIGINAL_REPO"
+  TMP_ANC=$(mktemp -d)
+  if [[ -d "$ORIGINAL_REPO/.git" ]] || [[ "$ORIGINAL_REPO" == http* ]]; then
+    if git clone --depth 50 "$ORIGINAL_REPO" "$TMP_ANC/orig" >/dev/null 2>&1; then
+      git -C "$TMP_ANC/orig" checkout -q "$COMMIT_OLD" 2>/dev/null || \
+        git -C "$TMP_ANC/orig" fetch --depth 50 origin "$COMMIT_OLD" >/dev/null 2>&1 || true
+      git -C "$TMP_ANC/orig" checkout -q "$COMMIT_OLD"
+      mkdir -p "$ANCESTOR_DIR"
+      git -C "$TMP_ANC/orig" archive --format=tar HEAD | tar -x -C "$ANCESTOR_DIR"
+      echo "Re-built ancestor cache from pin"
+    else
+      echo "halt: cannot reach original_repo $ORIGINAL_REPO. Run 'just template-retrofit'." >&2
+      rm -rf "$TMP_ANC"
+      exit 1
+    fi
+  else
+    # Local non-git source: snapshot copy.
+    mkdir -p "$ANCESTOR_DIR"
+    cp -R "$ORIGINAL_REPO/." "$ANCESTOR_DIR/"
+    echo "Re-built ancestor cache from pin"
+  fi
+  rm -rf "$TMP_ANC"
+fi
+
+# Initialize state file.
+SHORT_NEW=$(echo "$COMMIT_NEW" | head -c 12)
+BRANCH_NAME="awiki-template-update/$SHORT_NEW"
+python3 "$HELPERS/state.py" init "$FETCH_DIR/.update-state.json" \
+  --commit-old "$COMMIT_OLD" --commit-new "$COMMIT_NEW" --branch "$BRANCH_NAME"
+
+echo "info: phase 1 fetch ok (commit_new=$COMMIT_NEW)"
+fi  # end Phase 1 (skipped on resume)
+
 echo "info: subsequent phases not yet implemented"
 exit 0

@@ -12,7 +12,9 @@ setup() {
   bash "$REPO_ROOT/scripts/template-init.sh" \
     --repo "$REPO_ROOT/tests/fixtures/template-update/v1" \
     --ref main --version 0.1.0 --commit "$COMMIT_OLD" >/dev/null
-  git add -A
+  # template-cache is treated as a gitignored local cache per spec.
+  echo ".awiki/template-cache/" > .gitignore
+  git add .gitignore .awiki/template.json
   git -c user.email=a@b -c user.name=t commit -q -m "post-init"
 }
 
@@ -57,4 +59,33 @@ teardown() { rm -rf "$TMP"; }
   run bash "$REPO_ROOT/scripts/template-update.sh" --source /elsewhere
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "Source change detected"
+}
+
+@test "template-update: fetch creates _fetch dir and state file" {
+  cd "$TMP"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$REPO_ROOT/tests/fixtures/template-update/v1" \
+    --accept-source-change
+  [ "$status" -eq 0 ]
+  [ -d .awiki/template-cache/_fetch ]
+  [ -f .awiki/template-cache/_fetch/.update-state.json ]
+}
+
+@test "template-update: same commit -> 'already up to date'" {
+  cd "$TMP"
+  # Use v0 as source to match the pinned commit.
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$REPO_ROOT/tests/fixtures/template-update/v0" --accept-source-change
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already up to date" || true
+}
+
+@test "template-update: fetch auto-recovers ancestor cache when missing" {
+  cd "$TMP"
+  rm -rf ".awiki/template-cache/$COMMIT_OLD"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$REPO_ROOT/tests/fixtures/template-update/v1" --accept-source-change
+  [ "$status" -eq 0 ]
+  [ -d ".awiki/template-cache/$COMMIT_OLD" ]
+  echo "$output" | grep -q "Re-built ancestor cache from pin"
 }

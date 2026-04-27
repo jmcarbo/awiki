@@ -167,6 +167,68 @@ If the user has installed one of the configs in `scheduled/`, lint runs automati
    flag. Review the hook source first; treat unfamiliar plugin
    directories as untrusted.
 
+#### Feedback channel
+
+Synthesis pages carry a `## Feedback` section outside the BEGIN/END
+markers. Three refinement channels:
+
+- **Channel A — `## Feedback` bullets (curated, persistent).** User edits
+  this section directly in markdown. On the next regen, the orchestrator
+  parses each bullet and injects it into the prompt as a fenced literal
+  block:
+
+  ````
+  ```text
+  Tighten TL;DR to 15 words per bullet.
+  Add coverage of [[c-associative-trails]] — under-cited so far.
+  ```
+  ````
+
+  The fence guarantees that bullet content (including any string that
+  mimics a marker comment) renders as inert text — it cannot be confused
+  with the live page's BEGIN/END markers.
+
+- **Channel B — `synth.sh refine` (CLI append).**
+  `just synth-refine <slug> "<note>"` appends a bullet to `## Feedback`,
+  idempotent on exact duplicates. Multiple refines batch into one regen;
+  `just synth-regen <slug>` triggers the next pass.
+
+- **Channel C — `## Notes` (free-form).** Free user notes outside markers.
+  The agent reads `## Notes` as additional context (knowledge), NOT as
+  instructions. Use Notes for content; use Feedback for binding directives
+  that shape style/scope.
+
+#### MCP tools
+
+Three synthesis tools surface via the awiki MCP server (alongside the
+four existing ingest/lint/query/update tools):
+
+- `list_synth_plugins()` — returns `{plugins, errors}` with one record
+  per plugin under `synthesis-plugins/`. No arguments. Use to discover
+  available plugins before calling `synthesize`.
+- `synthesize(plugin, scope_descriptor, topic_slug)` — wraps
+  `synth.sh new`. Returns `{prompt_bundle, resolved_slugs, target_path}`
+  on success. On scope-resolution failure, returns
+  `{error: "scope_resolution_failed", reason, suggested_action}` (NOT an
+  MCP-level error). The agent receives the prompt, fills the body
+  between BEGIN/END markers in `target_path`, then calls
+  `finalize_synthesis`.
+- `finalize_synthesis(topic_slug)` — wraps `synth.sh finalize`.
+  Validates markers, runs synth lint, stamps `last_generated`,
+  populates frontmatter `sources:`. On marker/lint failure, returns a
+  structured error payload; agent corrects and retries.
+
+All three tools enforce strict argument validation:
+
+- `plugin` matches `^[a-z][a-z0-9-]*$`.
+- `topic_slug` matches `^[a-z0-9][a-z0-9-]*$` (no leading hyphen —
+  defeats flag-injection).
+- `scope_descriptor` validates against
+  `mcp/awiki-server/schemas/scope.json` (oneOf tag/slugs/query, with
+  optional exclude_tags/min_last_updated/types filters).
+- The resolved manifest path is `realpath`-checked against
+  `synthesis-plugins/` to defeat symlink-swap attacks.
+
 All justfile recipes use `--` to terminate flag parsing before positional
 args.
 
@@ -202,9 +264,9 @@ Mechanical (`scripts/lint.sh`):
 - S4 (error): every `[[slug]]` inside the generated region is in the page's resolved scope.
 - S5 (warning): recomputed scope_hash differs from BEGIN-marker value. Skipped for query-scoped pages.
 - S6 (warning): last_updated > last_generated AND working-tree diff vs HEAD intersects the generated region. Frontmatter-driven (not mtime).
+- S7 (info): `feedback_count=N` reported in synth-lint summary. Warning when >20 (suggests scope refactor or page split).
+- S8 (warning): `## Feedback` bullet contains `[[slug]]` not in the page's resolved scope. Either widen the scope or remove the bullet.
 - S9 (error): sum of evidence-quote words ≤ plugin manifest's max_evidence_total_words (default 500; study-guide 300).
-
-(S7 and S8 deferred to phase 15.)
 
 Semantic (agent-driven, post-lint review):
 - Contradictions between pages.

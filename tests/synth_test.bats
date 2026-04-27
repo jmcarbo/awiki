@@ -393,3 +393,19 @@ setup_mindmap_fixture() {
     grep -qF "$section" synthesis-plugins/timeline.md
   done
 }
+
+@test "synth.sh new study-guide accepts a single-source scope (min_sources=1)" {
+  run bash scripts/synth.sh new study-guide study-test --slugs=s1
+  [ "$status" -eq 0 ]
+  PAGE="content/synthesis/study-test-study-guide.md"
+  [ -f "$PAGE" ]
+  grep -q '^plugin: study-guide$' "$PAGE"
+  for section in "## Concept Checklist" "## Short-Answer Questions" "## Flashcards" "## Suggested Deep-Dives" "## Evidence"; do
+    grep -qF "$section" synthesis-plugins/study-guide.md
+  done
+}
+
+@test "study-guide manifest declares max_evidence_total_words=300" {
+  run grep -E '^max_evidence_total_words: 300$' synthesis-plugins/study-guide.md
+  [ "$status" -eq 0 ]
+}

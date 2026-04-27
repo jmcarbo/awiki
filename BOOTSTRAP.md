@@ -2,9 +2,15 @@
 
 Run this once when the user first opens an agent in a fresh clone of the awiki template. Walk through each step in order. Do NOT skip steps; later steps depend on earlier ones.
 
-## Step 0: Dependency check
+## Step 0: Submodules + dependency check
 
-Run `bash scripts/check-deps.sh`. If it exits non-zero, surface the printed install hints and halt. Re-run after the user installs missing tools.
+First, initialize git submodules (Hugo themes ship as submodules):
+
+```bash
+git submodule update --init --recursive
+```
+
+Then run `bash scripts/check-deps.sh`. If it exits non-zero, surface the printed install hints and halt. Re-run after the user installs missing tools.
 
 ## Step 1: Domain
 

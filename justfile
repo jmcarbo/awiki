@@ -21,7 +21,7 @@ reindex:
     bash scripts/qmd-index.sh
 
 search query:
-    qmd search "{{query}}"
+    qmd --index .qmd/index.sqlite search "{{query}}"
 
 log action *message:
     bash scripts/log-append.sh {{action}} {{message}}

@@ -5,10 +5,12 @@ A template repository for building personal LLM-maintained wikis. Domain-agnosti
 ## Quick start
 
 ```bash
-git clone <this-repo> mywiki
+git clone --recurse-submodules <this-repo> mywiki
 cd mywiki
 just                          # see available commands
 ```
+
+(If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive` to fetch the Hugo theme.)
 
 Open your agent (Claude Code, Codex, OpenCode) in this directory. Say:
 

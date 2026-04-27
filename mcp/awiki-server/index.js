@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { listSynthPlugins } from "./lib/list-plugins.js";
 import { validate } from "./lib/validate-scope.js";
 import { runSynthesize, runFinalize, assertManifestUnderPluginDir } from "./lib/synthesize.js";
+import { sanitizeCapture, SanitizeError } from "./lib/sanitize-capture.js";
+import { LockTimeoutError } from "./lib/lock.js";
 
 const REPO_ROOT = process.cwd();
 const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -73,6 +75,18 @@ const TOOLS = [
       additionalProperties: false,
       required: ["topic_slug"],
       properties: { topic_slug: { type: "string" } },
+    },
+  },
+  {
+    name: "capture",
+    description: "Sanitize and append a free-text capture to content/inbox.md via scripts/capture.sh. Returns {appended, line, timestamp, sanitizations_applied}. Hard-reject patterns (embedded newline, control char, checkbox prefix at start) return an MCP error.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["text"],
+      properties: {
+        text: { type: "string", maxLength: 4000 },
+      },
     },
   },
 ];
@@ -160,6 +174,51 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const result = runFinalize({ repoRoot: REPO_ROOT, topicSlug: topic_slug });
         out = JSON.stringify(result, null, 2);
+        break;
+      }
+      case "capture": {
+        if (typeof args?.text !== "string") {
+          throw new Error("capture: text must be a string");
+        }
+        // 1. Sanitize. Hard rejects throw SanitizeError → MCP error.
+        let sanitized;
+        try {
+          sanitized = sanitizeCapture(args.text);
+        } catch (e) {
+          if (e instanceof SanitizeError) {
+            throw new Error(`capture rejected: ${e.kind}: ${e.message}`);
+          }
+          throw e;
+        }
+        // 2. Build the line. ISO-8601 UTC with second precision.
+        const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const line = `- ${timestamp} ${sanitized.text}`;
+        // 3. Shell out to scripts/capture.sh under flock -x. capture.sh takes
+        // its own lock (phase 18a), reads text from stdin, and appends with
+        // its own ISO-8601 timestamp. We pass AWIKI_CAPTURE_PRESANITIZED=1
+        // so it skips its in-script neutralization (we already did it).
+        // capture.sh always runs hard-reject checks unconditionally.
+        try {
+          execFileSync("bash", ["scripts/capture.sh"], {
+            cwd: REPO_ROOT,
+            input: sanitized.text,
+            encoding: "utf8",
+            env: { ...process.env, AWIKI_CAPTURE_PRESANITIZED: "1" },
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`capture: lock timeout after 30s`);
+          }
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          throw new Error(`capture.sh failed: ${stderr.trim() || e.message}`);
+        }
+        out = JSON.stringify({
+          appended: true,
+          line,
+          timestamp,
+          sanitizations_applied: sanitized.applied,
+        });
         break;
       }
       default:

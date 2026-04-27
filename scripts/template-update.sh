@@ -127,6 +127,61 @@ export -f phase_index should_skip_phase
 
 # === Subcommand dispatch (recovery flows) ===
 
+# --re-pin <commit>: rollback escape hatch. Validate commit upstream, drop orphan cache,
+# rebuild target ancestor cache, write new pin to template.json. Refuses if pending-prompts
+# or state file present.
+if [[ -n "$RE_PIN" ]]; then
+  if [[ -d "$REPO_ROOT/.awiki/pending-prompts" ]] && [[ -n "$(ls -A "$REPO_ROOT/.awiki/pending-prompts" 2>/dev/null)" ]]; then
+    echo "halt: pending-prompts present — resolve before --re-pin" >&2
+    exit 1
+  fi
+  if [[ -f "$REPO_ROOT/.awiki/template-cache/_fetch/.update-state.json" ]]; then
+    echo "halt: update in progress — run --abort first" >&2
+    exit 1
+  fi
+
+  ORIGINAL_REPO=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" original_repo)
+  TMP_VALIDATE=$(mktemp -d)
+  REACHED=0
+  if [[ -d "$ORIGINAL_REPO/.git" ]] || [[ "$ORIGINAL_REPO" == http* ]]; then
+    if ! git clone --depth 50 "$ORIGINAL_REPO" "$TMP_VALIDATE/orig" >/dev/null 2>&1; then
+      echo "halt: cannot reach $ORIGINAL_REPO. Required to validate --re-pin commit." >&2
+      rm -rf "$TMP_VALIDATE"
+      exit 1
+    fi
+    REACHED=1
+    if ! git -C "$TMP_VALIDATE/orig" cat-file -e "$RE_PIN^{commit}" 2>/dev/null; then
+      # Try fetching the specific commit (may fail on shallow clones for arbitrary SHAs).
+      if ! git -C "$TMP_VALIDATE/orig" fetch --depth 50 origin "$RE_PIN" >/dev/null 2>&1 \
+           || ! git -C "$TMP_VALIDATE/orig" cat-file -e "$RE_PIN^{commit}" 2>/dev/null; then
+        echo "halt: commit $RE_PIN not resolvable in $ORIGINAL_REPO" >&2
+        rm -rf "$TMP_VALIDATE"
+        exit 1
+      fi
+    fi
+  fi
+
+  # Drop orphaned cache for previous pin.
+  CUR_COMMIT=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
+  if [[ -n "$CUR_COMMIT" && "$CUR_COMMIT" != "$RE_PIN" ]]; then
+    rm -rf "$REPO_ROOT/.awiki/template-cache/$CUR_COMMIT"
+  fi
+
+  # Rebuild target ancestor cache.
+  TARGET_CACHE="$REPO_ROOT/.awiki/template-cache/$RE_PIN"
+  if [[ ! -d "$TARGET_CACHE" ]] && [[ $REACHED -eq 1 ]]; then
+    git -C "$TMP_VALIDATE/orig" checkout -q "$RE_PIN" 2>/dev/null || true
+    mkdir -p "$TARGET_CACHE"
+    git -C "$TMP_VALIDATE/orig" archive --format=tar HEAD | tar -x -C "$TARGET_CACHE"
+  fi
+  rm -rf "$TMP_VALIDATE"
+
+  bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" commit "$RE_PIN" >/dev/null
+  echo "info: re-pinned to $RE_PIN; cache rebuilt + orphan dropped."
+  echo "info: if you reverted the merge, content is back to pre-update state."
+  exit 0
+fi
+
 # --continue: resume an in-progress update from the state file.
 if [[ $CONTINUE -eq 1 ]]; then
   FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"

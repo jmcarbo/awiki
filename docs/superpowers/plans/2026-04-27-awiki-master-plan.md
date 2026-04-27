@@ -30,15 +30,22 @@ Each phase ships independently with its own branch, tests, and merge gate. Phase
 | 10 | Auto-deploy templates | [`phase-10-auto-deploy`](./2026-04-27-phase-10-auto-deploy.md) | 3, 5 |
 | 11 | Multimodal ingest helpers | [`phase-11-multimodal-ingest`](./2026-04-27-phase-11-multimodal-ingest.md) | 2, 5 |
 | 12 | Polish & examples | [`phase-12-polish-examples`](./2026-04-27-phase-12-polish-examples.md) | all prior |
+| 13 | Synth core (NotebookLM-style synthesis layer) | [`phase-13-synth-core`](./2026-04-27-phase-13-synth-core.md) | 1, 2, 3, 6, 12 |
+| 14 | Synth lint + remaining plugins | [`phase-14-synth-lint-plugins`](./2026-04-27-phase-14-synth-lint-plugins.md) | 13 |
+| 15 | Synth refinement + MCP integration | [`phase-15-synth-refinement-mcp`](./2026-04-27-phase-15-synth-refinement-mcp.md) | 13, 14, 8 |
+
+Phases 13-15 are governed by a separate spec: [`2026-04-27-synthesis-generator-design.md`](../specs/2026-04-27-synthesis-generator-design.md).
 
 ## Recommended ordering
 
-- Strict dependency order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12.
+- Strict dependency order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15.
 - Parallelizable batches once 1+2 land:
   - Batch A: 3, 4, 5, 9 (no cross-dependencies after 1-2).
   - Batch B (after batch A merged): 6 (needs 3), 7 (needs 2+3), 11 (needs 2+5).
   - Batch C: 8 (needs 2+4+6), 10 (needs 3+5).
-  - Final: 12.
+  - Final v1: 12.
+- Synthesis extension (post-v1, separate spec):
+  - 13 (synth core), then 14 (lint + remaining plugins), then 15 (refinement + MCP). Strict 13 → 14 → 15.
 
 ## How to use
 

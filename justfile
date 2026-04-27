@@ -138,3 +138,19 @@ template-init:
                                    --ref "${TEMPLATE_REF:-main}" \
                                    --version "${TEMPLATE_VERSION:?TEMPLATE_VERSION required}" \
                                    --commit "${TEMPLATE_COMMIT:?TEMPLATE_COMMIT required}"
+
+# === template (added Phase 09) ===
+template-update *args:
+    bash scripts/template-update.sh {{args}}
+
+template-status:
+    bash scripts/template-update.sh --status
+
+template-gc:
+    bash scripts/template-update.sh --gc
+
+bootstrap-step id:
+    bash scripts/template-step.sh {{id}}
+
+template-retrofit:
+    bash scripts/template-retrofit.sh

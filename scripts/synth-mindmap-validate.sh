@@ -58,8 +58,8 @@ if [[ "$first_line" != mindmap* ]]; then
   exit 5
 fi
 # Balance brace check — Mermaid mindmap uses (), [], {{}} for shapes.
-open_count=$(grep -oE '[\(\[\{]' "$TMP" | wc -l | tr -d ' ')
-close_count=$(grep -oE '[\)\]\}]' "$TMP" | wc -l | tr -d ' ')
+open_count=$(tr -dc '([{' < "$TMP" | wc -c | tr -d ' ')
+close_count=$(tr -dc ')]}' < "$TMP" | wc -c | tr -d ' ')
 if [[ "$open_count" -ne "$close_count" ]]; then
   echo "ERROR: unbalanced shape brackets in mermaid block ($open_count open, $close_count close)" >&2
   exit 6

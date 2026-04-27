@@ -316,6 +316,60 @@ PY
   [[ "$output" == *"s1"* ]]
 }
 
+FIXTURES="tests/fixtures/wiki-synth"
+
+@test "mindmap post-hook accepts valid block (regex fallback if mmdc absent)" {
+  run bash "$REPO_ROOT/scripts/synth-mindmap-validate.sh" -- "$REPO_ROOT/$FIXTURES/content/synthesis/mindmap-valid.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "mindmap post-hook rejects invalid block" {
+  run bash "$REPO_ROOT/scripts/synth-mindmap-validate.sh" -- "$REPO_ROOT/$FIXTURES/content/synthesis/mindmap-invalid.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "mindmap post-hook test path skips when mmdc absent (regex fallback exercised)" {
+  if command -v mmdc >/dev/null 2>&1; then
+    skip "mmdc present — regex-fallback path not exercisable in this env"
+  fi
+  run bash "$REPO_ROOT/scripts/synth-mindmap-validate.sh" -- "$REPO_ROOT/$FIXTURES/content/synthesis/mindmap-valid.md"
+  [ "$status" -eq 0 ]
+}
+
+setup_mindmap_fixture() {
+  # Drop the valid mindmap fixture into the test wiki under a fresh slug so
+  # synth.sh finalize can act on it. Stub lint.sh so finalize doesn't S2-fail
+  # on the mindmap manifest's section requirements (the fixture has them but
+  # this isolates the post-hook gate test).
+  mkdir -p content/synthesis
+  cp "$REPO_ROOT/$FIXTURES/content/synthesis/mindmap-valid.md" content/synthesis/mindmap-fixture.md
+  # Sources s1/s2/s3 already exist in fixture content; keep them.
+}
+
+@test "synth post-hook is skipped when ALLOW_PLUGIN_POST_HOOKS=0" {
+  setup_mindmap_fixture
+  rm -f .awiki/post-hook-ran
+  AWIKI_REPO_ROOT="$WORK" ALLOW_PLUGIN_POST_HOOKS=0 \
+    bash scripts/synth.sh finalize -- mindmap-fixture
+  [ ! -f .awiki/post-hook-ran ]
+}
+
+@test "synth post-hook runs when ALLOW_PLUGIN_POST_HOOKS=1" {
+  setup_mindmap_fixture
+  rm -f .awiki/post-hook-ran
+  AWIKI_REPO_ROOT="$WORK" ALLOW_PLUGIN_POST_HOOKS=1 \
+    bash scripts/synth.sh finalize -- mindmap-fixture
+  [ -f .awiki/post-hook-ran ]
+}
+
+@test "synth.sh finalize on invalid mindmap exits 6 when ALLOW_PLUGIN_POST_HOOKS=1" {
+  mkdir -p content/synthesis
+  cp "$REPO_ROOT/$FIXTURES/content/synthesis/mindmap-invalid.md" content/synthesis/mindmap-bad.md
+  run env AWIKI_REPO_ROOT="$WORK" ALLOW_PLUGIN_POST_HOOKS=1 \
+    bash scripts/synth.sh finalize -- mindmap-bad
+  [ "$status" -eq 6 ]
+}
+
 @test "synth.sh new mindmap produces manifest-conformant scaffold" {
   run bash scripts/synth.sh new mindmap mindmap-test --tag=memex
   [ "$status" -eq 0 ]

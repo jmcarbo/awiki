@@ -33,8 +33,14 @@ Each phase ships independently with its own branch, tests, and merge gate. Phase
 | 13 | Synth core (NotebookLM-style synthesis layer) | [`phase-13-synth-core`](./2026-04-27-phase-13-synth-core.md) | 1, 2, 3, 6, 12 |
 | 14 | Synth lint + remaining plugins | [`phase-14-synth-lint-plugins`](./2026-04-27-phase-14-synth-lint-plugins.md) | 13 |
 | 15 | Synth refinement + MCP integration | [`phase-15-synth-refinement-mcp`](./2026-04-27-phase-15-synth-refinement-mcp.md) | 13, 14, 8 |
+| 16 | Task layer — schema + scaffold | [`phase-16-task-schema-scaffold`](./2026-04-27-phase-16-task-schema-scaffold.md) | 1, 2, 3, 6 |
+| 17 | Task layer — scanner + agenda + mechanical lint | [`phase-17-task-scanner-agenda`](./2026-04-27-phase-17-task-scanner-agenda.md) | 16 |
+| 18a | Task layer — triage + recur + semantic lint (bash) | [`phase-18a-task-triage-recur-bash`](./2026-04-27-phase-18a-task-triage-recur-bash.md) | 16, 17 |
+| 18b | Task layer — MCP server (Node) | [`phase-18b-task-mcp-server`](./2026-04-27-phase-18b-task-mcp-server.md) | 16, 17, 18a, 8 |
+| 19 | Task layer — review + polish | [`phase-19-task-review-polish`](./2026-04-27-phase-19-task-review-polish.md) | 18a, 18b |
 
 Phases 13-15 are governed by a separate spec: [`2026-04-27-synthesis-generator-design.md`](../specs/2026-04-27-synthesis-generator-design.md).
+Phases 16-19 are governed by a separate spec: [`2026-04-27-task-layer-design.md`](../specs/2026-04-27-task-layer-design.md), with their own master plan: [`2026-04-27-task-layer-master-plan.md`](./2026-04-27-task-layer-master-plan.md).
 
 ## Recommended ordering
 
@@ -46,6 +52,8 @@ Phases 13-15 are governed by a separate spec: [`2026-04-27-synthesis-generator-d
   - Final v1: 12.
 - Synthesis extension (post-v1, separate spec):
   - 13 (synth core), then 14 (lint + remaining plugins), then 15 (refinement + MCP). Strict 13 → 14 → 15.
+- Task-layer extension (post-v1, separate spec):
+  - 16 (schema + scaffold), then 17 (scanner + agenda + mechanical lint), then 18a (bash triage / recur / semantic lint), then 18b (Node MCP server), then 19 (review + polish). Strict 16 → 17 → 18a → 18b → 19. Independent of phases 13-15; can be merged in either order, but neither depends on the other.
 
 ## How to use
 

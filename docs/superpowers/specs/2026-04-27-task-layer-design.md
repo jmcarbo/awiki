@@ -847,7 +847,7 @@ these rules.
   (no shell interpolation).
 - **Per-arg validation at the MCP boundary**, applied before any
   filesystem touch:
-  - `id`: `^[a-z0-9~-]{1,32}$` (allows `inbox-...`, `file-...`, plain
+  - `id`: `^[a-z0-9_~-]{1,32}$` (allows `inbox-...`, `file-...`, plain
     block-ID, recurrence-chain IDs).
   - `outcome` ∈ exact enum (no superset, no case variants).
   - `project_slug`: `^[a-z0-9_][a-z0-9_-]{0,63}$` (underscore allowed
@@ -1041,10 +1041,20 @@ risks:
 
 No new tool requirements beyond v1. MCP server extension reuses Node
 20+. Scanner / agenda / recur / triage scripts use the bash 4+ already
-required by v1. `flock` is required (POSIX util-linux on Linux,
-`flock` from Homebrew on macOS — already present on macOS via
-`util-linux` / `coreutils` in most awiki user setups; v1's
-dependency-check is extended in phase 16 to verify it).
+required by v1.
+
+**`flock` is required.** Linux: ships with `util-linux` (preinstalled
+on every common distro). macOS: NOT shipped by default. Install via
+`brew install util-linux`; `util-linux` is keg-only on Homebrew, so
+the user must explicitly add the binary to PATH:
+
+```sh
+brew install util-linux
+echo 'export PATH="$(brew --prefix util-linux)/bin:$PATH"' >> ~/.zshrc
+```
+
+v1's dependency-check (extended in phase 16) detects missing `flock`
+and prints these install hints, halting bootstrap with a clear error.
 
 ## Implementation Phases
 

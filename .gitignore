@@ -42,3 +42,6 @@ content/synthesis/.staged/*
 .awiki/last-review
 .awiki/task-count
 .awiki/maps/
+
+# === git worktrees ===
+.worktrees/

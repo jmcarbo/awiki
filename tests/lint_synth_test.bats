@@ -31,3 +31,39 @@ run_synth_lint_file() {
   run run_synth_lint_file "$FIXTURES/synthesis/s2-missing-evidence.md"
   [[ "$output" == *"LINT|ERROR"*"S2"*"Evidence"* ]]
 }
+
+@test "S3: smart-quote variant matches after normalization" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-smart-quote.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: NFC vs NFD variant matches after normalization" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-nfc-vs-nfd.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: NBSP-spaced quote matches after normalization" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-nbsp.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: em-dash inside quote body matches after normalization" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-em-dash.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: ZWSP-injected source matches after normalization" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-zwsp.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: multi-paragraph quote matches after collapse" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-multi-paragraph.md"
+  [[ "$output" != *"LINT|ERROR"*"S3"* ]]
+}
+
+@test "S3: hallucinated quote → error with fuzzy suggestion" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s3-hallucination.md"
+  [[ "$output" == *"LINT|ERROR"*"S3"*"hallucinat"* || "$output" == *"LINT|ERROR"*"S3"*"not found"* ]]
+  [[ "$output" == *"suggestion:"* ]]
+}

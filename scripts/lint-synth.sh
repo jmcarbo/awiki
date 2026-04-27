@@ -115,6 +115,103 @@ synth_check_s2() {
   done <<<"$required"
 }
 
+# --- S3: evidence quote substring -------------------------------------------
+# Resolve a slug to a source path via <wiki-root>/.awiki/maps/slug-to-path.tsv.
+# Wiki root is derived from content_dir (assumes content_dir = <wiki-root>/content).
+synth_resolve_slug() {
+  local slug="$1"
+  local content_dir="${2:-content}"
+  local wiki_root="${content_dir%/content}"
+  [[ "$wiki_root" = "$content_dir" ]] && wiki_root="$(dirname "$content_dir")"
+  local map="$wiki_root/.awiki/maps/slug-to-path.tsv"
+  if [[ -f "$map" ]]; then
+    local rel
+    rel=$(awk -F'\t' -v s="$slug" '$1==s{print $2; exit}' "$map")
+    if [[ -n "$rel" ]]; then
+      if [[ "$rel" = /* ]]; then
+        echo "$rel"
+      else
+        echo "$wiki_root/$rel"
+      fi
+      return
+    fi
+  fi
+  # Fallback: name-based lookup under the content dir.
+  find "$content_dir" -type f -name "$slug.md" 2>/dev/null | head -1
+}
+
+synth_check_s3() {
+  local page="$1"
+  local content_dir="${2:-content}"
+  local wiki_root="${content_dir%/content}"
+  [[ "$wiki_root" = "$content_dir" ]] && wiki_root="$(dirname "$content_dir")"
+  local map="$wiki_root/.awiki/maps/slug-to-path.tsv"
+
+  # Slice the generated region.
+  local region_file
+  region_file=$(mktemp)
+  awk '
+    /^<!-- BEGIN GENERATED .* -->$/ { in_region=1; next }
+    /^<!-- END GENERATED -->$/      { in_region=0 }
+    in_region { print }
+  ' "$page" > "$region_file"
+
+  # Iterate evidence quote lines: > "..." — [[slug]]
+  # The em-dash is U+2014 LITERAL — match exactly.
+  local line slug quote_raw
+  while IFS= read -r line; do
+    # Capture the quote body and slug. Match an em-dash literal.
+    if [[ "$line" =~ ^\>[[:space:]]+\"(.+)\"[[:space:]]+—[[:space:]]+\[\[([a-z0-9][a-z0-9-]*)\]\][[:space:]]*$ ]]; then
+      quote_raw="${BASH_REMATCH[1]}"
+      slug="${BASH_REMATCH[2]}"
+    else
+      continue
+    fi
+
+    local source_path
+    source_path=$(synth_resolve_slug "$slug" "$content_dir")
+    if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+      echo "LINT|ERROR|$page|S3: evidence cites unresolvable slug: $slug"
+      ERRORS=$((ERRORS + 1))
+      continue
+    fi
+
+    # Materialize quote to a tmpfile (no argv text interpolation).
+    local quote_tmp rewrite_tmp norm_quote_tmp norm_source_tmp
+    quote_tmp=$(mktemp); rewrite_tmp=$(mktemp)
+    norm_quote_tmp=$(mktemp); norm_source_tmp=$(mktemp)
+    printf '%s' "$quote_raw" > "$quote_tmp"
+
+    # Rewrite [[other-slug]] inside the quote to title text.
+    if [[ -f "$map" ]]; then
+      python3 scripts/lint-synth-rewrite-wikilinks.py "--map=$map" -- "$quote_tmp" > "$rewrite_tmp"
+    else
+      python3 scripts/lint-synth-rewrite-wikilinks.py -- "$quote_tmp" > "$rewrite_tmp"
+    fi
+
+    # Normalize.
+    python3 scripts/lint-synth-normalize.py -- --quote  "$rewrite_tmp"  > "$norm_quote_tmp"
+    python3 scripts/lint-synth-normalize.py -- --source "$source_path" > "$norm_source_tmp"
+
+    if grep -F -q -f "$norm_quote_tmp" "$norm_source_tmp"; then
+      :  # OK
+    else
+      local suggestion
+      suggestion=$(python3 scripts/lint-synth-fuzzy.py -- "$source_path" "$norm_quote_tmp" 2>/dev/null || true)
+      if [[ -n "$suggestion" ]]; then
+        echo "LINT|ERROR|$page|S3: evidence quote not found in [[$slug]] (suggestion: $suggestion)"
+      else
+        echo "LINT|ERROR|$page|S3: evidence quote not found in [[$slug]] (hallucinated or paraphrased; no close match)"
+      fi
+      ERRORS=$((ERRORS + 1))
+    fi
+
+    rm -f "$quote_tmp" "$rewrite_tmp" "$norm_quote_tmp" "$norm_source_tmp"
+  done < "$region_file"
+
+  rm -f "$region_file"
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -132,7 +229,8 @@ synth_lint_file() {
 
   synth_check_s1 "$page" || return 0  # bail on broken markers — downstream rules need them
   synth_check_s2 "$page"
-  # synth_check_s3..S9 added in subsequent tasks.
+  synth_check_s3 "$page" "$content_dir"
+  # synth_check_s4..S9 added in subsequent tasks.
 }
 
 synth_lint_dir() {

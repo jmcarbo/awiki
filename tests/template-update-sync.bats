@@ -49,3 +49,42 @@ EOF
   [ "$status" -ne 0 ]
   grep -q '<<<<<<<' "$TMP/WIKI.md"
 }
+
+@test "sync apply-attributes: encryption-flip halts without --accept-attribute-changes" {
+  cd "$TMP"
+  echo "" > .gitattributes
+  git add .gitattributes
+  git -c user.email=a@b -c user.name=t commit -q -m init-attrs
+  TMP_NEW=$(mktemp -d)
+  cp -R "$REPO_ROOT/tests/fixtures/template-update/v0/." "$TMP_NEW/"
+  printf 'secrets/* filter=git-crypt diff=git-crypt\n' > "$TMP_NEW/.gitattributes"
+  mkdir -p secrets && echo k > secrets/key.age
+  git add secrets && git -c user.email=a@b -c user.name=t commit -q -m add-secrets
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-attributes \
+    --old-tree "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --new-tree "$TMP_NEW" \
+    --user-tree "$TMP" --rel .gitattributes
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "Encryption pattern change"
+  rm -rf "$TMP_NEW"
+}
+
+@test "sync apply-attributes: encryption-flip proceeds with --accept-attribute-changes" {
+  cd "$TMP"
+  echo "" > .gitattributes
+  git add .gitattributes
+  git -c user.email=a@b -c user.name=t commit -q -m init-attrs
+  TMP_NEW=$(mktemp -d)
+  cp -R "$REPO_ROOT/tests/fixtures/template-update/v0/." "$TMP_NEW/"
+  printf 'secrets/* filter=git-crypt diff=git-crypt\n' > "$TMP_NEW/.gitattributes"
+  mkdir -p secrets && echo k > secrets/key.age
+  git add secrets && git -c user.email=a@b -c user.name=t commit -q -m add-secrets
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-attributes \
+    --old-tree "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --new-tree "$TMP_NEW" \
+    --user-tree "$TMP" --rel .gitattributes \
+    --accept-attribute-changes
+  [ "$status" -eq 0 ]
+  grep -q 'filter=git-crypt' .gitattributes
+  rm -rf "$TMP_NEW"
+}

@@ -204,3 +204,27 @@ EOF2
   run grep -c -F 'content/inbox.md filter=git-crypt diff=git-crypt' .gitattributes
   [[ "$output" == "1" ]]
 }
+
+@test "task-init prints smoke instructions on success" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"just capture"* ]]
+  [[ "$output" == *"phase 17"* || "$output" == *"scanner"* ]]
+}
+
+@test "task-init reports first-run vs noop on rerun (when log-append present)" {
+  # Provide a stub log-append and an empty log file so we can grep.
+  cat > scripts/log-append.sh <<'STUB'
+#!/usr/bin/env bash
+shift  # drop --
+echo "LOG|$*" >> "${AWIKI_LOG_FILE:-content/log.md}"
+STUB
+  chmod +x scripts/log-append.sh
+  printf -- "---\ntype: log\n---\n" > content/log.md
+  AWIKI_LOG_FILE="content/log.md" bash scripts/task-init.sh
+  AWIKI_LOG_FILE="content/log.md" bash scripts/task-init.sh
+  run grep 'task-init enabled' content/log.md
+  [ "$status" -eq 0 ]
+  run grep 'task-init noop' content/log.md
+  [ "$status" -eq 0 ]
+}

@@ -236,12 +236,38 @@ step_encryption() {
 
 main() {
   note "start"
+
+  local first_run=1
+  [[ -f "$TASK_COUNT" ]] && first_run=0
+
   step_pages
   step_wiki_md
   step_encryption
   step_config
   step_state_files
-  note "done"
+
+  # Logging (best-effort; no failure if log-append is absent).
+  if [[ -x scripts/log-append.sh ]]; then
+    if [[ $first_run -eq 1 ]]; then
+      bash scripts/log-append.sh -- task-init "enabled" >/dev/null 2>&1 || true
+    else
+      bash scripts/log-append.sh -- task-init "noop" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # Smoke instructions.
+  cat <<HINTS
+TASK-INIT|done
+
+Smoke test:
+  just capture "pick up groceries"
+  cat content/inbox.md   # should show your line below the frontmatter
+
+Scanner + agenda generation arrives in phase 17. Triage + recurrence
+arrive in phase 18.
+
+Pre-commit hook installer is deferred to phase 19 (encrypt-init coupling).
+HINTS
 }
 
 main "$@"

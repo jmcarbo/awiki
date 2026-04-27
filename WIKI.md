@@ -55,6 +55,13 @@ draft: false
 8. Update affected section indexes' descriptions if and only if the section's purpose materially changed.
 9. Verify no broken wikilinks introduced (run `just lint` if many pages touched).
 
+**Vision-aware ingest:** when a source contains images, the agent operates in two passes:
+1. **Text pass:** Read the markdown body alone via the Read tool.
+2. **Image pass:** Use the Read tool to view referenced images one at a time. Claude Code handles `![alt](path.png)` markdown image refs natively; for Codex / OpenCode use their equivalent vision tool.
+3. **Integrate:** combine notes from both passes when writing `content/sources/<slug>.md` and any entity/concept pages affected.
+
+No script needed — the agent decides when image content is load-bearing. For dense visual sources (slides, infographics), the agent should default to image-pass; for text-with-decorative-images, text-pass alone is sufficient.
+
 ### 4.2 Query
 
 1. Read `content/catalog.md`.

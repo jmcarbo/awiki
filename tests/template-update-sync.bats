@@ -20,3 +20,32 @@ teardown() { rm -rf "$TMP"; }
   [ -f "$TMP/scripts/new-helper.sh" ]
   diff "$V1/scripts/new-helper.sh" "$TMP/scripts/new-helper.sh"
 }
+
+@test "sync apply-three-way: clean merge with no user changes" {
+  cd "$TMP"
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-three-way \
+    --old-tree "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --new-tree "$V1" \
+    --user-tree "$TMP" \
+    --rel WIKI.md
+  [ "$status" -eq 0 ]
+  ! grep -q '<<<<<<<' "$TMP/WIKI.md"
+  grep -q '## Added in v1' "$TMP/WIKI.md"
+}
+
+@test "sync apply-three-way: conflict leaves markers + nonzero" {
+  cd "$TMP"
+  cat > WIKI.md <<'EOF'
+# Wiki schema (user)
+USER EDITED
+EOF
+  git add WIKI.md
+  git -c user.email=a@b -c user.name=t commit -q -m user-edit
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-three-way \
+    --old-tree "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --new-tree "$V1" --user-tree "$TMP" --rel WIKI.md
+  [ "$status" -ne 0 ]
+  grep -q '<<<<<<<' "$TMP/WIKI.md"
+}

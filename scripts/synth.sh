@@ -406,6 +406,102 @@ cmd_new() {
   echo "SYNTH-NEW|target=$target|plugin=$plugin|sources=$nslugs|scope_hash=$scope_hash" >&2
 }
 
+# Validate marker integrity. Returns 0 on OK, prints reason and returns 5 on failure.
+synth_check_markers() {
+  local page="$1"
+  local begins; begins="$(grep -c '^<!-- BEGIN GENERATED ' "$page" || true)"
+  local ends;   ends="$(grep -c '^<!-- END GENERATED -->' "$page" || true)"
+  if [[ "$begins" -ne 1 || "$ends" -ne 1 ]]; then
+    echo "ERROR: marker integrity failure: BEGIN=$begins END=$ends" >&2
+    return 5
+  fi
+  local b_line e_line
+  b_line="$(grep -n '^<!-- BEGIN GENERATED ' "$page" | head -1 | cut -d: -f1)"
+  e_line="$(grep -n '^<!-- END GENERATED -->' "$page" | head -1 | cut -d: -f1)"
+  if [[ "$b_line" -gt "$e_line" ]]; then
+    echo "ERROR: BEGIN marker after END marker" >&2
+    return 5
+  fi
+  return 0
+}
+
+# Rewrite frontmatter scalars / list fields in-place.
+synth_fm_set_scalar() {
+  local page="$1" key="$2" value="$3"
+  awk -v k="$key" -v v="$value" '
+    BEGIN{c=0; done=0}
+    /^---$/ {c++; print; next}
+    c==1 && index($0, k":")==1 && done==0 { print k": "v; done=1; next }
+    {print}
+  ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+}
+
+synth_fm_set_sources() {
+  local page="$1" slugs="$2"
+  local list="["
+  local first=1
+  while IFS= read -r slug; do
+    [[ -z "$slug" ]] && continue
+    if [[ $first -eq 1 ]]; then list+="\"[[$slug]]\""; first=0; else list+=", \"[[$slug]]\""; fi
+  done <<< "$slugs"
+  list+="]"
+  awk -v v="$list" '
+    BEGIN{c=0; done=0}
+    /^---$/ {c++; print; next}
+    c==1 && /^sources:/ && done==0 { print "sources: " v; done=1; next }
+    {print}
+  ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+}
+
+synth_fm_set_scope_hash_in_marker() {
+  local page="$1" hash="$2"
+  awk -v h="$hash" '
+    /^<!-- BEGIN GENERATED plugin=/ {
+      sub(/scope_hash=[0-9a-f]+/, "scope_hash=" h)
+    }
+    {print}
+  ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+}
+
+cmd_finalize() {
+  if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh finalize <slug>"; fi
+  local slug="$1"; require_slug "$slug" "synthesis-page-slug"
+
+  local live="$SYNTH_DIR/$slug.md"
+  local staged="$STAGED_DIR/$slug.md"
+  local target=""
+  if [[ -f "$staged" ]]; then target="$staged"; else target="$live"; fi
+  [[ -f "$target" ]] || { EXIT_CODE=1 die "synthesis page not found: $target"; }
+
+  if ! synth_check_markers "$target"; then EXIT_CODE=5 die "marker integrity failed"; fi
+
+  # Scoped lint (phase 13: only marker + required-sections + slug existence;
+  # full S1-S9 lands in phase 14).
+  if ! bash "$REPO_ROOT/scripts/lint.sh" --only=synth --file="$target" 2>/dev/null; then
+    EXIT_CODE=6 die "scoped lint failed for $target"
+  fi
+
+  # Re-resolve scope, recompute hash, populate sources:.
+  synth_read_scope "$target"
+  if [[ "$target" == */private/* ]]; then SCOPE_TARGET_PRIVATE=1; else SCOPE_TARGET_PRIVATE=0; fi
+  local slugs; slugs="$(synth_resolve_to_slugs)"
+  local hash;  hash="$(synth_scope_hash "$slugs")"
+  synth_fm_set_scope_hash_in_marker "$target" "$hash"
+  synth_fm_set_sources "$target" "$slugs"
+  local now_utc; now_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  synth_fm_set_scalar "$target" "last_generated" "$now_utc"
+
+  # If we operated on a staged file, leave it staged; user runs `accept-stage`.
+  bash "$REPO_ROOT/scripts/log-append.sh" synth -- "$(synth_fm_field "$target" plugin) $slug"
+
+  # Bump ingest counter (synthesis counts toward auto-lint cadence).
+  mkdir -p .awiki
+  local cnt=0; [[ -f .awiki/ingest-count ]] && cnt="$(cat .awiki/ingest-count)"
+  echo "$((cnt + 1))" > .awiki/ingest-count
+
+  echo "SYNTH-FINALIZE|target=$target|sources=$(printf -- '%s' "$slugs" | grep -c . || true)|scope_hash=$hash" >&2
+}
+
 cmd_resolve() {
   if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh resolve <slug>"; fi
   local slug="$1"; require_slug "$slug" "synthesis-page-slug"
@@ -435,7 +531,8 @@ USAGE
     list) cmd_list "$@" ;;
     resolve) cmd_resolve "$@" ;;
     new) cmd_new "$@" ;;
-    regen|accept-stage|finalize|refine)
+    finalize) cmd_finalize "$@" ;;
+    regen|accept-stage|refine)
       EXIT_CODE=1 die "subcommand '$sub' not yet implemented"
       ;;
     *) EXIT_CODE=1 die "unknown subcommand: $sub" ;;

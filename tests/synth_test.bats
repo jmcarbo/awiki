@@ -151,3 +151,59 @@ EOF2
   run bash scripts/synth.sh new briefing -bad-topic --tag=memex
   [ "$status" -eq 1 ]
 }
+
+@test "synth finalize stamps last_generated and populates sources" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  # Simulate agent filling the region.
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/memex-briefing.md")
+text = p.read_text()
+filled = text.replace(
+  "<!-- BEGIN GENERATED plugin=briefing scope_hash=",
+  "<!-- BEGIN GENERATED plugin=briefing scope_hash=",
+)
+# Insert dummy body between markers.
+filled = filled.replace(
+  "<!-- END GENERATED -->",
+  "## TL;DR\n- claim [[s1]]\n## Key Findings\n- finding [[s2]]\n## Open Questions\n- q [[s3]]\n## Evidence\n> \"associative\" — [[s1]]\n<!-- END GENERATED -->",
+)
+p.write_text(filled)
+PY
+  run bash scripts/synth.sh finalize memex-briefing
+  [ "$status" -eq 0 ]
+  run grep '^last_generated: 2' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+  run grep -E '^sources: \[.*s1.*\]' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+}
+
+@test "synth finalize exits 5 on missing END marker" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/memex-briefing.md")
+p.write_text(p.read_text().replace("<!-- END GENERATED -->", ""))
+PY
+  run bash scripts/synth.sh finalize memex-briefing
+  [ "$status" -eq 5 ]
+}
+
+@test "synth finalize prefers .staged file when present" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  cp content/synthesis/memex-briefing.md content/synthesis/.staged/memex-briefing.md
+  # Mutate ONLY the staged file.
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/.staged/memex-briefing.md")
+p.write_text(p.read_text().replace(
+  "<!-- END GENERATED -->",
+  "## TL;DR\n- s [[s1]]\n## Key Findings\n- k [[s2]]\n## Open Questions\n- q [[s3]]\n## Evidence\n> \"q\" — [[s1]]\n<!-- END GENERATED -->",
+))
+PY
+  run bash scripts/synth.sh finalize memex-briefing
+  [ "$status" -eq 0 ]
+  # Live page is unchanged (still has empty body).
+  run grep '## TL;DR' content/synthesis/memex-briefing.md
+  [ "$status" -ne 0 ]
+}

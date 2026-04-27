@@ -117,3 +117,40 @@ EOF2
   MTIME_AFTER="$(stat -f %m "$PAGE" 2>/dev/null || stat -c %Y "$PAGE")"
   [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]
 }
+
+@test "lint flags orphan entity" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/island.md" <<E
+---
+title: "Island"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body content with sufficient length, but no inbound wikilinks anywhere.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|INFO"*"island.md"*"orphan"* ]]
+}
+
+@test "lint exempts section-index from orphan check" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/_index.md" <<E
+---
+title: "Entities"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" != *"LINT|INFO"*"_index.md"*"orphan"* ]]
+}

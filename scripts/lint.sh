@@ -121,6 +121,7 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T7
   awiki_lint_task_rule_T8   "$actions_tsv"
   awiki_lint_task_rule_T9   "$actions_tsv"
+  awiki_lint_task_rule_T10  "$actions_tsv"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
 }
@@ -398,6 +399,28 @@ awiki_lint_task_rule_T9() {
         "$file" "$since" "$age_days" "$id"
     fi
   done < <(awk -F'\t' 'NR>1 && $2=="?" && $10!="" { printf "%s\t%s\t%s\n", $1, $10, $4 }' "$act")
+}
+
+# T10: open or in-progress action lines whose due: is before today (UTC).
+# Today itself is NOT overdue. Completed [x], cancelled [-], waiting [?],
+# someday [>] lines are not flagged.
+awiki_lint_task_rule_T10() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local id due file
+    id="$(printf '%s' "$line" | cut -f1)"
+    due="$(printf '%s' "$line" | cut -f2)"
+    file="$(printf '%s' "$line" | cut -f3)"
+    [[ "$due" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local diff; diff="$(awiki_days_between "$due" "$today")"
+    if [[ "$diff" =~ ^-?[0-9]+$ ]] && (( diff > 0 )); then
+      printf 'LINT|WARN|%s|T10: overdue (due:%s, %dd ago) ^%s\n' \
+        "$file" "$due" "$diff" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && ($2==" " || $2=="/") && $7!="" { printf "%s\t%s\t%s\n", $1, $7, $4 }' "$act")
 }
 
 awiki_lint_task_rule_T14() {

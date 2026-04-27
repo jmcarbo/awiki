@@ -373,3 +373,91 @@ EOF
   [[ "$output" == *"edge15"* ]]
   ! grep -E 'T9:.*edge14' <<< "$output"
 }
+
+# --- T10: overdue ([ ]/[/] with due: < today) ----------------------------
+
+@test "T10 fires on [ ] with due in the past" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 3)"
+  cat > "$WORK/content/projects/late.md" <<EOF
+---
+title: "Late"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] file taxes @computer due:${past} ^t01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T10:"* ]]
+  [[ "$output" == *"content/projects/late.md"* ]]
+}
+
+@test "T10 fires on [/] with due in the past" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 1)"
+  cat > "$WORK/content/projects/late2.md" <<EOF
+---
+title: "Late2"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [/] in flight @computer due:${past} ^t02
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T10:"* ]]
+  [[ "$output" == *"content/projects/late2.md"* ]]
+}
+
+@test "T10 silent on [ ] with due today" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local today; today="$(date -u +%Y-%m-%d)"
+  cat > "$WORK/content/projects/duetoday.md" <<EOF
+---
+title: "Today"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] something @computer due:${today} ^t03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T10:' <<< "$output"
+}
+
+@test "T10 silent on [x] with due in the past (completed)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/done-old.md" <<EOF
+---
+title: "Done old"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep alive @home ^t04open
+
+## Done
+
+- [x] old @computer due:${past} done:${past} ^t04
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T10:' <<< "$output"
+}

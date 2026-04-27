@@ -2108,7 +2108,15 @@ PY
     echo "WIRED|claude|$CONFIG"
     ;;
   codex)
-    echo "Codex MCP wiring TBD by harness convention; see qmd README" >&2
+    CONFIG=".codex/config.toml"
+    mkdir -p .codex
+    cat >> "$CONFIG" <<'TOML'
+
+[mcp.servers.qmd]
+command = "qmd"
+args = ["mcp", "--root", "content/"]
+TOML
+    echo "WIRED|codex|$CONFIG"
     exit 1
     ;;
   *)
@@ -2371,11 +2379,51 @@ git commit -m "feat: scaffold section index pages with page-list shortcode"
 
 **Files:** Modify: `scripts/lint.sh`
 
-- [ ] **Step 1: Add test that system pages are not flagged as orphans**
+- [ ] **Step 1: Add test for orphan check + system-page exemption (single combined test)**
 
-(Orphan check isn't yet implemented — defer until orphan check ships in same task.)
+```bash
+cat >> tests/lint_test.bats <<'EOF'
 
-- [ ] **Step 2: Add orphan check + exemption**
+@test "lint flags orphan entity" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/island.md" <<E
+---
+title: "Island"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body content with sufficient length, but no inbound wikilinks anywhere.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|INFO"*"island.md"*"orphan"* ]]
+}
+
+@test "lint exempts section-index from orphan check" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/_index.md" <<E
+---
+title: "Entities"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" != *"LINT|INFO"*"_index.md"*"orphan"* ]]
+}
+EOF
+```
+
+- [ ] **Step 2: Add orphan check + system-page exemption to `scripts/lint.sh`
 
 Add to lint.sh per-page loop:
 

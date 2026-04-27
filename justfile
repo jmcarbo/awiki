@@ -43,6 +43,9 @@ build:
 init:
     @echo "Open agent. Say: 'init wiki'. Agent reads BOOTSTRAP.md."
 
+install-hooks:
+    bash scripts/install-hooks.sh
+
 install-qmd:
     bash scripts/install-qmd.sh
 

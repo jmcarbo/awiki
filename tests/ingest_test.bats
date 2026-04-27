@@ -2,7 +2,10 @@
 
 setup() {
   WORK="$(mktemp -d)"
-  cp -r raw "$WORK/raw"
+  # Build raw/ skeleton from scratch so the fixture is independent of the
+  # parent repo's raw/ state (e.g. README smoke test may leave a processed sample).
+  mkdir -p "$WORK/raw/inbox/interactive" "$WORK/raw/inbox/batch" "$WORK/raw/inbox/checkpoint"
+  mkdir -p "$WORK/raw/processed" "$WORK/raw/processed/_originals" "$WORK/raw/assets"
   cp tests/fixtures/sample-source.md "$WORK/raw/inbox/interactive/sample.md"
   mkdir -p "$WORK/.awiki" "$WORK/content"
   printf -- "---\ntitle: Log\ntype: log\ndraft: true\n---\n" > "$WORK/content/log.md"

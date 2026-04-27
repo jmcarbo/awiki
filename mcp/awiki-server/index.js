@@ -148,7 +148,7 @@ const TOOLS = [
   },
   {
     name: "mark_review_done",
-    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    description: "Stamp .awiki/last-review with the current ISO timestamp and append a one-line summary to content/agenda/review-log.md. Runs under flock -x. Returns {last_review, log_line}.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
@@ -381,9 +381,56 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         out = JSON.stringify(parseReviewStatus(REPO_ROOT, stdout));
         break;
       }
-      case "mark_review_done":
-        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+      case "mark_review_done": {
+        // Take a fresh review-status snapshot for the log-line counts,
+        // then write under flock -x. The two writes (timestamp file +
+        // log line append) must be atomic relative to other writers.
+        let statusStdout;
+        try {
+          statusStdout = execFileSync("bash", ["scripts/review-status.sh"], {
+            cwd: REPO_ROOT,
+            encoding: "utf8",
+            env: { ...process.env, LC_ALL: "C" },
+            timeout: 30_000,
+          });
+        } catch (e) {
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          throw new Error(`mark_review_done: review-status failed: ${stderr.trim() || e.message}`);
+        }
+        const counts = countsForLogLine(REPO_ROOT, statusStdout);
+
+        // ISO-8601 UTC timestamp with second precision (matches capture.sh).
+        const now = new Date();
+        const iso = now.toISOString().replace(/\.\d{3}Z$/, "Z");
+        const stamp = `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+        const logLine = `## [${stamp}] review | inbox=${counts.inbox} next=${counts.next} waiting=${counts.waiting} overdue=${counts.overdue} completed=${counts.completed} stuck=${counts.stuck}`;
+
+        // Write both atomically under flock -x. printf takes the values
+        // via positional args ($1, $2) so we never interpolate them into
+        // the script string itself (no quote-escaping concerns).
+        const inner =
+          'set -euo pipefail\n' +
+          'printf "%s\\n" "$1" > .awiki/last-review.tmp\n' +
+          'mv .awiki/last-review.tmp .awiki/last-review\n' +
+          'printf "%s\\n" "$2" >> content/agenda/review-log.md\n';
+
+        try {
+          runLockedExclusive({
+            repoRoot: REPO_ROOT,
+            argv: ["bash", "-c", inner, "--", iso, logLine],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`mark_review_done: lock timeout after 30s`);
+          }
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          throw new Error(`mark_review_done: write failed: ${stderr.trim() || e.message}`);
+        }
+
+        out = JSON.stringify({ last_review: iso, log_line: logLine });
         break;
+      }
       case "rebuild_agenda": {
         const t0 = Date.now();
         try {
@@ -565,6 +612,38 @@ function enrichOverdue(repoRoot, ids) {
     result.push({ id: c[0], due, days_over });
   }
   return result;
+}
+
+// Compute the per-bucket counts that go into the review-log line. "next"
+// (open [ ]/[/]) and "waiting" ([?]) come straight from actions.tsv; the
+// rest are pulled from the REVIEW|... output we already have.
+function countsForLogLine(repoRoot, stdout) {
+  const get = (key) => {
+    const re = new RegExp(`^REVIEW\\|${key}\\|count=(\\d+)`, "m");
+    const m = stdout.match(re);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  let next = 0, waiting = 0;
+  try {
+    const tsv = readFileSync(`${repoRoot}/.awiki/maps/actions.tsv`, "utf8");
+    const lines = tsv.split("\n");
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      const status = lines[i].split("\t")[1];
+      if (status === " " || status === "/") next++;
+      else if (status === "?") waiting++;
+    }
+  } catch {
+    // No TSV → next/waiting stay 0.
+  }
+  return {
+    inbox: get("inbox-unprocessed"),
+    next,
+    waiting,
+    overdue: get("overdue"),
+    completed: get("completed-since-last-review"),
+    stuck: get("stuck-projects"),
+  };
 }
 
 // =============================================================================

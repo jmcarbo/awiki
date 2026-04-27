@@ -127,6 +127,89 @@ export -f phase_index should_skip_phase
 
 # === Subcommand dispatch (recovery flows) ===
 
+# --rerun-bootstrap-step <id>: replay one (often dangerous) bootstrap step on a dedicated
+# branch. Refuses if there's any in-progress update (state file, update branch, or
+# pending prompts).
+if [[ -n "$RERUN_BOOTSTRAP_STEP" ]]; then
+  STEP_ID="$RERUN_BOOTSTRAP_STEP"
+
+  if [[ -f "$REPO_ROOT/.awiki/template-cache/_fetch/.update-state.json" ]]; then
+    echo "halt: update in progress — run --abort first" >&2
+    exit 1
+  fi
+  if [[ -d "$REPO_ROOT/.awiki/pending-prompts" ]] && [[ -n "$(ls -A "$REPO_ROOT/.awiki/pending-prompts" 2>/dev/null)" ]]; then
+    echo "halt: pending-prompts present — resolve first" >&2
+    exit 1
+  fi
+  # Halt if any awiki-template-update/* branch exists.
+  if git for-each-ref --format='%(refname:short)' refs/heads/awiki-template-update/ 2>/dev/null | grep -q .; then
+    echo "halt: existing update branch present — finish or --abort first" >&2
+    exit 1
+  fi
+
+  python3 "$HELPERS/preflight.py" check-tree
+
+  [[ -f "$REPO_ROOT/BOOTSTRAP.md" ]] || { echo "halt: BOOTSTRAP.md not found at repo root" >&2; exit 1; }
+
+  TS=$(date +%s)
+  RERUN_BRANCH="awiki-template-update/rerun-$STEP_ID-$TS"
+  git checkout -q -b "$RERUN_BRANCH"
+
+  # Replay step body from local BOOTSTRAP.md (not upstream).
+  BODY=$(python3 "$HELPERS/bootstrap_replay.py" body --bootstrap "$REPO_ROOT/BOOTSTRAP.md" --id "$STEP_ID")
+  if [[ $NON_INTERACTIVE -eq 0 ]]; then
+    echo "Step '$STEP_ID':"
+    echo "$BODY"
+    read -r -p "Run? [y/N] " ans
+    if ! [[ "$ans" =~ ^[Yy] ]]; then
+      DEFAULT_BRANCH=$(bash "$SCRIPT_DIR/template-config.sh" get "$REPO_ROOT/.awiki/config" default_branch main)
+      git checkout -q "$DEFAULT_BRANCH"
+      git branch -D "$RERUN_BRANCH" >/dev/null 2>&1 || true
+      exit 0
+    fi
+  fi
+
+  BODY_FILE=$(mktemp)
+  printf '%s' "$BODY" > "$BODY_FILE"
+  # env -i strip — matching mechanical-migration trust model.
+  env -i \
+    PATH="$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}" \
+    AWIKI_REPO_ROOT="$REPO_ROOT" \
+    bash "$BODY_FILE" || true
+  rm -f "$BODY_FILE"
+
+  # Compute new content_hash and update template.json. Use literal heredoc + os.environ
+  # to avoid shell-injection from values that might appear in step IDs.
+  NEW_HASH=$(python3 "$HELPERS/bootstrap_hash.py" hash "$REPO_ROOT/BOOTSTRAP.md" "$STEP_ID")
+  AWIKI_PJ="$PJ" AWIKI_STEP_ID="$STEP_ID" AWIKI_NEW_HASH="$NEW_HASH" python3 - <<'PY'
+import json, os
+pj = os.environ["AWIKI_PJ"]
+sid = os.environ["AWIKI_STEP_ID"]
+new_hash = os.environ["AWIKI_NEW_HASH"]
+with open(pj) as f:
+    d = json.load(f)
+for s in d.get("bootstrap_steps_done", []):
+    if s.get("id") == sid:
+        s["content_hash"] = new_hash
+        s["status"] = "applied"
+        break
+else:
+    d.setdefault("bootstrap_steps_done", []).append(
+        {"id": sid, "status": "applied", "content_hash": new_hash}
+    )
+with open(pj, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
+
+  git add -A
+  if ! git diff --cached --quiet; then
+    git commit -q -m "chore(template): re-run bootstrap step $STEP_ID"
+  fi
+  echo "info: rerun-bootstrap-step $STEP_ID complete on $RERUN_BRANCH"
+  exit 0
+fi
+
 # --re-pin <commit>: rollback escape hatch. Validate commit upstream, drop orphan cache,
 # rebuild target ancestor cache, write new pin to template.json. Refuses if pending-prompts
 # or state file present.

@@ -159,3 +159,47 @@ awiki_grammar_split_tail() {
     printf -- '%s=%s\n' "$key" "$val"
   done
 }
+
+# awiki_date_add_days <YYYY-MM-DD> <N>  — emit YYYY-MM-DD plus N days.
+# Negative N is allowed (subtracts). Portable: prefers GNU `date -d`,
+# falls back to BSD `date -j -v`.
+awiki_date_add_days() {
+  local in="$1" n="$2"
+  _awiki_is_calendar_date "$in" || { echo "awiki_date_add_days: bad date $in" >&2; return 1; }
+  [[ "$n" =~ ^-?[0-9]+$ ]] || { echo "awiki_date_add_days: bad delta $n" >&2; return 1; }
+  if date -d "$in +$n days" "+%Y-%m-%d" >/dev/null 2>&1; then
+    date -d "$in +$n days" "+%Y-%m-%d"
+  else
+    # BSD/macOS form. -v takes a signed magnitude: "+3d" or "-3d".
+    local sign="+"
+    if [[ "$n" =~ ^- ]]; then sign="-"; fi
+    date -j -v"${sign}${n#-}d" -f "%Y-%m-%d" "$in" "+%Y-%m-%d"
+  fi
+}
+
+# awiki_date_add_months <YYYY-MM-DD> <N>  — month-add with last-day clamp.
+# 2026-01-31 + 1m -> 2026-02-28 (clamp). 2024-01-31 + 1m -> 2024-02-29 (leap).
+awiki_date_add_months() {
+  local in="$1" n="$2"
+  _awiki_is_calendar_date "$in" || { echo "awiki_date_add_months: bad date $in" >&2; return 1; }
+  [[ "$n" =~ ^-?[0-9]+$ ]] || { echo "awiki_date_add_months: bad delta $n" >&2; return 1; }
+  local y="${in:0:4}" m="${in:5:2}" d="${in:8:2}"
+  y=$((10#$y)); m=$((10#$m)); d=$((10#$d))
+  local total=$(( (y * 12 + (m - 1)) + n ))
+  local ny=$(( total / 12 ))
+  local nm=$(( (total % 12) + 1 ))
+  local maxday=31
+  case "$nm" in
+    4|6|9|11) maxday=30 ;;
+    2)
+      if (( ny % 4 == 0 && (ny % 100 != 0 || ny % 400 == 0) )); then
+        maxday=29
+      else
+        maxday=28
+      fi
+      ;;
+  esac
+  local nd="$d"
+  (( nd > maxday )) && nd=$maxday
+  printf '%04d-%02d-%02d\n' "$ny" "$nm" "$nd"
+}

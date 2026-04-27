@@ -123,3 +123,55 @@ teardown() {
     [[ "$output" != *"REASON=bad-"* ]]
   done
 }
+
+@test "awiki_date_add_days adds positive days" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-04-27 7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-05-04" ]
+}
+
+@test "awiki_date_add_days handles month boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-01-30 5'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-02-04" ]
+}
+
+@test "awiki_date_add_days handles year boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-12-30 7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2027-01-06" ]
+}
+
+@test "awiki_date_add_days handles negative delta" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-04-27 -7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-04-20" ]
+}
+
+@test "awiki_date_add_days rejects bad date" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-02-30 1'
+  [ "$status" -ne 0 ]
+}
+
+@test "awiki_date_add_months clamps to last day of target month" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2026-01-31 1'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-02-28" ]
+}
+
+@test "awiki_date_add_months handles leap year" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2024-01-31 1'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2024-02-29" ]
+}
+
+@test "awiki_date_add_months crosses year boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2026-11-15 3'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2027-02-15" ]
+}
+
+@test "awiki_date_add_months rejects bad input" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months not-a-date 1'
+  [ "$status" -ne 0 ]
+}

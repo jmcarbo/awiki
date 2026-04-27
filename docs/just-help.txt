@@ -82,7 +82,24 @@ synth-accept-stage <slug>
     staged file first; on lint failure, leaves the staged file in place and
     exits 6 so the agent can retry.
 
-Lint: `just lint --only=synth` runs only S1-S6/S9 synth rules. With --fix,
+Lint: `just lint --only=synth` runs only S1-S9 synth rules. With --fix,
 it normalizes smart quotes, em-dashes, and zero-width spaces inside
 generated regions only. Marker repair, missing-section repair, and S9
 reductions are NOT auto-fixable — they require regen.
+
+# === synthesis: refine ===
+just synth-refine <slug> "<note>"
+    Append a bullet to ## Feedback in the synthesis page <slug>. Idempotent
+    on exact-duplicate bullets. Bumps frontmatter last_updated but NOT
+    last_generated. Does NOT trigger regen automatically — call
+    `just synth-regen <slug>` when ready.
+
+    QUOTING: the note must be quoted because it contains spaces.
+
+    Example:
+        just synth-refine memex-briefing "Tighten TL;DR to 15 words per bullet."
+
+    Multiple refines accumulate; the next regen sees them all (each bullet
+    rendered as one line inside a fenced ```text block in the prompt
+    bundle, immune to marker-mimicry injection). To clear addressed
+    bullets, edit content/synthesis/<slug>.md directly.

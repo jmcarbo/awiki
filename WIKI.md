@@ -268,6 +268,23 @@ Mechanical (`scripts/lint.sh`):
 - S8 (warning): `## Feedback` bullet contains `[[slug]]` not in the page's resolved scope. Either widen the scope or remove the bullet.
 - S9 (error): sum of evidence-quote words ≤ plugin manifest's max_evidence_total_words (default 500; study-guide 300).
 
+Task-layer (action-grammar, phases 17/18a):
+- T1 (error): bad status marker on action-grammar line.
+- T2 (error): duplicate `^id` (within a page or cross-page chain instance).
+- T3 (error): unrecognized tail key on an action-grammar line.
+- T4 (error): invalid date in `due:`/`defer:`/`since:`/`done:`.
+- T5 (error): `[?]` waiting line missing `wait:[[person]]`.
+- T6 (error): `@context` not in alias map.
+- T7 (error): hand-edit detected inside an `<!-- BEGIN/END agenda:X -->` managed region.
+- T8 (warn): `type: project, status: active` page with zero open `[ ]`/`[/]` actions. Exempt: `_loose.md`, `_someday.md`, `status: someday`/`done`.
+- T9 (warn): `[?]` line whose `since:` is more than 14 days ago.
+- T10 (warn): `[ ]`/`[/]` line with `due:` before today (UTC; today itself is not overdue).
+- T11 (warn): `[>]` line whose enclosing page's `last_updated` is more than 90 days ago. Caveat: for the `_someday.md` catch-all, every someday item shares the page-level `last_updated` timestamp; adding a new someday item resets the clock for all entries on that page. Acceptable approximation for v1; per-line review timestamps deferred.
+- T12: recurrence chain length warn at ≥150, error at ≥200. Independent of `action-recur.sh`'s refuse-to-emit at 200 (the latter prevents new growth via the only emit path; T12 surfaces hand-edit chains that exceeded the cap).
+- T13 (info): `type: context` page with zero referencing actions (post-alias resolution).
+- T14 (error): malformed `^id` shape (must be `[a-z0-9]{3,16}` or `<base><sep><digits>`).
+- T15 (warn): indented continuation following an action line (multi-line action; not auto-fixed).
+
 Semantic (agent-driven, post-lint review):
 - Contradictions between pages.
 - Stale claims vs newer sources.

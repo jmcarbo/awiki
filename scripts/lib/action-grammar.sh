@@ -177,6 +177,224 @@ awiki_date_add_days() {
   fi
 }
 
+# awiki_recur_compute_due <done-date> <every-token>
+# Dispatches Nd / Nw / Nm / daily / weekly / monthly. Echoes YYYY-MM-DD.
+# Exits 4 on bad token.
+awiki_recur_compute_due() {
+  local done_date="$1" every="$2"
+  local n unit
+  case "$every" in
+    daily)   awiki_date_add_days   "$done_date" 1; return 0 ;;
+    weekly)  awiki_date_add_days   "$done_date" 7; return 0 ;;
+    monthly) awiki_date_add_months "$done_date" 1; return 0 ;;
+  esac
+  if [[ "$every" =~ ^([0-9]+)([dwm])$ ]]; then
+    n="${BASH_REMATCH[1]}"; unit="${BASH_REMATCH[2]}"
+    case "$unit" in
+      d) awiki_date_add_days   "$done_date" "$n" ;;
+      w) awiki_date_add_days   "$done_date" "$((n * 7))" ;;
+      m) awiki_date_add_months "$done_date" "$n" ;;
+    esac
+    return 0
+  fi
+  echo "awiki_recur_compute_due: bad every: '$every'" >&2
+  return 4
+}
+
+# Detect a [x] action line that carries an every: tail key.
+awiki_is_completed_recurring_action() {
+  local l="$1"
+  [[ "$l" =~ ^-\ \[x\]\  ]] || return 1
+  [[ "$l" =~ \ every:[A-Za-z0-9]+ ]]
+}
+
+# Extract the chain base of an action line — the portion of ^id before the
+# AWIKI_RECUR_SEP, or the full id if no separator is present.
+awiki_extract_chain_base() {
+  local l="$1"
+  local id
+  # Match the trailing ^id (anchored to end-of-line, allowing trailing spaces).
+  if [[ "$l" =~ \^([A-Za-z0-9_~]+)[[:space:]]*$ ]]; then
+    id="${BASH_REMATCH[1]}"
+    if [[ "$id" == *"${AWIKI_RECUR_SEP}"* ]]; then
+      printf '%s' "${id%%"${AWIKI_RECUR_SEP}"*}"
+    else
+      printf '%s' "$id"
+    fi
+  fi
+}
+
+# Extract the chain instance number of an action line. Chain head (no
+# separator) is 1; ^base<sep>N is N. Empty if id missing or malformed.
+awiki_extract_chain_n() {
+  local l="$1"
+  local id
+  if [[ "$l" =~ \^([A-Za-z0-9_~]+)[[:space:]]*$ ]]; then
+    id="${BASH_REMATCH[1]}"
+    if [[ "$id" == *"${AWIKI_RECUR_SEP}"* ]]; then
+      local n="${id##*"${AWIKI_RECUR_SEP}"}"
+      [[ "$n" =~ ^[0-9]+$ ]] && printf '%s' "$n"
+    else
+      printf '%s' 1
+    fi
+  fi
+}
+
+# Extract a tail key value ("every", "done", "due") from an action line.
+# Returns empty if absent.
+awiki_extract_tail_key() {
+  local l="$1" k="$2"
+  if [[ "$l" =~ [[:space:]]${k}:([^[:space:]]+) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Build an open-copy line from a completed-recurring line by:
+#  - flipping [x] -> [ ]
+#  - replacing due:<old> with due:<new>
+#  - removing done:<date>
+#  - replacing the trailing ^id with the new instance id
+awiki_build_open_copy() {
+  local in="$1" new_due="$2" new_id="$3"
+  local out="$in"
+  # Flip the checkbox. Note: bash parameter expansion treats `[x]` as a glob
+  # character class, so we use sed for a literal replacement.
+  out="$(printf '%s' "$out" | sed -E 's/^- \[x\] /- [ ] /')"
+  # Replace due:<date> if present; otherwise splice one in just before the ^id.
+  if [[ "$out" =~ ^(.*[[:space:]])due:[0-9]{4}-[0-9]{2}-[0-9]{2}([[:space:]].*)$ ]]; then
+    out="${BASH_REMATCH[1]}due:${new_due}${BASH_REMATCH[2]}"
+  elif [[ "$out" =~ ^(.*[[:space:]])due:[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    out="${BASH_REMATCH[1]}due:${new_due}"
+  else
+    # No prior due — splice one in just before the ^id (if any).
+    if [[ "$out" =~ ^(.*)[[:space:]]\^[A-Za-z0-9_~]+[[:space:]]*$ ]]; then
+      out="${BASH_REMATCH[1]} due:${new_due} ^${new_id}"
+      printf '%s' "$out"; return 0
+    else
+      out="${out} due:${new_due}"
+    fi
+  fi
+  # Strip done:<date>.
+  out="$(printf '%s' "$out" | sed -E 's/[[:space:]]done:[0-9]{4}-[0-9]{2}-[0-9]{2}//')"
+  # Replace the trailing ^id with the new instance id.
+  out="$(printf '%s' "$out" | sed -E "s/\\^[A-Za-z0-9_~]+\$/^${new_id}/")"
+  printf '%s' "$out"
+}
+
+# Collect chain state from a page: emits "<base>\t<n>" lines for each instance.
+# The chain head (no separator) is "<base>\t1".
+awiki_collect_chain_state() {
+  local page="$1"
+  case "$AWIKI_RECUR_SEP" in
+    '~'|'__') ;;
+    *) echo "awiki_collect_chain_state: unknown AWIKI_RECUR_SEP='$AWIKI_RECUR_SEP'" >&2; return 1 ;;
+  esac
+  awk -v sep="$AWIKI_RECUR_SEP" '
+    /^- \[[ \/?>x-]\]/ {
+      # Find the trailing ^id (allow trailing whitespace).
+      if (match($0, /\^[A-Za-z0-9_~]+[[:space:]]*$/)) {
+        id = substr($0, RSTART+1, RLENGTH-1)
+        sub(/[[:space:]]+$/, "", id)
+        sep_pos = index(id, sep)
+        if (sep_pos == 0) {
+          print id "\t1"
+        } else {
+          base = substr(id, 1, sep_pos - 1)
+          n = substr(id, sep_pos + length(sep))
+          if (n ~ /^[0-9]+$/) print base "\t" n
+        }
+      }
+    }' "$page"
+}
+
+# Given collected chain state, return the next free <n> for <base>. Always >= 2.
+awiki_recur_next_instance_n() {
+  local chains="$1" base="$2"
+  local max
+  max="$(awiki_recur_chain_max_n "$chains" "$base")"
+  printf '%s' "$((max + 1))"
+}
+
+# Highest existing instance number for <base>; defaults to 1 (the chain head).
+awiki_recur_chain_max_n() {
+  local chains="$1" base="$2"
+  local max=1 b n
+  if [[ -z "$chains" ]]; then
+    printf '%s' 1
+    return 0
+  fi
+  while IFS=$'\t' read -r b n; do
+    [[ -z "$b" ]] && continue
+    if [[ "$b" == "$base" && "$n" =~ ^[0-9]+$ && "$n" -gt "$max" ]]; then
+      max="$n"
+    fi
+  done <<<"$chains"
+  printf '%s' "$max"
+}
+
+# Membership check: does <base> already have <n> in chain state?
+awiki_recur_chain_has() {
+  local chains="$1" base="$2" n="$3"
+  local b nn
+  [[ -z "$chains" ]] && return 1
+  while IFS=$'\t' read -r b nn; do
+    [[ -z "$b" ]] && continue
+    if [[ "$b" == "$base" && "$nn" == "$n" ]]; then return 0; fi
+  done <<<"$chains"
+  return 1
+}
+
+# Membership check: does <base> already have an instance with n >= <floor>?
+# Used for idempotence: a completed line at position cur_n has been "consumed"
+# if any successor with n >= cur_n+1 already exists.
+awiki_recur_chain_has_ge() {
+  local chains="$1" base="$2" floor="$3"
+  local b nn
+  [[ -z "$chains" ]] && return 1
+  while IFS=$'\t' read -r b nn; do
+    [[ -z "$b" ]] && continue
+    if [[ "$b" == "$base" && "$nn" =~ ^[0-9]+$ && "$nn" -ge "$floor" ]]; then
+      return 0
+    fi
+  done <<<"$chains"
+  return 1
+}
+
+# Read a frontmatter scalar value by key from a markdown page. Returns the
+# bare value with any wrapping single/double quotes stripped. Empty string if
+# the key is absent or not a scalar (lists/maps return empty).
+# Only inspects the leading `---` ... `---` frontmatter block.
+awiki_frontmatter_value() {
+  local page="$1" key="$2"
+  [[ -f "$page" ]] || { printf ''; return 0; }
+  awk -v key="$key" '
+    BEGIN { in_fm = 0; saw_open = 0 }
+    /^---[[:space:]]*$/ {
+      if (!saw_open) { saw_open = 1; in_fm = 1; next }
+      else           { exit }
+    }
+    !in_fm { next }
+    {
+      # Match `key: value` (allow spaces around colon).
+      if (match($0, /^[A-Za-z_][A-Za-z0-9_-]*:/)) {
+        k = substr($0, 1, RLENGTH - 1)
+        if (k == key) {
+          v = substr($0, RLENGTH + 1)
+          sub(/^[[:space:]]+/, "", v)
+          sub(/[[:space:]]+$/, "", v)
+          # Strip wrapping quotes.
+          if (v ~ /^".*"$/) { v = substr(v, 2, length(v) - 2) }
+          else if (v ~ /^'\''.*'\''$/) { v = substr(v, 2, length(v) - 2) }
+          # Empty list/map markers return empty.
+          if (v ~ /^\[/ || v ~ /^\{/) v = ""
+          print v
+          exit
+        }
+      }
+    }
+  ' "$page"
+}
+
 # awiki_date_add_months <YYYY-MM-DD> <N>  — month-add with last-day clamp.
 # 2026-01-31 + 1m -> 2026-02-28 (clamp). 2024-01-31 + 1m -> 2024-02-29 (leap).
 awiki_date_add_months() {

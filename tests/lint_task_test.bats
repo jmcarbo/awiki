@@ -154,7 +154,9 @@ type: project
 ---
 - [ ] thing @phone due:2026/4/27 ^ax01
 EOM
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  # --fix may exit non-zero (e.g., T8 warning about active-but-empty pages).
+  # Use `run` so the test only validates the file-content change.
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   run grep -F 'due:2026-04-27' "$WORK/content/projects/page.md"
   [ -n "$output" ]
 }
@@ -162,9 +164,9 @@ EOM
 @test "lint --fix is idempotent (second run is no-op)" {
   cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
   AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   cp -R "$WORK/content" "$WORK/content_run1"
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   diff -r "$WORK/content_run1" "$WORK/content"
 }
 
@@ -181,7 +183,538 @@ last_updated: 2026-04-27
 ---
 - [ ] no id yet @phone
 EOM
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  # --fix may exit non-zero (T8 warning until ^id is minted and scanner reruns).
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   run grep -E '\^[a-z0-9]{8}' "$WORK/content/projects/p.md"
   [ -n "$output" ]
+}
+
+# --- T8: no-next-action (warn) -------------------------------------------
+
+@test "T8 fires on active project with no open actions" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/idle.md" <<'EOF'
+---
+title: "Idle"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+(none)
+
+## Done
+
+- [x] something old @computer done:2025-12-01 ^old1
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T8:"* ]]
+  [[ "$output" == *"content/projects/idle.md"* ]]
+}
+
+@test "T8 silent on _loose.md (catch-all exemption)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/_loose.md" <<'EOF'
+---
+title: "Loose"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/_loose.md|T8' <<< "$output"
+}
+
+@test "T8 silent on _someday.md (catch-all exemption)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/_someday.md" <<'EOF'
+---
+title: "Someday"
+type: project
+status: someday
+draft: false
+---
+
+## Open Actions
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/_someday.md|T8' <<< "$output"
+}
+
+@test "T8 silent on status: someday and status: done projects" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/dormant.md" <<'EOF'
+---
+title: "Dormant"
+type: project
+status: someday
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/finished.md" <<'EOF'
+---
+title: "Finished"
+type: project
+status: done
+draft: false
+---
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/projects/(dormant|finished)\.md\|T8' <<< "$output"
+}
+
+@test "T8 in-progress [/] counts as an open action" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/working.md" <<'EOF'
+---
+title: "Working"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [/] in progress @computer ^w01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/working.md|T8' <<< "$output"
+}
+
+@test "T8 silent on good fixture (every active project has open actions)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T8:' <<< "$output"
+}
+
+# Helper: produce a YYYY-MM-DD that is N days before today, GNU+BSD portable.
+_n_days_ago() {
+  local n="$1"
+  date -u -d "-${n} days" +%Y-%m-%d 2>/dev/null \
+    || date -u -j -v-"${n}"d +%Y-%m-%d
+}
+
+# --- T9: waiting-stale (warn, since: > 14d ago) --------------------------
+
+@test "T9 fires when [?] since: > 14d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local stale; stale="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/q3-wait.md" <<EOF
+---
+title: "Q3 wait"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] q3 budget approval wait:[[bob-smith]] since:${stale} ^w03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T9:"* ]]
+  [[ "$output" == *"content/projects/q3-wait.md"* ]]
+}
+
+@test "T9 silent when [?] since: <= 14d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local fresh; fresh="$(_n_days_ago 7)"
+  cat > "$WORK/content/projects/q3-wait.md" <<EOF
+---
+title: "Q3 wait"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] q3 budget approval wait:[[bob-smith]] since:${fresh} ^w03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T9:' <<< "$output"
+}
+
+@test "T9 boundary: exactly 14d is silent, exactly 15d is warn" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local d14; d14="$(_n_days_ago 14)"
+  local d15; d15="$(_n_days_ago 15)"
+  cat > "$WORK/content/projects/edge.md" <<EOF
+---
+title: "Edge"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] item14 wait:[[bob-smith]] since:${d14} ^edge14
+- [?] item15 wait:[[bob-smith]] since:${d15} ^edge15
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T9:"* ]]
+  [[ "$output" == *"edge15"* ]]
+  ! grep -E 'T9:.*edge14' <<< "$output"
+}
+
+# --- T10: overdue ([ ]/[/] with due: < today) ----------------------------
+
+@test "T10 fires on [ ] with due in the past" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 3)"
+  cat > "$WORK/content/projects/late.md" <<EOF
+---
+title: "Late"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] file taxes @computer due:${past} ^t01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T10:"* ]]
+  [[ "$output" == *"content/projects/late.md"* ]]
+}
+
+@test "T10 fires on [/] with due in the past" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 1)"
+  cat > "$WORK/content/projects/late2.md" <<EOF
+---
+title: "Late2"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [/] in flight @computer due:${past} ^t02
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T10:"* ]]
+  [[ "$output" == *"content/projects/late2.md"* ]]
+}
+
+@test "T10 silent on [ ] with due today" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local today; today="$(date -u +%Y-%m-%d)"
+  cat > "$WORK/content/projects/duetoday.md" <<EOF
+---
+title: "Today"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] something @computer due:${today} ^t03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T10:' <<< "$output"
+}
+
+@test "T10 silent on [x] with due in the past (completed)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local past; past="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/done-old.md" <<EOF
+---
+title: "Done old"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep alive @home ^t04open
+
+## Done
+
+- [x] old @computer due:${past} done:${past} ^t04
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T10:' <<< "$output"
+}
+
+# --- T11: stale-someday (warn, page last_updated > 90d) ------------------
+
+@test "T11 fires on [>] when enclosing page last_updated > 90d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local stale; stale="$(_n_days_ago 100)"
+  cat > "$WORK/content/projects/dusty.md" <<EOF
+---
+title: "Dusty"
+type: project
+status: active
+last_updated: ${stale}
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep dusty active @home ^dustopen
+- [>] reorganize garage someday @home ^s01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T11:"* ]]
+  [[ "$output" == *"content/projects/dusty.md"* ]]
+}
+
+@test "T11 silent on [>] when enclosing page last_updated <= 90d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local fresh; fresh="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/recent.md" <<EOF
+---
+title: "Recent"
+type: project
+status: active
+last_updated: ${fresh}
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep recent active @home ^recopen
+- [>] reorganize garage someday @home ^s02
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T11:' <<< "$output"
+}
+
+# --- T12: recur-chain-cap (warn ≥150, error ≥200) -----------------------
+
+@test "T12 silent on chain length 149" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c149.md" <<'EOF'
+---
+title: "Chain149"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c1a
+EOF
+  for n in $(seq 2 149); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c1a~%d\n' "$n" \
+      >> "$WORK/content/projects/c149.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T12:' <<< "$output"
+}
+
+@test "T12 warns at chain length 150-199" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c150.md" <<'EOF'
+---
+title: "Chain150"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c2a
+EOF
+  for n in $(seq 2 150); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c2a~%d\n' "$n" \
+      >> "$WORK/content/projects/c150.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"length=150"* ]]
+  ! grep -F 'LINT|ERROR|content/projects/c150.md|T12' <<< "$output"
+}
+
+@test "T12 errors at chain length >=200" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c200.md" <<'EOF'
+---
+title: "Chain200"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c3a
+EOF
+  for n in $(seq 2 200); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c3a~%d\n' "$n" \
+      >> "$WORK/content/projects/c200.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"length=200"* ]]
+  grep -E 'LINT\|ERROR\|content/projects/c200\.md\|T12' <<< "$output"
+}
+
+@test "T12 fires on hand-edited chain (no recur run)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/handedit.md" <<'EOF'
+---
+title: "Handedit"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] manual @home every:1d done:2026-04-27 ^h99
+EOF
+  for n in $(seq 2 250); do
+    printf -- '- [x] manual @home every:1d done:2026-04-27 ^h99~%d\n' "$n" \
+      >> "$WORK/content/projects/handedit.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"^h99"* ]]
+  [[ "$output" == *"length=250"* ]]
+  grep -E 'LINT\|ERROR\|.*\|T12: .*\^h99.*length=250' <<< "$output"
+}
+
+# --- T13: context-unused (info) ------------------------------------------
+
+@test "T13 fires when a context page has zero referencing actions" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/garage.md" <<'EOF'
+---
+title: "@garage"
+type: context
+aliases: ['@garage']
+draft: false
+---
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T13:"* ]]
+  [[ "$output" == *"content/contexts/garage.md"* ]]
+}
+
+@test "T13 silent when at least one action references the context" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/phone.md" <<'EOF'
+---
+title: "@phone"
+type: context
+aliases: ['@phone']
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/p13.md" <<'EOF'
+---
+title: "P13"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [ ] call x @phone ^p13a
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/contexts/phone\.md\|T13' <<< "$output"
+}
+
+@test "T13 honors aliases (alias parity check)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/computer.md" <<'EOF'
+---
+title: "@computer"
+type: context
+aliases: ['@computer', '@laptop']
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/p13b.md" <<'EOF'
+---
+title: "P13b"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [ ] code @laptop ^p13bx
+EOF
+  # Rebuild alias map (lint.sh does this in its main pass), then re-scan so
+  # actions.tsv's context column reflects the canonical slug.
+  # The alias-build step in this checkout is the existing fixture's
+  # alias-to-slug.tsv; refresh it via the lint --only=task path which doesn't
+  # rebuild aliases. We manually append @laptop->computer for parity.
+  printf '@laptop\tcomputer\tcontent/contexts/computer.md\tpublic\n' \
+    >> "$WORK/.awiki/maps/alias-to-slug.tsv"
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  # @laptop alias resolves to computer in the alias map; computer is
+  # therefore referenced (no T13 on computer.md).
+  ! grep -E 'content/contexts/computer\.md\|T13' <<< "$output"
+}
+
+@test "T11 boundary: exactly 90d is silent, 91d is warn" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local d90; d90="$(_n_days_ago 90)"
+  local d91; d91="$(_n_days_ago 91)"
+  cat > "$WORK/content/projects/p90.md" <<EOF
+---
+title: "P90"
+type: project
+status: active
+last_updated: ${d90}
+draft: false
+---
+
+- [ ] keep p90 alive @home ^p90keep
+- [>] item @home ^p90a
+EOF
+  cat > "$WORK/content/projects/p91.md" <<EOF
+---
+title: "P91"
+type: project
+status: active
+last_updated: ${d91}
+draft: false
+---
+
+- [ ] keep p91 alive @home ^p91keep
+- [>] item @home ^p91a
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/projects/p90\.md\|T11' <<< "$output"
+  grep -E 'content/projects/p91\.md\|T11' <<< "$output"
 }

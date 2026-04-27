@@ -106,9 +106,25 @@ agenda:
     bash scripts/action-scan.sh
     bash scripts/agenda.sh
 
+# === task layer (phase 18a) ===
+# Run the triage walker over content/inbox.md and raw/inbox/interactive/.
+# For non-interactive single-item application, use:
+#   just triage-apply <id> <outcome> [k=v ...]
+triage:
+    bash scripts/triage.sh --interactive
+
+triage-apply *args:
+    bash scripts/triage.sh {{args}}
+
+# Re-emit open copies for any [x] every:... lines whose next-due is missing.
+recur:
+    bash scripts/action-recur.sh --all
+
+# Dry-run variant — prints unified diff, makes no changes.
+recur-dry:
+    bash scripts/action-recur.sh --dry-run --all
+
 # Stubs land in later phases:
-# triage:                                # phase 18
-#     bash scripts/triage.sh --interactive
 # review:                                # phase 19
 #     bash scripts/agenda.sh
 #     bash scripts/lint.sh

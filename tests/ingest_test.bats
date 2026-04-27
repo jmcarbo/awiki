@@ -28,7 +28,7 @@ teardown() {
 
 @test "ingest appends log entry" {
   bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh" raw/inbox/interactive/sample.md
-  run grep "ingest | sample.md | mode=interactive" content/log.md
+  run grep "ingest | sample.md mode=interactive" content/log.md
   [ "$status" -eq 0 ]
 }
 

@@ -93,3 +93,63 @@ PROJEOM
   cd /
   rm -rf "$PHASE17_WORK"
 }
+
+@test "smoke phase 18a: capture → triage-apply act → agenda → flip [x] → agenda removes" {
+  PHASE18A_WORK="$(mktemp -d)"
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  cp -R "$REPO_ROOT" "$PHASE18A_WORK/awiki"
+  cd "$PHASE18A_WORK/awiki"
+  AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
+  just capture "call dentist about crown"
+
+  # Locate the captured line and synthesize its inbox-<sha>-<lineno> id.
+  local lineno
+  lineno="$(awk '/^- /{n=NR} END{print n}' content/inbox.md)"
+  [ -n "$lineno" ]
+  local raw
+  raw="$(awk -v n="$lineno" 'NR==n' content/inbox.md)"
+  local sha
+  sha="$(printf '%s' "$raw" | shasum | awk '{print substr($1,1,10)}')"
+  local id="inbox-${sha}-${lineno}"
+
+  # Apply act outcome to _loose with @phone context via the bash CLI form.
+  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone "lineno=${lineno}"
+  [ "$status" -eq 0 ]
+  [ -f content/projects/_loose.md ]
+  run grep -E '^- \[ \] call dentist about crown @phone \^[a-z0-9]{8}' content/projects/_loose.md
+  [ "$status" -eq 0 ]
+
+  # Inbox should no longer contain the captured line.
+  run grep -F 'call dentist about crown' content/inbox.md
+  [ "$status" -ne 0 ]
+
+  # First agenda regen — action should appear under @phone in next-actions.
+  just agenda
+  run grep -F '### @phone' content/agenda/next-actions.md
+  [ -n "$output" ]
+  run grep -F 'call dentist about crown' content/agenda/next-actions.md
+  [ -n "$output" ]
+
+  # Flip [ ] -> [x] in _loose.md. Also clear the previous next-actions
+  # body inside the managed region so the next scan does not see two
+  # copies of the same ^id (one open, one done) and reject as dup-id.
+  if sed --version >/dev/null 2>&1; then
+    sed -i 's/^- \[ \] call dentist/- [x] call dentist/' content/projects/_loose.md
+  else
+    sed -i '' 's/^- \[ \] call dentist/- [x] call dentist/' content/projects/_loose.md
+  fi
+  awk '
+    BEGIN { drop = 0 }
+    /<!-- BEGIN agenda:/ { print; drop = 1; next }
+    /<!-- END agenda:/   { drop = 0; print; next }
+    !drop                { print }
+  ' content/agenda/next-actions.md > content/agenda/next-actions.md.tmp \
+    && mv content/agenda/next-actions.md.tmp content/agenda/next-actions.md
+
+  just agenda
+  run grep -F 'call dentist about crown' content/agenda/next-actions.md
+  [ -z "$output" ]
+
+  cd /
+  rm -rf "$PHASE18A_WORK"
+}

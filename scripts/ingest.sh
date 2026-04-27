@@ -47,7 +47,7 @@ fi
 mkdir -p "$DEST_DIR"
 mv "$SRC" "$DEST"
 
-bash "$SCRIPT_DIR/log-append.sh" ingest "$(basename "$SRC") | mode=$MODE"
+bash "$SCRIPT_DIR/log-append.sh" ingest "$(basename "$SRC") mode=$MODE"
 
 # Increment counter
 COUNTER_FILE=".awiki/ingest-count"

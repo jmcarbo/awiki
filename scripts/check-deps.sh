@@ -58,6 +58,17 @@ for opt in qmd git-crypt age entr fswatch pdftotext; do
   fi
 done
 
+# Optional: 'expect' is needed only by the BATS interactive triage driver;
+# the triage.sh --interactive walker itself runs without it.
+if ! command -v expect >/dev/null 2>&1; then
+  echo "OPTIONAL-MISSING|expect"
+  echo "  warn: 'expect' not installed; interactive triage tests will be skipped." >&2
+  echo "    macOS: brew install expect" >&2
+  echo "    debian: apt-get install expect" >&2
+else
+  echo "OK|expect (optional)"
+fi
+
 # Optional Python module: pyyaml (used by tests/scheduled_test.bats to validate
 # scheduled/github-action.yml.example). Warn but do not fail.
 if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then

@@ -119,8 +119,25 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T5   "$actions_tsv"
   awiki_lint_task_rule_T6   "$actions_tsv" "$alias_map"
   awiki_lint_task_rule_T7
+  awiki_lint_task_rule_T8   "$actions_tsv"
+  awiki_lint_task_rule_T9   "$actions_tsv"
+  awiki_lint_task_rule_T10  "$actions_tsv"
+  awiki_lint_task_rule_T11  "$actions_tsv"
+  awiki_lint_task_rule_T12  "$actions_tsv"
+  awiki_lint_task_rule_T13  "$actions_tsv" "$alias_map"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
+}
+
+# Days between two YYYY-MM-DD dates ($2 - $1). Pure-bash via UTC seconds.
+# Negative if $2 < $1. Returns 0 on bad input.
+awiki_days_between() {
+  local a_secs b_secs
+  a_secs="$(date -u -d "$1" +%s 2>/dev/null \
+            || date -u -j -f "%Y-%m-%d" "$1" +%s 2>/dev/null)" || { printf '0'; return 0; }
+  b_secs="$(date -u -d "$2" +%s 2>/dev/null \
+            || date -u -j -f "%Y-%m-%d" "$2" +%s 2>/dev/null)" || { printf '0'; return 0; }
+  printf '%d' $(( (b_secs - a_secs) / 86400 ))
 }
 
 awiki_lint_task_rule_T1() {
@@ -318,6 +335,219 @@ awiki_lint_task_rule_T7() {
       }
     ' "$f"
   done < <(find "$content_dir" -type f -name '*.md' 2>/dev/null | sort)
+}
+
+# T8: type:project, status:active page with zero open [ ]/[/] action lines.
+# Emits LINT|WARN. Exempt: _loose.md, _someday.md (catch-all pages by spec
+# convention), and any project page whose status is `someday` or `done`.
+awiki_lint_task_rule_T8() {
+  local act="$1"
+  local content_dir="$AWIKI_REPO_ROOT/content"
+  [[ -d "$content_dir" ]] || return 0
+
+  # Build the set of project files (relative path) that have at least one
+  # open action ([ ] or [/]). Reads actions.tsv via awk because bash `read`
+  # with IFS=$'\t' collapses consecutive empty fields (whitespace-only IFS
+  # quirk), which corrupts the column layout for rows like
+  # `id<tab>?<tab>txt<tab>file<tab>line<tab><tab><tab>...`.
+  declare -A has_open=()
+  if [[ -f "$act" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      has_open["$line"]=1
+    done < <(awk -F'\t' 'NR>1 && ($2==" " || $2=="/") { print $4 }' "$act")
+  fi
+
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local base; base="$(basename "$f")"
+    case "$base" in
+      _loose.md|_someday.md|_index.md) continue ;;
+    esac
+    local relpath="${f#"$AWIKI_REPO_ROOT/"}"
+    local fm_type fm_status
+    fm_type="$(awiki_frontmatter_value "$f" type)"
+    [[ "$fm_type" == "project" ]] || continue
+    fm_status="$(awiki_frontmatter_value "$f" status)"
+    # Only flag explicitly-active project pages. Pages without a status:
+    # frontmatter value (or status:someday|done) are exempt: they are not
+    # claiming to be in the active-work pool.
+    [[ "$fm_status" == "active" ]] || continue
+    if [[ -z "${has_open[$relpath]:-}" ]]; then
+      printf 'LINT|WARN|%s|T8: type:project, status:active page has zero open [ ]/[/] actions\n' \
+        "$relpath"
+    fi
+  done < <(find "$content_dir" -type f -name '*.md' 2>/dev/null | sort)
+}
+
+# T9: [?] action lines whose since: is > 14 days before today (UTC).
+# Boundary is strict: exactly 14d is silent, 15+ days warns.
+# actions.tsv columns: 1 id  2 status  3 text  4 file  5 line  6 context
+#                      7 due 8 defer  9 wait  10 since 11 every 12 done
+#                     13 priority 14 est 15 project 16 source_kind
+awiki_lint_task_rule_T9() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  while IFS=$'\n' read -r line; do
+    [[ -z "$line" ]] && continue
+    local id since file
+    id="$(printf '%s' "$line" | cut -f1)"
+    since="$(printf '%s' "$line" | cut -f2)"
+    file="$(printf '%s' "$line" | cut -f3)"
+    [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local age_days; age_days="$(awiki_days_between "$since" "$today")"
+    if [[ "$age_days" =~ ^-?[0-9]+$ ]] && (( age_days > 14 )); then
+      printf 'LINT|WARN|%s|T9: waiting-stale (since:%s, %dd ago) ^%s\n' \
+        "$file" "$since" "$age_days" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && $2=="?" && $10!="" { printf "%s\t%s\t%s\n", $1, $10, $4 }' "$act")
+}
+
+# T10: open or in-progress action lines whose due: is before today (UTC).
+# Today itself is NOT overdue. Completed [x], cancelled [-], waiting [?],
+# someday [>] lines are not flagged.
+awiki_lint_task_rule_T10() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local id due file
+    id="$(printf '%s' "$line" | cut -f1)"
+    due="$(printf '%s' "$line" | cut -f2)"
+    file="$(printf '%s' "$line" | cut -f3)"
+    [[ "$due" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local diff; diff="$(awiki_days_between "$due" "$today")"
+    if [[ "$diff" =~ ^-?[0-9]+$ ]] && (( diff > 0 )); then
+      printf 'LINT|WARN|%s|T10: overdue (due:%s, %dd ago) ^%s\n' \
+        "$file" "$due" "$diff" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && ($2==" " || $2=="/") && $7!="" { printf "%s\t%s\t%s\n", $1, $7, $4 }' "$act")
+}
+
+# T11: [>] someday lines whose enclosing page's last_updated frontmatter
+# is more than 90 days old. Caveat: granularity is page-level — adding a
+# new someday item resets the clock for every entry on the same page.
+# (Documented in WIKI.md.)
+awiki_lint_task_rule_T11() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  declare -A page_lu_cache=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    local id file
+    id="$(printf '%s' "$row" | cut -f1)"
+    file="$(printf '%s' "$row" | cut -f2)"
+    [[ -n "$id" && -n "$file" ]] || continue
+    local lu
+    if [[ -n "${page_lu_cache[$file]+x}" ]]; then
+      lu="${page_lu_cache[$file]}"
+    else
+      local abs="$AWIKI_REPO_ROOT/$file"
+      lu=""
+      if [[ -f "$abs" ]]; then
+        lu="$(awiki_frontmatter_value "$abs" last_updated)"
+      fi
+      page_lu_cache[$file]="$lu"
+    fi
+    [[ "$lu" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local diff; diff="$(awiki_days_between "$lu" "$today")"
+    if [[ "$diff" =~ ^-?[0-9]+$ ]] && (( diff > 90 )); then
+      printf 'LINT|WARN|%s|T11: stale-someday (page last_updated:%s, %dd ago) ^%s\n' \
+        "$file" "$lu" "$diff" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && $2==">" { printf "%s\t%s\n", $1, $4 }' "$act")
+}
+
+# T12: count instances per chain across all pages and emit:
+#   warn  at length 150-199
+#   error at length >=200
+# Independent of action-recur.sh's refuse-to-emit at chain >=200 — that path
+# only blocks new growth via the emitter; T12 surfaces violations created by
+# hand edits or by mid-chain interval changes that desync from the cap.
+# Honors AWIKI_RECUR_SEP (default `~`).
+awiki_lint_task_rule_T12() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local sep="${AWIKI_RECUR_SEP:-~}"
+
+  awk -F'\t' -v sep="$sep" '
+    NR>1 && $1!="" {
+      id = $1
+      file = $4
+      pos = index(id, sep)
+      if (pos > 0) base = substr(id, 1, pos - 1)
+      else         base = id
+      counts[base]++
+      # Capture last-seen file for the diagnostic.
+      any_file[base] = file
+    }
+    END {
+      for (b in counts) {
+        n = counts[b]
+        if (n >= 200) {
+          printf "LINT|ERROR|%s|T12: recur-chain ^%s length=%d (>=200)\n", any_file[b], b, n
+        } else if (n >= 150) {
+          printf "LINT|WARN|%s|T12: recur-chain ^%s length=%d (>=150)\n", any_file[b], b, n
+        }
+      }
+    }
+  ' "$act"
+}
+
+# T13: type:context pages with zero referencing actions (after alias
+# resolution). Informational only — never raises the lint exit code.
+#
+# Implementation note: actions.tsv's `context` column stores the raw
+# `@<token>` from the action line (NOT the alias-resolved canonical slug —
+# the scanner does not resolve here). T13 uses the alias map
+# (.awiki/maps/alias-to-slug.tsv) to map each `@<token>` to its canonical
+# slug, then checks which type:context pages are unreferenced.
+awiki_lint_task_rule_T13() {
+  local act="$1" alias_map="$2"
+  local content_dir="$AWIKI_REPO_ROOT/content"
+  [[ -d "$content_dir" ]] || return 0
+
+  # Build alias -> canonical-slug map.
+  declare -A alias_slug=()
+  if [[ -f "$alias_map" ]]; then
+    while IFS=$'\t' read -r al slug _rest; do
+      [[ -z "$al" ]] && continue
+      alias_slug["$al"]="$slug"
+    done < "$alias_map"
+  fi
+
+  # Build set of referenced canonical slugs from actions.tsv.
+  declare -A referenced=()
+  if [[ -f "$act" ]]; then
+    while IFS= read -r ctx; do
+      [[ -z "$ctx" ]] && continue
+      local resolved="${alias_slug[$ctx]:-}"
+      if [[ -z "$resolved" ]]; then
+        # Fall back to stripping the leading `@`.
+        resolved="${ctx#@}"
+      fi
+      referenced["$resolved"]=1
+    done < <(awk -F'\t' 'NR>1 && $6!="" { print $6 }' "$act")
+  fi
+
+  # Walk every content/contexts/*.md page; emit T13 for each unreferenced one.
+  local ctx_dir="$content_dir/contexts"
+  [[ -d "$ctx_dir" ]] || return 0
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local slug; slug="$(basename "$f" .md)"
+    [[ "$slug" == "_index" ]] && continue
+    local fm_type; fm_type="$(awiki_frontmatter_value "$f" type)"
+    [[ "$fm_type" == "context" ]] || continue
+    if [[ -z "${referenced[$slug]:-}" ]]; then
+      local relpath="${f#"$AWIKI_REPO_ROOT/"}"
+      printf 'LINT|INFO|%s|T13: context-unused (no actions reference @%s)\n' \
+        "$relpath" "$slug"
+    fi
+  done < <(find "$ctx_dir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
 }
 
 awiki_lint_task_rule_T14() {

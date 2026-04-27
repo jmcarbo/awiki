@@ -324,5 +324,55 @@ elif [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]] && [[ $SCHEMA_UPGRADE -eq 1 ]]; then
   fi
 fi
 
-echo "info: subsequent phases not yet implemented"
+# === Phase 2: plan ===
+if [[ "${RESUMED:-0}" -eq 1 ]]; then
+  echo "info: resume — skipping Phase 2 (plan output not regenerated)"
+  PLAN_OUT=""   # downstream phases must not depend on PLAN_OUT after resume; orchestrator already committed Commit A from the original plan.
+else
+SCRATCH="$FETCH_DIR/_scratch-merge"
+mkdir -p "$SCRATCH"
+
+# user-tree = bootstrapped repo (REPO_ROOT) but excluding .awiki/.
+USER_TREE_TMP="$SCRATCH/user-tree"
+mkdir -p "$USER_TREE_TMP"
+git -C "$REPO_ROOT" archive --format=tar HEAD | tar -x -C "$USER_TREE_TMP"
+
+# Capture plan stdout.
+PLAN_OUT=$(bash "$SCRIPT_DIR/template-plan.sh" \
+  --old-tree "$ANCESTOR_DIR" \
+  --new-tree "$FETCH_DIR" \
+  --user-tree "$USER_TREE_TMP" \
+  --manifest "$NEW_MANIFEST" \
+  --commit-old "$COMMIT_OLD" \
+  --commit-new "$COMMIT_NEW" \
+  --provenance "$PJ")
+
+echo "$PLAN_OUT"
+
+# If --print-migrations, frame each migration body.
+if [[ $PRINT_MIGRATIONS -eq 1 ]]; then
+  for MIG in "$FETCH_DIR/migrations/"*.sh; do
+    [[ -f "$MIG" ]] || continue
+    [[ "$(basename "$MIG")" == "schema-"* ]] && continue
+    MID="$(basename "$MIG" .sh)"
+    echo "PLAN|migration-body|$MID|begin"
+    while IFS= read -r line; do
+      ESC=$(python3 "$HELPERS/escape.py" "$line")
+      echo "PLAN|migration-body|$MID|$ESC"
+    done < "$MIG"
+    echo "PLAN|migration-body|$MID|end"
+  done
+fi
+
+# Clean up scratch.
+rm -rf "$SCRATCH"
+
+if [[ $APPLY -eq 0 ]]; then
+  # Dry-run: clean up _fetch too unless the user might re-run with --apply.
+  # Spec leaves _fetch around between dry-run and --apply for cache reuse.
+  exit 0
+fi
+fi  # end Phase 2 (skipped on resume)
+
+echo "info: phase 3 not yet implemented (Commit A lands in Phase 05)"
 exit 0

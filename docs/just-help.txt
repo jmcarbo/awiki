@@ -103,3 +103,11 @@ just synth-refine <slug> "<note>"
     rendered as one line inside a fenced ```text block in the prompt
     bundle, immune to marker-mimicry injection). To clear addressed
     bullets, edit content/synthesis/<slug>.md directly.
+
+SYNTHESIS-EXTRAS
+  bash scripts/synth-export-anki.sh content/synthesis/<study-guide-slug>.md
+                                Convert a study-guide synthesis page's
+                                ## Flashcards block into an Anki .apkg at
+                                .awiki/exports/<slug>.apkg. Skips gracefully
+                                (exit 0) if the optional `genanki` Python
+                                package is not installed.

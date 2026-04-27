@@ -48,3 +48,6 @@ content/synthesis/.staged/*
 
 # phase-17 spike vault — Obsidian config is per-machine
 tests/fixtures/spike-obsidian-vault/.obsidian/
+
+# template-update cache (gitignored; rebuildable from template.json pin)
+.awiki/template-cache/

@@ -110,6 +110,55 @@ for a in "${!ALIAS_COUNT[@]}"; do
   fi
 done
 
+# Orphan check: count inbound wikilinks per slug; warn if zero.
+declare -A INBOUND
+while IFS= read -r -d '' page; do
+  while read -r link; do
+    target="${link%%|*}"
+    INBOUND[$target]=$((${INBOUND[$target]:-0} + 1))
+    # Also credit the alias's resolved slug, if any
+    resolved="${ALIAS_TO_SLUG[$target]:-}"
+    if [[ -n "$resolved" ]]; then
+      INBOUND[$resolved]=$((${INBOUND[$resolved]:-0} + 1))
+    fi
+  done < <(grep -oE '\[\[[^]]+\]\]' "$page" | sed -E 's/^\[\[|\]\]$//g')
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+while IFS= read -r -d '' page; do
+  slug="$(basename "$page" .md)"
+  type_field="$(awk -F'[:[:space:]]+' '/^type:/{print $2; exit}' "$page" | tr -d '"')"
+  if [[ "$type_field" =~ ^(log|catalog|section-index)$ ]]; then
+    continue
+  fi
+  if [[ "${INBOUND[$slug]:-0}" -eq 0 ]]; then
+    echo "LINT|INFO|$page|orphan: no inbound wikilinks"
+    INFOS=$((INFOS + 1))
+  fi
+done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+# Catalog cross-link check
+CATALOG="$CONTENT_DIR/catalog.md"
+if [[ -f "$CATALOG" ]]; then
+  declare -A IN_CATALOG
+  while read -r link; do
+    target="${link%%|*}"
+    IN_CATALOG[$target]=1
+  done < <(grep -oE '\[\[[^]]+\]\]' "$CATALOG" | sed -E 's/^\[\[|\]\]$//g')
+
+  while IFS= read -r -d '' page; do
+    slug="$(basename "$page" .md)"
+    [[ "$slug" =~ ^(_index|catalog|log)$ ]] && continue
+    type_field="$(awk -F'[:[:space:]]+' '/^type:/{print $2; exit}' "$page" | tr -d '"')"
+    if [[ "$type_field" =~ ^(log|catalog|section-index)$ ]]; then
+      continue
+    fi
+    if [[ -z "${IN_CATALOG[$slug]:-}" ]]; then
+      echo "LINT|WARN|$page|missing from catalog"
+      WARNS=$((WARNS + 1))
+    fi
+  done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+fi
+
 echo "LINT-SUMMARY|errors=$ERRORS|warnings=$WARNS|info=$INFOS"
 
 if [[ "$ERRORS" -gt 0 ]]; then exit 2; fi

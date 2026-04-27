@@ -509,6 +509,103 @@ EOF
   ! grep -F 'T11:' <<< "$output"
 }
 
+# --- T12: recur-chain-cap (warn ≥150, error ≥200) -----------------------
+
+@test "T12 silent on chain length 149" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c149.md" <<'EOF'
+---
+title: "Chain149"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c1a
+EOF
+  for n in $(seq 2 149); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c1a~%d\n' "$n" \
+      >> "$WORK/content/projects/c149.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T12:' <<< "$output"
+}
+
+@test "T12 warns at chain length 150-199" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c150.md" <<'EOF'
+---
+title: "Chain150"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c2a
+EOF
+  for n in $(seq 2 150); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c2a~%d\n' "$n" \
+      >> "$WORK/content/projects/c150.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"length=150"* ]]
+  ! grep -F 'LINT|ERROR|content/projects/c150.md|T12' <<< "$output"
+}
+
+@test "T12 errors at chain length >=200" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/c200.md" <<'EOF'
+---
+title: "Chain200"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] x @home every:1d done:2026-04-27 ^c3a
+EOF
+  for n in $(seq 2 200); do
+    printf -- '- [x] x @home every:1d done:2026-04-27 ^c3a~%d\n' "$n" \
+      >> "$WORK/content/projects/c200.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"length=200"* ]]
+  grep -E 'LINT\|ERROR\|content/projects/c200\.md\|T12' <<< "$output"
+}
+
+@test "T12 fires on hand-edited chain (no recur run)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/handedit.md" <<'EOF'
+---
+title: "Handedit"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [x] manual @home every:1d done:2026-04-27 ^h99
+EOF
+  for n in $(seq 2 250); do
+    printf -- '- [x] manual @home every:1d done:2026-04-27 ^h99~%d\n' "$n" \
+      >> "$WORK/content/projects/handedit.md"
+  done
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T12:"* ]]
+  [[ "$output" == *"^h99"* ]]
+  [[ "$output" == *"length=250"* ]]
+  grep -E 'LINT\|ERROR\|.*\|T12: .*\^h99.*length=250' <<< "$output"
+}
+
 @test "T11 boundary: exactly 90d is silent, 91d is warn" {
   cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
   local d90; d90="$(_n_days_ago 90)"

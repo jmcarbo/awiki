@@ -123,6 +123,7 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T9   "$actions_tsv"
   awiki_lint_task_rule_T10  "$actions_tsv"
   awiki_lint_task_rule_T11  "$actions_tsv"
+  awiki_lint_task_rule_T12  "$actions_tsv"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
 }
@@ -457,6 +458,42 @@ awiki_lint_task_rule_T11() {
         "$file" "$lu" "$diff" "$id"
     fi
   done < <(awk -F'\t' 'NR>1 && $2==">" { printf "%s\t%s\n", $1, $4 }' "$act")
+}
+
+# T12: count instances per chain across all pages and emit:
+#   warn  at length 150-199
+#   error at length >=200
+# Independent of action-recur.sh's refuse-to-emit at chain >=200 — that path
+# only blocks new growth via the emitter; T12 surfaces violations created by
+# hand edits or by mid-chain interval changes that desync from the cap.
+# Honors AWIKI_RECUR_SEP (default `~`).
+awiki_lint_task_rule_T12() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local sep="${AWIKI_RECUR_SEP:-~}"
+
+  awk -F'\t' -v sep="$sep" '
+    NR>1 && $1!="" {
+      id = $1
+      file = $4
+      pos = index(id, sep)
+      if (pos > 0) base = substr(id, 1, pos - 1)
+      else         base = id
+      counts[base]++
+      # Capture last-seen file for the diagnostic.
+      any_file[base] = file
+    }
+    END {
+      for (b in counts) {
+        n = counts[b]
+        if (n >= 200) {
+          printf "LINT|ERROR|%s|T12: recur-chain ^%s length=%d (>=200)\n", any_file[b], b, n
+        } else if (n >= 150) {
+          printf "LINT|WARN|%s|T12: recur-chain ^%s length=%d (>=150)\n", any_file[b], b, n
+        }
+      }
+    }
+  ' "$act"
 }
 
 awiki_lint_task_rule_T14() {

@@ -72,3 +72,14 @@ run_synth_lint_file() {
   run run_synth_lint_file "$FIXTURES/synthesis/s4-out-of-scope.md"
   [[ "$output" == *"LINT|ERROR"*"S4"*"some-other-slug-not-in-scope"* ]]
 }
+
+@test "S5: tag-scope drift → warning" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s5-drift.md"
+  [[ "$output" == *"LINT|WARN"*"S5"*"scope drift"* ]]
+}
+
+@test "S5: query-scope is skipped (no warning regardless of hash)" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s5-query-scope.md"
+  [[ "$output" != *"LINT|WARN"*"S5"* ]]
+  [[ "$output" != *"LINT|ERROR"*"S5"* ]]
+}

@@ -330,6 +330,46 @@ synth_check_s4() {
   done < <(grep -oE '\[\[[a-z0-9][a-z0-9|-]*\]\]' <<<"$region" | sed -E 's/^\[\[|\]\]$//g')
 }
 
+# --- S5: scope drift --------------------------------------------------------
+# Recompute scope_hash from the page's scope: block; compare to the BEGIN
+# marker's declared hash. Skip query-scoped pages (qmd is non-deterministic).
+synth_check_s5() {
+  local page="$1"
+  local content_dir="${2:-content}"
+
+  # Detect query scope; skip.
+  local scope_kind=""
+  local in_fm=0 in_scope=0
+  while IFS= read -r line; do
+    [[ "$line" == "---" ]] && in_fm=$((in_fm + 1)) && continue
+    [[ "$in_fm" -ne 1 ]] && continue
+    if [[ "$line" =~ ^scope:[[:space:]]*$ ]]; then in_scope=1; continue; fi
+    if [[ "$in_scope" -eq 1 ]]; then
+      if [[ "$line" =~ ^[^[:space:]] ]]; then in_scope=0; continue; fi
+      [[ "$line" =~ ^[[:space:]]+tag:    ]] && scope_kind="tag"
+      [[ "$line" =~ ^[[:space:]]+slugs:  ]] && scope_kind="slugs"
+      [[ "$line" =~ ^[[:space:]]+query:  ]] && scope_kind="query"
+    fi
+  done < "$page"
+  [[ "$scope_kind" = "query" ]] && return 0
+
+  local declared_hash
+  declared_hash=$(grep -oE 'scope_hash=[a-f0-9]{6}' "$page" | head -1 | cut -d= -f2)
+  [[ -n "$declared_hash" ]] || return 0
+
+  local resolved_slugs
+  resolved_slugs="$(synth_resolve_scope_slugs "$page" "$content_dir")"
+
+  local current_hash
+  current_hash=$(printf -- '%s\n' "$resolved_slugs" | sort -u | python3 scripts/lint-synth-hash.py)
+
+  [[ -n "$current_hash" ]] || return 0
+  if [[ "$declared_hash" != "$current_hash" ]]; then
+    echo "LINT|WARN|$page|S5: scope drift (declared=$declared_hash current=$current_hash); consider regen"
+    WARNS=$((WARNS + 1))
+  fi
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -349,7 +389,8 @@ synth_lint_file() {
   synth_check_s2 "$page"
   synth_check_s3 "$page" "$content_dir"
   synth_check_s4 "$page" "$content_dir"
-  # synth_check_s5..S9 added in subsequent tasks.
+  synth_check_s5 "$page" "$content_dir"
+  # synth_check_s6..S9 added in subsequent tasks.
 }
 
 synth_lint_dir() {

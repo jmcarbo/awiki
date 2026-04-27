@@ -69,6 +69,14 @@ Full architecture: see `docs/superpowers/specs/2026-04-27-llm-wiki-scaffold-desi
 
 Run `bash scripts/check-deps.sh` to verify.
 
+## Scheduled lint
+
+Pre-built configs ship under `scheduled/`:
+
+- **macOS (launchd):** `cp scheduled/launchd.plist.example ~/Library/LaunchAgents/com.user.awiki.lint.plist`, edit the absolute path, `launchctl load ~/Library/LaunchAgents/com.user.awiki.lint.plist`.
+- **Linux (systemd):** copy `scheduled/awiki-lint.service.example` and `scheduled/awiki-lint.timer.example` to `~/.config/systemd/user/`, drop the `.example`, edit the absolute path, then `systemctl --user daemon-reload && systemctl --user enable --now awiki-lint.timer`.
+- **GitHub Actions:** `cp scheduled/github-action.yml.example .github/workflows/awiki-ci.yml`. If the repo uses git-crypt, set the `GIT_CRYPT_KEY` repo secret to the base64-encoded key; the workflow unlocks before lint/test.
+
 ## License
 
 Choose your own per-clone. Template ships without a LICENSE file.

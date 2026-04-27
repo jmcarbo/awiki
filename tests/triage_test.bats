@@ -91,3 +91,137 @@ inbox_id_for_lineno() {
   [ "$status" -eq 7 ]
   wait $bg_pid 2>/dev/null || true
 }
+
+@test "triage trash: removes inbox line via strikethrough, logs" {
+  local id; id="$(inbox_id_for_lineno 7)"   # "- 2026-04-27 14:32 call dentist..."
+  run bash scripts/triage.sh "$id" trash lineno=7
+  [ "$status" -eq 0 ]
+  # Original line replaced with strikethrough form (~~...~~) per spec table.
+  grep -q '^~~- 2026-04-27 14:32 call dentist about crown~~$' content/inbox.md
+  grep -q 'triage | trash' .awiki/log
+}
+
+@test "triage do-now: appends [x] to chosen project, removes inbox line" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  # Pre-create a project page so we can check append (act test will exercise lazy create).
+  cat > content/projects/dentist.md <<'EOF'
+---
+title: "Dentist"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  run bash scripts/triage.sh "$id" do-now project_slug=dentist context_slug=phone lineno=7
+  [ "$status" -eq 0 ]
+  grep -qE '^- \[x\] call dentist about crown @phone done:[0-9]{4}-[0-9]{2}-[0-9]{2} \^[a-z0-9]{8}$' content/projects/dentist.md
+  ! grep -q 'call dentist about crown' content/inbox.md
+  grep -q 'triage | do-now' .awiki/log
+}
+
+@test "triage act with project_slug=_loose lazily creates _loose.md" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  [ ! -f content/projects/_loose.md ]
+  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone lineno=7
+  [ "$status" -eq 0 ]
+  [ -f content/projects/_loose.md ]
+  grep -q '^type: project$'  content/projects/_loose.md
+  grep -q '^status: active$' content/projects/_loose.md
+  grep -qE '^- \[ \] call dentist about crown @phone \^[a-z0-9]{8}$' content/projects/_loose.md
+  ! grep -q 'call dentist about crown' content/inbox.md
+}
+
+@test "triage someday with project_slug=_someday lazily creates _someday.md" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  [ ! -f content/projects/_someday.md ]
+  run bash scripts/triage.sh "$id" someday project_slug=_someday lineno=7
+  [ "$status" -eq 0 ]
+  [ -f content/projects/_someday.md ]
+  grep -q '^type: project$'   content/projects/_someday.md
+  grep -q '^status: someday$' content/projects/_someday.md
+  grep -qE '^- \[>\] call dentist about crown \^[a-z0-9]{8}$' content/projects/_someday.md
+}
+
+@test "triage defer-scheduled: appends [ ] with due:" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  cat > content/projects/dentist.md <<'EOF'
+---
+title: "Dentist"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  run bash scripts/triage.sh "$id" defer-scheduled \
+    project_slug=dentist context_slug=phone due=2026-05-15 lineno=7
+  [ "$status" -eq 0 ]
+  grep -qE '^- \[ \] call dentist about crown @phone due:2026-05-15 \^[a-z0-9]{8}$' content/projects/dentist.md
+}
+
+@test "triage defer-scheduled: rejects bad date with exit 4" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" defer-scheduled \
+    project_slug=dentist due=2026-02-30 lineno=7
+  [ "$status" -eq 4 ]
+  echo "$output" | grep -q "bad date"
+}
+
+@test "triage waiting: requires wait_for and stamps since:" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  cat > content/projects/q3.md <<'EOF'
+---
+title: "Q3"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  today="$(date -u +%Y-%m-%d)"
+  run bash scripts/triage.sh "$id" waiting \
+    project_slug=q3 wait_for=bob-smith lineno=7
+  [ "$status" -eq 0 ]
+  grep -qE "^- \[\?\] call dentist about crown wait:\[\[bob-smith\]\] since:${today} \^[a-z0-9]{8}$" content/projects/q3.md
+}
+
+@test "triage reference: writes new page under content/<page_type>s/" {
+  local id; id="$(inbox_id_for_lineno 8)"   # "idea: rewrite onboarding email"
+  run bash scripts/triage.sh "$id" reference \
+    page_type=concept ref_slug=onboarding-email-rewrite lineno=8
+  [ "$status" -eq 0 ]
+  [ -f content/concepts/onboarding-email-rewrite.md ]
+  grep -q '^type: concept$' content/concepts/onboarding-email-rewrite.md
+  ! grep -q 'idea: rewrite onboarding email' content/inbox.md
+}
+
+@test "triage rejects bad project_slug with exit 4" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" act project_slug='../etc/passwd' lineno=7
+  [ "$status" -eq 4 ]
+}
+
+@test "triage emits TRIAGE-RESULT trailer with structured payload" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" act lineno=7 project_slug=renovate-kitchen context_slug=phone
+  [ "$status" -eq 0 ]
+  # Last non-blank line is the trailer.
+  local trailer
+  trailer="$(printf '%s\n' "$output" | awk 'NF{last=$0} END{print last}')"
+  [[ "$trailer" == TRIAGE-RESULT\|* ]]
+  # Strip prefix and parse.
+  local json="${trailer#TRIAGE-RESULT|}"
+  echo "$json" | jq -e '.actions_taken | type == "array"' >/dev/null
+  echo "$json" | jq -e '.created_pages | type == "array"' >/dev/null
+  echo "$json" | jq -e '.updated_pages | type == "array"' >/dev/null
+}

@@ -246,3 +246,50 @@ PY
   [ "$status" -eq 0 ]
   [ -f content/synthesis/.staged/memex-briefing.md ]
 }
+
+@test "synth accept-stage promotes staged file" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  git -C "$WORK" init -q . 2>/dev/null || true
+  git -C "$WORK" add -A 2>/dev/null || true
+  git -C "$WORK" -c user.email=t@t -c user.name=t commit -q -m init 2>/dev/null || true
+  bash scripts/synth.sh regen memex-briefing --stage >/dev/null
+  # Fill staged file
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/.staged/memex-briefing.md")
+p.write_text(p.read_text().replace(
+  "<!-- END GENERATED -->",
+  "## TL;DR\n- s [[s1]]\n## Key Findings\n- k [[s2]]\n## Open Questions\n- q [[s3]]\n## Evidence\n> \"q\" — [[s1]]\n<!-- END GENERATED -->",
+))
+PY
+  bash scripts/synth.sh finalize memex-briefing >/dev/null
+  run bash scripts/synth.sh accept-stage memex-briefing
+  [ "$status" -eq 0 ]
+  [ ! -f content/synthesis/.staged/memex-briefing.md ]
+  run grep '## TL;DR' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+}
+
+@test "synth accept-stage exits 7 if no staged file" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  run bash scripts/synth.sh accept-stage memex-briefing
+  [ "$status" -eq 7 ]
+}
+
+@test "synth refine appends feedback bullet and creates section" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  run bash scripts/synth.sh refine memex-briefing "tighten the TL;DR"
+  [ "$status" -eq 0 ]
+  run grep -F '## Feedback' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+  run grep -F -- '- tighten the TL;DR' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+}
+
+@test "synth refine is idempotent on exact-duplicate bullet" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  bash scripts/synth.sh refine memex-briefing "be concise"
+  bash scripts/synth.sh refine memex-briefing "be concise"
+  run grep -c -F -- '- be concise' content/synthesis/memex-briefing.md
+  [ "$output" = "1" ]
+}

@@ -621,6 +621,77 @@ cmd_regen() {
   echo "SYNTH-REGEN|target=$target|stage=$stage|scope_hash=$hash" >&2
 }
 
+cmd_accept_stage() {
+  if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh accept-stage <slug>"; fi
+  local slug="$1"; require_slug "$slug" "synthesis-page-slug"
+  local staged="$STAGED_DIR/$slug.md"
+  local live="$SYNTH_DIR/$slug.md"
+  [[ -f "$staged" ]] || { EXIT_CODE=7 die "no staged file at $staged"; }
+
+  if ! bash "$REPO_ROOT/scripts/lint.sh" --only=synth --file="$staged" 2>/dev/null; then
+    EXIT_CODE=6 die "scoped lint failed for staged file"
+  fi
+  mv "$staged" "$live"
+  bash "$REPO_ROOT/scripts/log-append.sh" synth -- "$(synth_fm_field "$live" plugin) $slug accept-stage"
+  echo "SYNTH-ACCEPT-STAGE|target=$live" >&2
+}
+
+cmd_refine() {
+  if [[ $# -lt 2 ]]; then EXIT_CODE=1 die "usage: synth.sh refine <slug> \"<note>\""; fi
+  local slug="$1"; shift; require_slug "$slug" "synthesis-page-slug"
+  local note="$*"
+  local page="$SYNTH_DIR/$slug.md"
+  [[ -f "$page" ]] || { EXIT_CODE=1 die "synthesis page not found: $page"; }
+
+  # Idempotence guard.
+  if grep -F -q -- "- $note" "$page"; then
+    echo "SYNTH-REFINE|skipped (duplicate)|$slug" >&2
+    return 0
+  fi
+
+  if grep -q '^## Feedback$' "$page"; then
+    # Append bullet inside existing Feedback section, before the next H2 or BEGIN marker.
+    awk -v note="$note" '
+      BEGIN{ in_fb=0; emitted=0 }
+      /^## Feedback$/ { in_fb=1; print; next }
+      in_fb==1 && /^<!-- BEGIN GENERATED / && emitted==0 {
+        print "- " note
+        print ""
+        emitted=1
+        in_fb=0
+        print
+        next
+      }
+      in_fb==1 && /^## / && !/^## Feedback$/ && emitted==0 {
+        print "- " note
+        print ""
+        emitted=1
+        in_fb=0
+        print
+        next
+      }
+      { print }
+    ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+  else
+    # Insert "## Feedback\n- <note>\n" before the BEGIN marker.
+    awk -v note="$note" '
+      BEGIN{ inserted=0 }
+      /^<!-- BEGIN GENERATED / && inserted==0 {
+        print "## Feedback"
+        print ""
+        print "- " note
+        print ""
+        inserted=1
+      }
+      { print }
+    ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+  fi
+
+  local today; today="$(date '+%Y-%m-%d')"
+  synth_fm_set_scalar "$page" "last_updated" "$today"
+  echo "SYNTH-REFINE|appended|$slug|$note" >&2
+}
+
 cmd_resolve() {
   if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh resolve <slug>"; fi
   local slug="$1"; require_slug "$slug" "synthesis-page-slug"
@@ -647,14 +718,13 @@ USAGE
   fi
   local sub="$1"; shift
   case "$sub" in
-    list) cmd_list "$@" ;;
-    resolve) cmd_resolve "$@" ;;
-    new) cmd_new "$@" ;;
-    finalize) cmd_finalize "$@" ;;
-    regen) cmd_regen "$@" ;;
-    accept-stage|refine)
-      EXIT_CODE=1 die "subcommand '$sub' not yet implemented"
-      ;;
+    list)         cmd_list "$@" ;;
+    resolve)      cmd_resolve "$@" ;;
+    new)          cmd_new "$@" ;;
+    finalize)     cmd_finalize "$@" ;;
+    regen)        cmd_regen "$@" ;;
+    accept-stage) cmd_accept_stage "$@" ;;
+    refine)       cmd_refine "$@" ;;
     *) EXIT_CODE=1 die "unknown subcommand: $sub" ;;
   esac
 }

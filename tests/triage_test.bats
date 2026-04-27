@@ -265,3 +265,97 @@ EOF
   echo "$json" | jq -e '.created_pages | type == "array"' >/dev/null
   echo "$json" | jq -e '.updated_pages | type == "array"' >/dev/null
 }
+
+@test "triage --interactive walks inbox one item at a time and applies outcomes" {
+  command -v expect >/dev/null 2>&1 || skip "expect not installed"
+
+  # Pre-create a project page so the walker can pick it.
+  cat > content/projects/dentist.md <<'EOF'
+---
+title: "Dentist"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+
+  # Drive the walker via expect: outcome=trash on line 7, then EOF on line 8.
+  cat > /tmp/triage_drive.exp <<EOF
+#!/usr/bin/env expect
+set timeout 5
+set env(AWIKI_REPO_ROOT) "$TMP"
+set env(AWIKI_LOG_FILE) "$TMP/.awiki/log"
+set env(PATH) "$PATH"
+spawn bash scripts/triage.sh --interactive
+expect "Outcome*"
+send "trash\r"
+expect -re "Outcome.*"
+send -- "\x04"
+expect eof
+EOF
+  run expect /tmp/triage_drive.exp
+  [ "$status" -eq 0 ]
+  grep -q '^~~- 2026-04-27 14:32 call dentist about crown~~$' content/inbox.md
+  # Line 8 (idea: rewrite onboarding email) was NOT applied because we EOF'd.
+  grep -q 'idea: rewrite onboarding email' content/inbox.md
+}
+
+@test "triage --interactive re-prompts on regex-invalid project_slug" {
+  command -v expect >/dev/null 2>&1 || skip "expect not installed"
+  cat > /tmp/triage_drive2.exp <<EOF
+#!/usr/bin/env expect
+set timeout 5
+set env(AWIKI_REPO_ROOT) "$TMP"
+set env(AWIKI_LOG_FILE) "$TMP/.awiki/log"
+set env(PATH) "$PATH"
+spawn bash scripts/triage.sh --interactive
+expect "Outcome*"
+send "act\r"
+expect "Project slug*"
+send "../etc/passwd\r"
+expect {
+  "Project slug*" { send "_loose\r" }
+  timeout { exit 1 }
+}
+expect "Context slug*"
+send "phone\r"
+expect "Outcome*"
+send -- "\x04"
+expect eof
+EOF
+  run expect /tmp/triage_drive2.exp
+  [ "$status" -eq 0 ]
+  [ -f content/projects/_loose.md ]
+}
+
+@test "triage --interactive ctrl-c aborts current item but keeps prior items applied" {
+  command -v expect >/dev/null 2>&1 || skip "expect not installed"
+  cat > /tmp/triage_drive3.exp <<EOF
+#!/usr/bin/env expect
+set timeout 5
+set env(AWIKI_REPO_ROOT) "$TMP"
+set env(AWIKI_LOG_FILE) "$TMP/.awiki/log"
+set env(PATH) "$PATH"
+spawn bash scripts/triage.sh --interactive
+expect "Outcome*"
+send "trash\r"
+expect "Outcome*"
+send "act\r"
+expect "Project slug*"
+send -- "\x03"
+expect eof
+EOF
+  run expect /tmp/triage_drive3.exp
+  # The first item should still be applied (strikethrough on line 7).
+  grep -q '^~~- 2026-04-27 14:32 call dentist about crown~~$' content/inbox.md
+  # The second item (line 8) was aborted -> still present, no _loose action.
+  grep -q 'idea: rewrite onboarding email' content/inbox.md
+  # If _loose.md was created, it MUST NOT contain the second item's text.
+  if [ -f content/projects/_loose.md ]; then
+    ! grep -q 'idea: rewrite onboarding email' content/projects/_loose.md
+  fi
+}

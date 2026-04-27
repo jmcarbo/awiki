@@ -594,6 +594,217 @@ awiki_verify_inbox_line_id() {
 
 # Stubs filled in by task 18a.11.
 triage_increment_and_maybe_rebuild() { :; }
-triage_interactive() { echo "TODO interactive" >&2; return 0; }
+
+# === Interactive walker (Task 18a.10) ===
+triage_interactive() {
+  # Build the work list: each unprocessed inbox line, then each raw file.
+  local inbox="${AWIKI_REPO_ROOT:-.}/content/inbox.md"
+  local raw_dir="${AWIKI_REPO_ROOT:-.}/raw/inbox/interactive"
+
+  # Snapshot inbox lines into arrays first so stdin stays free for prompts.
+  local -a item_linenos=() item_lines=()
+  if [[ -f "$inbox" ]]; then
+    local lineno=0
+    local in_fm=0 fm_seen=0
+    local ln
+    while IFS= read -r ln || [[ -n "$ln" ]]; do
+      lineno=$((lineno + 1))
+      if [[ "$ln" == "---" ]]; then
+        if [[ $in_fm -eq 0 && $fm_seen -eq 0 ]]; then
+          in_fm=1; fm_seen=1; continue
+        elif [[ $in_fm -eq 1 ]]; then
+          in_fm=0; continue
+        fi
+      fi
+      [[ $in_fm -eq 1 ]] && continue
+      [[ -z "$ln" ]] && continue
+      [[ "$ln" =~ ^~~ ]] && continue   # already trashed
+      [[ "$ln" =~ ^- ]] || continue
+      item_linenos+=("$lineno")
+      item_lines+=("$ln")
+    done < "$inbox"
+  fi
+
+  local i
+  for i in "${!item_linenos[@]}"; do
+    triage_walk_one_inbox_item "$inbox" "${item_linenos[$i]}" "${item_lines[$i]}" || true
+  done
+
+  # Then walk raw files. Snapshot the find output similarly.
+  if [[ -d "$raw_dir" ]]; then
+    local -a raw_files=()
+    while IFS= read -r -d '' f; do
+      raw_files+=("$f")
+    done < <(find "$raw_dir" -type f -print0)
+    local rf
+    for rf in "${raw_files[@]}"; do
+      triage_walk_one_raw_item "$rf" || true
+    done
+  fi
+}
+
+triage_walk_one_inbox_item() {
+  local inbox="$1"; local lineno="$2"; local raw_line="$3"
+
+  printf '\n--- inbox line %d ---\n%s\n' "$lineno" "$raw_line"
+
+  # Per-item Ctrl-C handler: catch SIGINT, print "(aborted)", return without
+  # applying. The outer trap restores at function return.
+  local aborted=0
+  trap 'aborted=1; printf "\n(aborted, item left unprocessed)\n"; return 0' INT
+
+  local outcome
+  outcome="$(triage_prompt_outcome)" || { trap - INT; return 0; }
+  [[ -z "$outcome" || "$outcome" == "EOF" ]] && { trap - INT; return 0; }
+
+  local id
+  id="$(awiki_synthesize_inbox_id "$raw_line" "$lineno")"
+
+  declare -A params=()
+  params[lineno]="$lineno"
+  triage_prompt_params "$outcome" params || { trap - INT; return 0; }
+  [[ $aborted -eq 1 ]] && { trap - INT; return 0; }
+
+  # Build positional arg list and re-invoke triage.sh's apply path.
+  local kv_args=()
+  local k
+  for k in "${!params[@]}"; do
+    [[ -z "${params[$k]}" ]] && continue
+    kv_args+=("${k}=${params[$k]}")
+  done
+  if ! bash "$0" "$id" "$outcome" "${kv_args[@]}"; then
+    printf '(skipping; previous error)\n' >&2
+  fi
+  trap - INT
+}
+
+triage_walk_one_raw_item() {
+  local f="$1"
+  printf '\n--- raw file %s ---\n' "$f"
+  local repo_root="${AWIKI_REPO_ROOT:-.}"
+  local rel="${f#"${repo_root}"/}"
+  local sha; sha="$(printf '%s' "$rel" | sha1sum | awk '{print substr($1,1,10)}')"
+  local id="file-${sha}"
+
+  local aborted=0
+  trap 'aborted=1; printf "\n(aborted)\n"; return 0' INT
+
+  local outcome
+  outcome="$(triage_prompt_outcome)" || { trap - INT; return 0; }
+  [[ -z "$outcome" || "$outcome" == "EOF" ]] && { trap - INT; return 0; }
+
+  declare -A params=()
+  triage_prompt_params "$outcome" params || { trap - INT; return 0; }
+  [[ $aborted -eq 1 ]] && { trap - INT; return 0; }
+
+  local kv_args=()
+  local k
+  for k in "${!params[@]}"; do
+    [[ -z "${params[$k]}" ]] && continue
+    kv_args+=("${k}=${params[$k]}")
+  done
+  bash "$0" "$id" "$outcome" "${kv_args[@]}" || true
+  trap - INT
+}
+
+# Synthesize the same id format as triage_inbox does: inbox-<sha>-<lineno>.
+awiki_synthesize_inbox_id() {
+  local raw="$1"; local lineno="$2"
+  local sha; sha="$(printf '%s' "$raw" | sha1sum | awk '{print substr($1,1,10)}')"
+  printf 'inbox-%s-%d' "$sha" "$lineno"
+}
+
+# Outcome prompt: regex-validated against the OUTCOMES enum; re-prompts on
+# bad input. EOF (Ctrl-D) returns "EOF" so the caller can skip the item.
+triage_prompt_outcome() {
+  local choice
+  while true; do
+    if ! IFS= read -r -p 'Outcome (trash|do-now|act|defer-scheduled|waiting|reference|someday)? ' choice; then
+      printf 'EOF'; return 0
+    fi
+    if [[ " $OUTCOMES " == *" $choice "* ]]; then
+      printf '%s' "$choice"; return 0
+    fi
+    printf '  unknown outcome; try again.\n' >&2
+  done
+}
+
+# Per-outcome param prompts. Populates the named-ref associative array.
+triage_prompt_params() {
+  local outcome="$1"; local -n out="$2"
+  # Lineno prompt is shared (skip if pre-supplied by the walker).
+  if [[ -z "${out[lineno]:-}" ]]; then
+    triage_prompt_value lineno '^[0-9]+$' "Lineno? " out
+  fi
+  case "$outcome" in
+    trash) ;;
+    do-now)
+      triage_prompt_slug project_slug "Project slug (suggestions: $(triage_slug_hints projects))? " 1 out
+      triage_prompt_slug context_slug "Context slug (suggestions: $(triage_slug_hints contexts))? " 0 out
+      ;;
+    act)
+      triage_prompt_slug project_slug "Project slug (suggestions: $(triage_slug_hints projects))? " 1 out
+      triage_prompt_slug context_slug "Context slug (suggestions: $(triage_slug_hints contexts))? " 0 out
+      ;;
+    defer-scheduled)
+      triage_prompt_slug project_slug "Project slug? " 1 out
+      triage_prompt_slug context_slug "Context slug? " 0 out
+      triage_prompt_value due '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' "Due (YYYY-MM-DD, blank for defer)? " out
+      if [[ -z "${out[due]:-}" ]]; then
+        triage_prompt_value defer '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' "Defer (YYYY-MM-DD)? " out
+      fi
+      ;;
+    waiting)
+      triage_prompt_slug project_slug "Project slug? " 1 out
+      triage_prompt_value wait_for '^[a-z0-9][a-z0-9-]{0,63}$' "Wait-for entity slug? " out
+      ;;
+    reference)
+      triage_prompt_value page_type '^(entity|concept|topic|source)$' "Page type? " out
+      triage_prompt_value ref_slug '^[a-z0-9][a-z0-9-]{0,63}$' "Reference slug? " out
+      ;;
+    someday)
+      triage_prompt_slug project_slug "Project slug? " 1 out
+      ;;
+  esac
+}
+
+# Generic prompt: regex-validated, blank allowed.
+# Args: <key> <regex> <prompt-string> <namref>
+# Caller passes the literal name of an associative array (typically "params");
+# the namref is named __pv_out to avoid circular collision when callers use a
+# namref themselves (e.g. triage_prompt_params has its own `out` namref).
+triage_prompt_value() {
+  local key="$1"; local regex="$2"; local prompt="$3"; local -n __pv_out="$4"
+  local v
+  while true; do
+    if ! IFS= read -r -p "$prompt" v; then return 1; fi
+    if [[ -z "$v" ]]; then __pv_out[$key]=""; return 0; fi
+    if [[ "$v" =~ $regex ]]; then __pv_out[$key]="$v"; return 0; fi
+    printf '  invalid; try again.\n' >&2
+  done
+}
+
+# Slug prompt with autocomplete-hint string. <required> is 1 or 0.
+triage_prompt_slug() {
+  local key="$1"; local prompt="$2"; local required="$3"; local -n __ps_out="$4"
+  local regex='^[a-z0-9_][a-z0-9_-]{0,63}$'
+  if [[ "$key" != "project_slug" ]]; then regex='^[a-z0-9][a-z0-9-]{0,63}$'; fi
+  local v
+  while true; do
+    if ! IFS= read -r -p "$prompt" v; then return 1; fi
+    if [[ -z "$v" && "$required" -eq 0 ]]; then __ps_out[$key]=""; return 0; fi
+    if [[ -n "$v" && "$v" =~ $regex ]]; then __ps_out[$key]="$v"; return 0; fi
+    printf '  invalid slug; try again.\n' >&2
+  done
+}
+
+# Slug autocomplete hints. <kind> = "projects" | "contexts".
+triage_slug_hints() {
+  local kind="$1"
+  local dir="${AWIKI_REPO_ROOT:-.}/content/${kind}"
+  [[ -d "$dir" ]] || { printf 'none'; return 0; }
+  find "$dir" -maxdepth 1 -name '*.md' -not -name '_index.md' -exec basename {} .md \; \
+    | sort | paste -sd, -
+}
 
 main "$@"

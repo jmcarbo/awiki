@@ -382,3 +382,14 @@ setup_mindmap_fixture() {
     grep -qF "$section" synthesis-plugins/mindmap.md
   done
 }
+
+@test "synth.sh new timeline produces manifest-conformant scaffold" {
+  run bash scripts/synth.sh new timeline timeline-test --tag=memex
+  [ "$status" -eq 0 ]
+  PAGE="content/synthesis/timeline-test-timeline.md"
+  [ -f "$PAGE" ]
+  grep -q '^plugin: timeline$' "$PAGE"
+  for section in "## Timeline" "## Themes" "## Evidence"; do
+    grep -qF "$section" synthesis-plugins/timeline.md
+  done
+}

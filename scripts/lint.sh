@@ -46,6 +46,11 @@ declare -A ALIAS_COUNT
 
 while IFS= read -r -d '' page; do
   slug="$(basename "$page" .md)"
+  # Skip section indexes: every section has its own _index.md, so they all
+  # share the slug "_index". Mirrors the same skip in scripts/build.sh.
+  if [[ "$slug" == "_index" ]]; then
+    continue
+  fi
   if [[ -n "${SLUG_TO_PATH[$slug]:-}" ]]; then
     echo "LINT|ERROR|$page|duplicate slug: $slug also at ${SLUG_TO_PATH[$slug]}"
     ERRORS=$((ERRORS + 1))
@@ -70,6 +75,11 @@ while IFS= read -r -d '' page; do
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
 while IFS= read -r -d '' page; do
+  # Section indexes (_index.md) are landing pages with intentionally short bodies;
+  # exempt them from empty-page and per-page lint checks below.
+  if [[ "$(basename "$page")" == "_index.md" ]]; then
+    continue
+  fi
   body_len=$(awk '/^---$/{c++; next} c==2{print}' "$page" | wc -c | tr -d ' ')
   if [[ "$body_len" -lt 50 ]]; then
     echo "LINT|WARN|$page|empty page (<50 char body)"

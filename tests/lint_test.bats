@@ -155,6 +155,31 @@ E
   [[ "$output" != *"LINT|INFO"*"_index.md"*"orphan"* ]]
 }
 
+@test "lint does not flag _index.md as duplicate slug" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities" "$TMP/concepts"
+  cat > "$TMP/entities/_index.md" <<E
+---
+title: "Entities"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  cat > "$TMP/concepts/_index.md" <<E
+---
+title: "Concepts"
+type: section-index
+draft: false
+---
+
+Section landing.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" != *"duplicate slug: _index"* ]]
+}
+
 @test "lint warns on page missing from catalog" {
   TMP="$(mktemp -d)/content"
   mkdir -p "$TMP/entities"

@@ -315,3 +315,16 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"s1"* ]]
 }
+
+@test "synth.sh new mindmap produces manifest-conformant scaffold" {
+  run bash scripts/synth.sh new mindmap mindmap-test --tag=memex
+  [ "$status" -eq 0 ]
+  PAGE="content/synthesis/mindmap-test-mindmap.md"
+  [ -f "$PAGE" ]
+  grep -q '^plugin: mindmap$' "$PAGE"
+  grep -q '^output_subtype:' synthesis-plugins/mindmap.md
+  for section in "## Mindmap" "## Legend" "## Pages" "## Evidence"; do
+    # Required sections appear in the manifest (scaffold's BEGIN..END block is empty).
+    grep -qF "$section" synthesis-plugins/mindmap.md
+  done
+}

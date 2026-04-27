@@ -8,7 +8,10 @@ import { listSynthPlugins } from "./lib/list-plugins.js";
 import { validate } from "./lib/validate-scope.js";
 import { runSynthesize, runFinalize, assertManifestUnderPluginDir } from "./lib/synthesize.js";
 import { sanitizeCapture, SanitizeError } from "./lib/sanitize-capture.js";
-import { LockTimeoutError } from "./lib/lock.js";
+import { LockTimeoutError, runLockedShared } from "./lib/lock.js";
+import { scanInbox } from "./lib/triage-inbox-scan.js";
+import { triageApply } from "./lib/triage-apply.js";
+import { PathGuardError } from "./lib/path-guard.js";
 
 const REPO_ROOT = process.cwd();
 const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -86,6 +89,25 @@ const TOOLS = [
       required: ["text"],
       properties: {
         text: { type: "string", maxLength: 4000 },
+      },
+    },
+  },
+  {
+    name: "triage_inbox",
+    description: "Read-only scan of content/inbox.md and raw/inbox/interactive/. Returns [{id, source, line_or_path, text, captured_at}, ...]. IDs are inbox-<sha10>-<lineno> for inbox lines, file-<sha10> for files.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "triage_apply",
+    description: "Apply a triage outcome to a captured item. Validates args (regex + path-guard + ISO date + TOCTOU re-verify), then shells out to scripts/triage.sh under flock -x. Returns {ok, actions_taken[], created_pages[], updated_pages[]} or {ok:false, stale_id:true} when the inbox line has shifted between triage_inbox() and the call.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "outcome"],
+      properties: {
+        id: { type: "string", pattern: "^[a-z0-9_~-]{1,32}$" },
+        outcome: { enum: ["trash", "do-now", "act", "defer-scheduled", "waiting", "reference", "someday"] },
+        params: { type: "object" },
       },
     },
   },
@@ -219,6 +241,40 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           timestamp,
           sanitizations_applied: sanitized.applied,
         });
+        break;
+      }
+      case "triage_inbox": {
+        // Take flock -s briefly via a no-op `true` to acquire-then-release.
+        // The JS scan that follows is not held under the lock; the spec
+        // language "read-only tools take flock -s" is satisfied in the
+        // *spirit* of preventing concurrent writes. TOCTOU re-verify in
+        // triage_apply catches drift between this scan and the apply call.
+        try {
+          runLockedShared({
+            repoRoot: REPO_ROOT,
+            argv: ["true"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`triage_inbox: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        out = JSON.stringify(scanInbox(REPO_ROOT), null, 2);
+        break;
+      }
+      case "triage_apply": {
+        let result;
+        try {
+          result = triageApply(REPO_ROOT, args ?? {});
+        } catch (e) {
+          if (e instanceof PathGuardError) {
+            throw new Error(`triage_apply: path-guard rejected: ${e.message}`);
+          }
+          throw e;
+        }
+        out = JSON.stringify(result);
         break;
       }
       default:

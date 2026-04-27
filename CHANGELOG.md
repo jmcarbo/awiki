@@ -6,3 +6,5 @@
 - `template-update.sh` orchestrator skeleton with Phase 0a (preflight: dirty tree, branch, encryption, pending prompts, source-change), Phase 1 (fetch + ancestor auto-recovery + state file init), Phase 0b (post-fetch schema check + encryption recheck + optional `--verify-signature`) (Phase 03).
 - `template-update.sh` Phase 1.5 (schema-upgrade with update branch + Commit 0) and Phase 2 (plan emit, `--print-migrations` body framing, scratch-merge cleanup) (Phase 04).
 - `template-update.sh` Phase 3 Commit A: sync per-strategy (overwrite, three_way, attributes_merge with `--accept-attribute-changes` gate, new_file prompts, deletions with locally-modified prompt), conflict-marker halt, branch creation if needed (Phase 05).
+- Migration runner with stripped env + `touches:` enforcement + `.awiki/` ban + `--skip-migration <id>`.
+- LLM prompt staging into `.awiki/pending-prompts/` with `scope_glob` enforcement (blocks secrets/, .awiki/, .git/, themes/) and `risk` metadata; `risk: high` under `--non-interactive` auto-declined and recorded as skipped (Phase 06).

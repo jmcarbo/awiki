@@ -548,8 +548,51 @@ _triage_emit_trailer() {
     "$at" "$cp" "$up"
 }
 
-# Stubs filled in by tasks 18a.9 / 18a.11.
-awiki_verify_inbox_line_id() { :; }
+# === Inbox-line TOCTOU re-verify (Task 18a.9) ===
+# Re-reads inbox line at <lineno>, recomputes sha1[:10], compares to the hash
+# embedded in <id>. On mismatch (or missing line, or out-of-range lineno),
+# prints a single-line JSON diagnostic on stdout and exits 9. Verification
+# runs BEFORE any disk mutation so the inbox stays intact on rejection.
+awiki_verify_inbox_line_id() {
+  local id="$1"; local path="$2"; local lineno="$3"
+
+  if [[ ! "$id" =~ ^inbox-([a-z0-9]{10})-([0-9]+)$ ]]; then
+    echo '{"ok":false,"stale_id":true,"reason":"id_shape"}'
+    exit 9
+  fi
+  local expect_sha="${BASH_REMATCH[1]}"
+  local expect_line="${BASH_REMATCH[2]}"
+
+  if [[ "$expect_line" != "$lineno" ]]; then
+    echo '{"ok":false,"stale_id":true,"reason":"lineno_mismatch"}'
+    exit 9
+  fi
+
+  if [[ ! -f "$path" ]]; then
+    echo '{"ok":false,"stale_id":true,"reason":"inbox_missing"}'
+    exit 9
+  fi
+
+  local total
+  total="$(wc -l < "$path")"
+  # Strip leading whitespace from BSD wc output.
+  total="${total##*( )}"
+  total="${total// /}"
+  if [[ "$lineno" -lt 1 || "$lineno" -gt "$total" ]]; then
+    echo '{"ok":false,"stale_id":true,"reason":"lineno_out_of_range"}'
+    exit 9
+  fi
+
+  local actual_line actual_sha
+  actual_line="$(sed -n "${lineno}p" "$path")"
+  actual_sha="$(printf '%s' "$actual_line" | sha1sum | awk '{print substr($1,1,10)}')"
+  if [[ "$actual_sha" != "$expect_sha" ]]; then
+    echo '{"ok":false,"stale_id":true,"reason":"sha_mismatch"}'
+    exit 9
+  fi
+}
+
+# Stubs filled in by task 18a.11.
 triage_increment_and_maybe_rebuild() { :; }
 triage_interactive() { echo "TODO interactive" >&2; return 0; }
 

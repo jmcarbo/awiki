@@ -211,6 +211,46 @@ EOF
   [ "$status" -eq 4 ]
 }
 
+@test "triage rejects stale inbox-line id with exit 9 + structured stdout" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  # Mutate the inbox line so the recomputed sha differs.
+  sed -i.bak '7s/.*/- 2026-04-27 14:32 something else entirely/' content/inbox.md
+  rm -f content/inbox.md.bak
+
+  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone lineno=7
+  [ "$status" -eq 9 ]
+  echo "$output" | grep -q '"stale_id":true'
+  echo "$output" | grep -q '"ok":false'
+  # The mutated inbox line is NOT removed.
+  grep -q 'something else entirely' content/inbox.md
+}
+
+@test "triage rejects when inbox lineno no longer exists (file shorter)" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  # Truncate the inbox so line 7 is gone.
+  sed -i.bak '7d' content/inbox.md
+  rm -f content/inbox.md.bak
+  run bash scripts/triage.sh "$id" trash lineno=7
+  [ "$status" -eq 9 ]
+  echo "$output" | grep -q '"stale_id":true'
+}
+
+@test "triage accepts when inbox line is unchanged" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" trash lineno=7
+  [ "$status" -eq 0 ]
+  grep -q '^~~- 2026-04-27 14:32 call dentist about crown~~$' content/inbox.md
+}
+
+@test "triage stale-id does NOT emit TRIAGE-RESULT trailer" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  sed -i.bak '7s/.*/- 2026-04-27 14:32 something else entirely/' content/inbox.md
+  rm -f content/inbox.md.bak
+  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone lineno=7
+  [ "$status" -eq 9 ]
+  ! echo "$output" | grep -q 'TRIAGE-RESULT|'
+}
+
 @test "triage emits TRIAGE-RESULT trailer with structured payload" {
   local id; id="$(inbox_id_for_lineno 7)"
   run bash scripts/triage.sh "$id" act lineno=7 project_slug=renovate-kitchen context_slug=phone

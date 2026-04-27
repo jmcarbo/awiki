@@ -2,13 +2,28 @@
 set -uo pipefail
 
 FIX=0
+ONLY=""
+ONLY_FILE=""
 CONTENT_DIR="content"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fix) FIX=1; shift ;;
+    --only=*) ONLY="${1#--only=}"; shift ;;
+    --file=*) ONLY_FILE="${1#--file=}"; shift ;;
+    --) shift; break ;;
     *) CONTENT_DIR="$1"; shift ;;
   esac
 done
+
+# Source synth lint extension (always available; runs only if --only=synth or
+# default mode includes synth pages).
+if [[ -f "$(dirname "$0")/lint-synth.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/lint-synth.sh"
+elif [[ -f scripts/lint-synth.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/lint-synth.sh
+fi
 
 apply_fixes() {
   local page="$1"
@@ -30,7 +45,7 @@ apply_fixes() {
   fi
 }
 
-if [[ "$FIX" -eq 1 ]]; then
+if [[ "$FIX" -eq 1 && ( -z "$ONLY" || "$ONLY" = "all" ) ]]; then
   while IFS= read -r -d '' page; do
     apply_fixes "$page"
   done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
@@ -39,6 +54,8 @@ fi
 ERRORS=0
 WARNS=0
 INFOS=0
+
+if [[ -z "$ONLY" || "$ONLY" = "all" ]]; then
 
 declare -A SLUG_TO_PATH
 declare -A ALIAS_TO_SLUG
@@ -167,6 +184,19 @@ if [[ -f "$CATALOG" ]]; then
       WARNS=$((WARNS + 1))
     fi
   done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+fi
+
+fi  # end of: if [[ -z "$ONLY" || "$ONLY" = "all" ]]; then (mechanical lint block)
+
+# --- Synth lint dispatch ----------------------------------------------------
+if [[ -z "$ONLY" || "$ONLY" = "synth" || "$ONLY" = "all" ]]; then
+  if declare -F synth_lint_file >/dev/null 2>&1; then
+    if [[ -n "$ONLY_FILE" ]]; then
+      synth_lint_file "$ONLY_FILE" "$CONTENT_DIR"
+    else
+      synth_lint_dir "$CONTENT_DIR"
+    fi
+  fi
 fi
 
 echo "LINT-SUMMARY|errors=$ERRORS|warnings=$WARNS|info=$INFOS"

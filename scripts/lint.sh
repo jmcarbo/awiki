@@ -120,8 +120,20 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T6   "$actions_tsv" "$alias_map"
   awiki_lint_task_rule_T7
   awiki_lint_task_rule_T8   "$actions_tsv"
+  awiki_lint_task_rule_T9   "$actions_tsv"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
+}
+
+# Days between two YYYY-MM-DD dates ($2 - $1). Pure-bash via UTC seconds.
+# Negative if $2 < $1. Returns 0 on bad input.
+awiki_days_between() {
+  local a_secs b_secs
+  a_secs="$(date -u -d "$1" +%s 2>/dev/null \
+            || date -u -j -f "%Y-%m-%d" "$1" +%s 2>/dev/null)" || { printf '0'; return 0; }
+  b_secs="$(date -u -d "$2" +%s 2>/dev/null \
+            || date -u -j -f "%Y-%m-%d" "$2" +%s 2>/dev/null)" || { printf '0'; return 0; }
+  printf '%d' $(( (b_secs - a_secs) / 86400 ))
 }
 
 awiki_lint_task_rule_T1() {
@@ -330,17 +342,16 @@ awiki_lint_task_rule_T8() {
   [[ -d "$content_dir" ]] || return 0
 
   # Build the set of project files (relative path) that have at least one
-  # open action ([ ] or [/]). Read from actions.tsv if present; otherwise
-  # the set is empty (every active project will be flagged).
+  # open action ([ ] or [/]). Reads actions.tsv via awk because bash `read`
+  # with IFS=$'\t' collapses consecutive empty fields (whitespace-only IFS
+  # quirk), which corrupts the column layout for rows like
+  # `id<tab>?<tab>txt<tab>file<tab>line<tab><tab><tab>...`.
   declare -A has_open=()
   if [[ -f "$act" ]]; then
-    local _id status _text file _rest
-    while IFS=$'\t' read -r _id status _text file _rest; do
-      [[ "$file" == "file" ]] && continue
-      case "$status" in
-        ' '|'/') has_open["$file"]=1 ;;
-      esac
-    done < <(tail -n +2 "$act")
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      has_open["$line"]=1
+    done < <(awk -F'\t' 'NR>1 && ($2==" " || $2=="/") { print $4 }' "$act")
   fi
 
   while IFS= read -r f; do
@@ -363,6 +374,30 @@ awiki_lint_task_rule_T8() {
         "$relpath"
     fi
   done < <(find "$content_dir" -type f -name '*.md' 2>/dev/null | sort)
+}
+
+# T9: [?] action lines whose since: is > 14 days before today (UTC).
+# Boundary is strict: exactly 14d is silent, 15+ days warns.
+# actions.tsv columns: 1 id  2 status  3 text  4 file  5 line  6 context
+#                      7 due 8 defer  9 wait  10 since 11 every 12 done
+#                     13 priority 14 est 15 project 16 source_kind
+awiki_lint_task_rule_T9() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  while IFS=$'\n' read -r line; do
+    [[ -z "$line" ]] && continue
+    local id since file
+    id="$(printf '%s' "$line" | cut -f1)"
+    since="$(printf '%s' "$line" | cut -f2)"
+    file="$(printf '%s' "$line" | cut -f3)"
+    [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local age_days; age_days="$(awiki_days_between "$since" "$today")"
+    if [[ "$age_days" =~ ^-?[0-9]+$ ]] && (( age_days > 14 )); then
+      printf 'LINT|WARN|%s|T9: waiting-stale (since:%s, %dd ago) ^%s\n' \
+        "$file" "$since" "$age_days" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && $2=="?" && $10!="" { printf "%s\t%s\t%s\n", $1, $10, $4 }' "$act")
 }
 
 awiki_lint_task_rule_T14() {

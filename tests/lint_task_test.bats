@@ -299,3 +299,77 @@ EOF
   run run_lint
   ! grep -F 'T8:' <<< "$output"
 }
+
+# Helper: produce a YYYY-MM-DD that is N days before today, GNU+BSD portable.
+_n_days_ago() {
+  local n="$1"
+  date -u -d "-${n} days" +%Y-%m-%d 2>/dev/null \
+    || date -u -j -v-"${n}"d +%Y-%m-%d
+}
+
+# --- T9: waiting-stale (warn, since: > 14d ago) --------------------------
+
+@test "T9 fires when [?] since: > 14d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local stale; stale="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/q3-wait.md" <<EOF
+---
+title: "Q3 wait"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] q3 budget approval wait:[[bob-smith]] since:${stale} ^w03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T9:"* ]]
+  [[ "$output" == *"content/projects/q3-wait.md"* ]]
+}
+
+@test "T9 silent when [?] since: <= 14d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local fresh; fresh="$(_n_days_ago 7)"
+  cat > "$WORK/content/projects/q3-wait.md" <<EOF
+---
+title: "Q3 wait"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] q3 budget approval wait:[[bob-smith]] since:${fresh} ^w03
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T9:' <<< "$output"
+}
+
+@test "T9 boundary: exactly 14d is silent, exactly 15d is warn" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local d14; d14="$(_n_days_ago 14)"
+  local d15; d15="$(_n_days_ago 15)"
+  cat > "$WORK/content/projects/edge.md" <<EOF
+---
+title: "Edge"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [?] item14 wait:[[bob-smith]] since:${d14} ^edge14
+- [?] item15 wait:[[bob-smith]] since:${d15} ^edge15
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T9:"* ]]
+  [[ "$output" == *"edge15"* ]]
+  ! grep -E 'T9:.*edge14' <<< "$output"
+}

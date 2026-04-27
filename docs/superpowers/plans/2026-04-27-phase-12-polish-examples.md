@@ -21,7 +21,6 @@
 **Deliverable:** `examples/sample-wiki/` reference, full README smoke test verified, pre-commit hook installer, Obsidian vault config.
 
 **Branch:** `phase-12-polish`
-**Depends on:** all prior phases.
 
 ## Task 12.1: Branch + Obsidian vault config
 
@@ -136,13 +135,14 @@ git commit -m "docs: add examples/sample-wiki reference"
 - [ ] **Step 1: Fresh-clone smoke test (manual)**
 
 ```bash
-cd /tmp
-git clone /Users/joanmarc/dailywork/celonis/awiki test-clone
-cd test-clone
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+TEST_DIR="$(mktemp -d)/awiki-test-clone"
+git clone "$REPO_ROOT" "$TEST_DIR"
+cd "$TEST_DIR"
 git submodule update --init --recursive
 just check-deps
 just install-hooks
-echo "# Sample\nA test source about caves." > raw/inbox/interactive/sample.md
+printf "# Sample\nA test source about caves.\n" > raw/inbox/interactive/sample.md
 just ingest raw/inbox/interactive/sample.md
 just lint
 just build

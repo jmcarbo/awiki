@@ -21,7 +21,6 @@
 **Deliverable:** Pre-built configs for launchd (macOS), systemd (Linux), GitHub Actions (CI).
 
 **Branch:** `phase-9-scheduled`
-**Depends on:** Phase 2.
 
 ## Task 9.1: Branch + launchd plist
 

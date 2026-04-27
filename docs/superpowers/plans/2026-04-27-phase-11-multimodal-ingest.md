@@ -21,7 +21,6 @@
 **Deliverable:** `ingest-pdf.sh`, `ingest-audio.sh`, vision workflow doc.
 
 **Branch:** `phase-11-multimodal`
-**Depends on:** Phase 2.
 
 ## Task 11.1: Branch + `scripts/ingest-pdf.sh`
 

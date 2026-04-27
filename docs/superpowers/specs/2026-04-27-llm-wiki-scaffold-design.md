@@ -144,7 +144,7 @@ Filled by BOOTSTRAP: `wiki_name`, `domain`, one-line purpose.
 title: "Vannevar Bush"
 date: 2026-04-27
 last_updated: 2026-04-27
-type: entity                    # entity|concept|topic|source|synthesis|deck|chart|canvas|log|catalog
+type: entity                    # entity|concept|topic|source|synthesis|deck|chart|canvas|log|catalog|section-index
 tags: [memex, computing-history]
 aliases: [Bush, V. Bush]
 sources: ["[[s-as-we-may-think]]"]
@@ -418,7 +418,7 @@ A small Node MCP server at `mcp/awiki-server/` exposes wiki operations as native
 - Stdio transport (`@modelcontextprotocol/sdk` `StdioServerTransport`).
 - Server runs in user's working directory; no network listener. Inherits user's filesystem permissions.
 - All shell-outs use `execFileSync` with argument arrays (no shell interpolation) to prevent command injection from tool arguments.
-- Tool inputs validated with JSON Schema (hand-written or via `zod-to-json-schema`); requests with malformed args return MCP error responses.
+- Tool inputs validated with hand-written JSON schemas; requests with malformed args return MCP error responses.
 
 ### Security model
 - Server has read/write access to the repo it's launched from. It does NOT read the encryption keys directly — git-crypt key handling stays in `secrets/` outside the server's invocation path.
@@ -428,7 +428,7 @@ A small Node MCP server at `mcp/awiki-server/` exposes wiki operations as native
 ### Wiring
 - `scripts/wire-awiki-mcp.sh` registers the server in the user's agent harness:
   - **Claude Code:** project-level `./.mcp.json` (NOT `.claude/.mcp.json`).
-  - **Codex:** `~/.codex/config.toml` `[mcp.servers.awiki]` block (project-local override under `.codex/config.toml` if user prefers).
+  - **Codex:** project-local `./.codex/config.toml` `[mcp.servers.awiki]` block.
 - Wire script is idempotent; re-running updates the entry in place.
 
 ### When to use
@@ -609,12 +609,12 @@ The full v1 scope is broken into 12 phases. Each phase produces working, testabl
 | 3 | Hugo render | 1 | `build.sh` preprocessor, slug+alias maps, `serve.sh`, `hugo.toml`, theme submodule, smoke render. |
 | 4 | qmd integration | 1 | `install-qmd.sh`, `qmd-index.sh`, MCP option, `.awiki/qmd-status`, grep fallback. |
 | 5 | Encryption | 1, 2 | `encrypt-init.sh` (git-crypt + age), atomic `.gitignore` flip, `.gitattributes` patterns, lint privacy checks. |
-| 6 | Section indexes + catalog v2 | 1, 3 | Hugo `page-list` shortcode, template ships per-section `_index.md` files, lint exempts system pages from orphan check, catalog cross-link check, `scripts/update-catalog.sh`. |
+| 6 | Section indexes + catalog v2 | 1, 2, 3 | Hugo `page-list` shortcode, template ships per-section `_index.md` files, lint exempts system pages from orphan check, catalog cross-link check, `scripts/update-catalog.sh`. |
 | 7 | Slug rename, deletion, alias resolution | 2, 3 | `rename.sh`, `delete-page.sh`, alias map consumed by preprocessor + lint, alias-collision lint rule. |
-| 8 | MCP wiki-ops server | 2, 4 | `mcp/awiki-server` (Node) exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog`; BOOTSTRAP wiring option for Claude Code. |
+| 8 | MCP wiki-ops server | 2, 4, 6 | `mcp/awiki-server` (Node) exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog`; BOOTSTRAP wiring option for Claude Code and Codex. |
 | 9 | Scheduled lint configs | 2 | `scheduled/launchd.plist.example`, `scheduled/systemd.timer.example`, `scheduled/github-action.yml.example`, README docs. |
-| 10 | Auto-deploy templates | 3 | `deploy/netlify.toml`, `deploy/cloudflare-pages.toml`, `deploy/github-pages.yml.example`, README per-target instructions. |
-| 11 | Multimodal ingest helpers | 2 | `scripts/ingest-pdf.sh` (`pdftotext` / `marker`), `scripts/ingest-audio.sh` (`whisper-cpp`), vision-workflow doc in WIKI.md. |
+| 10 | Auto-deploy templates | 3, 5 | `deploy/netlify.toml`, `deploy/cloudflare-pages.toml`, `deploy/github-pages.yml.example`, `scripts/deploy-build.sh` with git-crypt unlock, README per-target instructions. |
+| 11 | Multimodal ingest helpers | 2, 5 | `scripts/ingest-pdf.sh` (`pdftotext` / `marker`), `scripts/ingest-audio.sh` (`whisper-cpp`), vision-workflow doc in WIKI.md. Originals stored under `raw/processed/_originals/` (privacy-protected by phase 5). |
 | 12 | Polish & examples | all | `docs/just-help.txt` finalized, `examples/sample-wiki/` reference, full README smoke test, pre-commit hook installer, Obsidian vault config committed. |
 
 **Spike absorption.** The two unverified assumptions (Hugo wikilink rendering, qmd build) are absorbed into phases 3 and 4 respectively, each starting with a 1-day spike task that validates assumptions and pins toolchain choices before the rest of the phase proceeds. No separate "spike phases."

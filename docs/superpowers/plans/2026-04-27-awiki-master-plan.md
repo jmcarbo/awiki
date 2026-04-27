@@ -23,7 +23,7 @@ Each phase ships independently with its own branch, tests, and merge gate. Phase
 | 3 | Hugo render | [`phase-03-hugo-render`](./2026-04-27-phase-03-hugo-render.md) | 1 |
 | 4 | qmd integration | [`phase-04-qmd-integration`](./2026-04-27-phase-04-qmd-integration.md) | 1 |
 | 5 | Encryption | [`phase-05-encryption`](./2026-04-27-phase-05-encryption.md) | 1, 2 |
-| 6 | Section indexes + catalog v2 | [`phase-06-section-indexes`](./2026-04-27-phase-06-section-indexes.md) | 1, 3 |
+| 6 | Section indexes + catalog v2 | [`phase-06-section-indexes`](./2026-04-27-phase-06-section-indexes.md) | 1, 2, 3 |
 | 7 | Slug rename, deletion, alias resolution | [`phase-07-rename-delete`](./2026-04-27-phase-07-rename-delete.md) | 2, 3 |
 | 8 | MCP wiki-ops server | [`phase-08-mcp-server`](./2026-04-27-phase-08-mcp-server.md) | 2, 4, 6 |
 | 9 | Scheduled lint configs | [`phase-09-scheduled-lint`](./2026-04-27-phase-09-scheduled-lint.md) | 2 |

@@ -21,7 +21,6 @@
 **Deliverable:** `install-qmd.sh`, `qmd-index.sh`, MCP wiring option, `.awiki/qmd-status` flag, grep fallback in WIKI.md.
 
 **Branch:** `phase-4-qmd-integration`
-**Depends on:** Phase 1.
 
 ## Task 4.1: Spike — confirm qmd build
 

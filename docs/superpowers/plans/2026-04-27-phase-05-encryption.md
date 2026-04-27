@@ -21,7 +21,6 @@
 **Deliverable:** `encrypt-init.sh` (git-crypt + age), atomic `.gitignore` flip, `.gitattributes` patterns, lint privacy checks.
 
 **Branch:** `phase-5-encryption`
-**Depends on:** Phase 1, 2.
 
 ## Task 5.1: Branch + `scripts/encrypt-init.sh` (git-crypt path)
 
@@ -155,7 +154,18 @@ E
 
 - [ ] **Step 3: Modify `scripts/lint.sh` — add privacy check**
 
-Inside the per-page-checks loop, after the empty-page check, add:
+`scripts/lint.sh` was created in phase 2. Open it and find the empty-page check (the second `while IFS= read -r -d '' page; do` loop):
+
+```bash
+while IFS= read -r -d '' page; do
+  body_len=$(awk '/^---$/{c++; next} c==2{print}' "$page" | wc -c | tr -d ' ')
+  if [[ "$body_len" -lt 50 ]]; then
+    echo "LINT|WARN|$page|empty page (<50 char body)"
+    WARNS=$((WARNS + 1))
+  fi
+```
+
+Insert the privacy check IMMEDIATELY AFTER the closing `fi` of the empty-page block and BEFORE the broken-wikilinks `while read -r link` line:
 
 ```bash
   # Parse the tags: line as a YAML list, check for an exact 'private' token.

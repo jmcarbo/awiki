@@ -4,7 +4,7 @@
 
 **Spec:** [`2026-04-27-llm-wiki-scaffold-design.md`](../specs/2026-04-27-llm-wiki-scaffold-design.md)
 **Master:** [`2026-04-27-awiki-master-plan.md`](./2026-04-27-awiki-master-plan.md)
-**Depends on:** Phase 1, 3
+**Depends on:** Phase 1, 2, 3 (modifies `scripts/lint.sh` from phase 2)
 **Previous:** [Phase 05](./2026-04-27-phase-05-encryption.md)
 **Next:** [Phase 07](./2026-04-27-phase-07-rename-delete.md)
 
@@ -21,7 +21,6 @@
 **Deliverable:** Hugo `page-list` shortcode, BOOTSTRAP scaffolds section indexes, lint exemptions for system pages, catalog cross-link checks.
 
 **Branch:** `phase-6-section-indexes`
-**Depends on:** Phase 1, 3.
 
 ## Task 6.1: Branch + Hugo shortcode
 
@@ -129,7 +128,18 @@ EOF
 
 - [ ] **Step 2: Add orphan check + system-page exemption to `scripts/lint.sh`**
 
-Insert this block after the alias-collision check, before the `LINT-SUMMARY` line:
+`scripts/lint.sh` was created in phase 2. Open it and find this anchor block (the alias-collision loop near the bottom):
+
+```bash
+for a in "${!ALIAS_COUNT[@]}"; do
+  if [[ "${ALIAS_COUNT[$a]}" -gt 1 ]]; then
+    echo "LINT|ERROR|content|alias collision: '$a' used by multiple pages"
+    ERRORS=$((ERRORS + 1))
+  fi
+done
+```
+
+Insert the orphan-check block IMMEDIATELY AFTER that `done` line and BEFORE the `echo "LINT-SUMMARY|..."` line:
 
 ```bash
 # Orphan check: count inbound wikilinks per slug; warn if zero.
@@ -371,7 +381,7 @@ git add scripts/update-catalog.sh tests/update_catalog_test.bats
 git commit -m "feat: add update-catalog script (rebuilds content/catalog.md from frontmatter)"
 ```
 
-## Task 6.5: Phase 6 merge
+## Task 6.6: Phase 6 merge
 
 ```bash
 git checkout main

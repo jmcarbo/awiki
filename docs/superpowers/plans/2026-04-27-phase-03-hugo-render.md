@@ -21,7 +21,6 @@
 **Deliverable:** Wikilink preprocessor (`build.sh`), live-watch wrapper (`serve.sh`), `hugo.toml`, `hugo-book` theme submodule, slug+alias maps, smoke render of fixture content.
 
 **Branch:** `phase-3-hugo-render`
-**Depends on:** Phase 1, 2.
 
 ## Task 3.1: Spike — confirm preprocessing approach
 

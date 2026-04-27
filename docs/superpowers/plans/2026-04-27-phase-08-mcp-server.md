@@ -21,7 +21,6 @@
 **Deliverable:** `mcp/awiki-server/` Node MCP server exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog`. BOOTSTRAP wiring option.
 
 **Branch:** `phase-8-mcp-server`
-**Depends on:** Phase 2, 4.
 
 ## Task 8.1: Branch + npm package
 

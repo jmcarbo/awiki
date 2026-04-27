@@ -21,7 +21,14 @@
 **Deliverable:** `rename.sh`, `delete-page.sh`. Alias-collision lint rule (already shipped phase 2/3).
 
 **Branch:** `phase-7-rename-delete`
-**Depends on:** Phase 2, 3.
+
+## Task 7.0: Branch
+
+- [ ] **Step 1: Create branch**
+
+```bash
+git checkout -b phase-7-rename-delete
+```
 
 ## Task 7.1: `scripts/rename.sh`
 
@@ -34,9 +41,12 @@ cat > tests/rename_test.bats <<'EOF'
 #!/usr/bin/env bats
 
 setup() {
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   WORK="$(mktemp -d)/repo"
-  mkdir -p "$WORK/content/entities"
-  cp scripts/rename.sh /dev/null 2>/dev/null || true
+  mkdir -p "$WORK/content/entities" "$WORK/scripts"
+  # rename.sh shells `bash scripts/log-append.sh ...` from cwd; mirror that script.
+  cp "$REPO_ROOT/scripts/log-append.sh" "$WORK/scripts/log-append.sh"
+  printf -- "---\ntitle: Log\ntype: log\ndraft: true\n---\n" > "$WORK/content/log.md"
   cat > "$WORK/content/entities/foo.md" <<E
 ---
 title: "Foo"
@@ -59,7 +69,7 @@ E
 teardown() { rm -rf "$WORK"; }
 
 @test "rename moves file and updates wikilinks" {
-  bash "$BATS_TEST_DIRNAME/../scripts/rename.sh" foo foo-renamed
+  bash "$REPO_ROOT/scripts/rename.sh" foo foo-renamed
   [ -f content/entities/foo-renamed.md ]
   [ ! -f content/entities/foo.md ]
   run grep -F '[[foo-renamed]]' content/entities/bar.md
@@ -121,8 +131,10 @@ cat > tests/delete_page_test.bats <<'EOF'
 #!/usr/bin/env bats
 
 setup() {
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   WORK="$(mktemp -d)/repo"
-  mkdir -p "$WORK/content/entities"
+  mkdir -p "$WORK/content/entities" "$WORK/scripts"
+  cp "$REPO_ROOT/scripts/log-append.sh" "$WORK/scripts/log-append.sh"
   cat > "$WORK/content/entities/foo.md" <<E
 ---
 title: "Foo"
@@ -145,18 +157,18 @@ E
 teardown() { rm -rf "$WORK"; }
 
 @test "delete-page removes file" {
-  bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" foo
+  bash "$REPO_ROOT/scripts/delete-page.sh" foo
   [ ! -f content/entities/foo.md ]
 }
 
 @test "delete-page marks wikilinks as broken" {
-  bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" foo
+  bash "$REPO_ROOT/scripts/delete-page.sh" foo
   run grep -F 'broken: was [[foo]]' content/entities/bar.md
   [ "$status" -eq 0 ]
 }
 
 @test "delete-page rejects unknown slug" {
-  run bash "$BATS_TEST_DIRNAME/../scripts/delete-page.sh" nonexistent
+  run bash "$REPO_ROOT/scripts/delete-page.sh" nonexistent
   [ "$status" -eq 2 ]
 }
 EOF

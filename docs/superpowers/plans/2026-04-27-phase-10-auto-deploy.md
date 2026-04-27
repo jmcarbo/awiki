@@ -21,7 +21,6 @@
 **Deliverable:** Netlify, Cloudflare Pages, GitHub Pages templates + README per-target instructions.
 
 **Branch:** `phase-10-deploy`
-**Depends on:** Phase 3.
 
 ## Task 10.1: Branch + Netlify
 

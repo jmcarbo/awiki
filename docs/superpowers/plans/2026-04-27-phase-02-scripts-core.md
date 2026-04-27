@@ -21,7 +21,6 @@
 **Deliverable:** Functional `log-append.sh`, `ingest.sh`, `lint.sh` (mechanical), `.awiki/config` defaults, BATS tests for each.
 
 **Branch:** `phase-2-scripts-core`
-**Depends on:** Phase 1.
 
 ## Task 2.1: Branch + `.awiki/config` defaults
 

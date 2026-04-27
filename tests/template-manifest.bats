@@ -76,3 +76,45 @@ EOF
   [ "$output" = "three_way" ]
   rm -rf "$TMP"
 }
+
+@test "manifest bootstrap-ids: prints in declared order" {
+  run bash "$REPO_ROOT/scripts/template-manifest.sh" bootstrap-ids "$FIXTURE/template.manifest.toml"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "dep-check" ]
+  [ "${lines[1]}" = "domain" ]
+  [ "${lines[2]}" = "stage-commit" ]
+}
+
+@test "manifest dangerous-ids: empty for v0 fixture" {
+  run bash "$REPO_ROOT/scripts/template-manifest.sh" dangerous-ids "$FIXTURE/template.manifest.toml"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "manifest has-glob-overlap: clean fixture -> exit 0" {
+  run bash "$REPO_ROOT/scripts/template-manifest.sh" has-glob-overlap "$FIXTURE/template.manifest.toml"
+  [ "$status" -eq 0 ]
+}
+
+@test "manifest has-glob-overlap: duplicate within strategy -> exit 1" {
+  TMP=$(mktemp -d)
+  cat > "$TMP/manifest.toml" <<'EOF'
+schema_version = 1
+template_version = "0.0.0"
+[strategies]
+overwrite = ["scripts/**", "scripts/**"]
+preserve = []
+three_way = []
+attributes_merge = []
+template_only = []
+[new_file_default]
+strategy = "prompt"
+[bootstrap]
+ordered_steps = []
+[bootstrap.dangerous]
+ids = []
+EOF
+  run bash "$REPO_ROOT/scripts/template-manifest.sh" has-glob-overlap "$TMP/manifest.toml"
+  [ "$status" -ne 0 ]
+  rm -rf "$TMP"
+}

@@ -108,6 +108,33 @@ def cmd_resolve(path: Path, relpath: str) -> int:
     return 0
 
 
+def cmd_bootstrap_ids(path: Path) -> int:
+    m = load(path)
+    for sid in m.get("bootstrap", {}).get("ordered_steps", []):
+        print(sid)
+    return 0
+
+
+def cmd_dangerous_ids(path: Path) -> int:
+    m = load(path)
+    for sid in m.get("bootstrap", {}).get("dangerous", {}).get("ids", []):
+        print(sid)
+    return 0
+
+
+def cmd_has_glob_overlap(path: Path) -> int:
+    m = load(path)
+    for strategy, globs in m.get("strategies", {}).items():
+        if len(set(globs)) != len(globs):
+            seen = set()
+            for g in globs:
+                if g in seen:
+                    print(f"duplicate glob in {strategy}: {g}", file=sys.stderr)
+                seen.add(g)
+            return 1
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 3:
         print("usage: manifest_parse.py <subcmd> <path> [args...]", file=sys.stderr)
@@ -123,6 +150,12 @@ def main() -> int:
             print("usage: resolve <manifest> <relpath>", file=sys.stderr)
             return 2
         return cmd_resolve(path_arg, sys.argv[3])
+    if subcmd == "bootstrap-ids":
+        return cmd_bootstrap_ids(path_arg)
+    if subcmd == "dangerous-ids":
+        return cmd_dangerous_ids(path_arg)
+    if subcmd == "has-glob-overlap":
+        return cmd_has_glob_overlap(path_arg)
     print(f"unknown subcmd: {subcmd}", file=sys.stderr)
     return 2
 

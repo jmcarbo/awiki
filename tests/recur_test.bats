@@ -167,3 +167,134 @@ EOF
   [ "$status" -eq 0 ]
   grep -q '^- \[ \] review flashcards @computer every:3d due:2026-04-30 \^s01~2$' content/projects/study.md
 }
+
+@test "action-recur: re-running on the same page is a no-op (idempotent)" {
+  seed_weekly_done_a05
+  run bash scripts/action-recur.sh content/projects/garden.md
+  [ "$status" -eq 0 ]
+  # First run produced one open instance.
+  open_count=$(grep -c '^- \[ \] water plants' content/projects/garden.md)
+  [ "$open_count" -eq 1 ]
+
+  # Re-scan: actions.tsv would now include the new open instance, but the test
+  # bypasses action-scan.sh; build the next actions.tsv by hand to mirror reality.
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+a05	x	water plants	content/projects/garden.md	15	home		    	1w	2026-05-04				garden	public
+a05~2	 	water plants	content/projects/garden.md	14	home	2026-05-11	    	1w					garden	public
+EOF
+
+  run bash scripts/action-recur.sh content/projects/garden.md
+  [ "$status" -eq 0 ]
+  # No new instance created.
+  open_count=$(grep -c '^- \[ \] water plants' content/projects/garden.md)
+  [ "$open_count" -eq 1 ]
+}
+
+@test "action-recur: refuses to emit at chain length 200 (exit 6)" {
+  mkdir -p content/projects
+  # Synthesize a page with one [x] head + 198 [ ] instances numbered 2..199.
+  # Next emit would be ^h01~200, which the cap rejects.
+  {
+    cat <<'EOF'
+---
+title: "Cap test"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+## Done
+
+- [x] tick @computer every:1d due:2026-04-27 done:2026-04-27 ^h01
+EOF
+    for n in $(seq 2 199); do
+      printf -- '- [ ] tick @computer every:1d due:2026-04-%02d ^h01~%d\n' $((27 + n)) "$n"
+    done
+  } > content/projects/cap.md
+  # actions.tsv with 199 instances.
+  {
+    printf 'id\tstatus\ttext\tfile\tline\tcontext\tdue\tdefer\twait\tsince\tevery\tdone\tpriority\test\tproject\tsource_kind\n'
+    printf 'h01\tx\ttick\tcontent/projects/cap.md\t10\tcomputer\t\t\t\t\t1d\t2026-04-27\t\t\tcap\tpublic\n'
+    for n in $(seq 2 199); do
+      printf 'h01~%d\t \ttick\tcontent/projects/cap.md\t%d\tcomputer\t\t\t\t\t1d\t\t\t\tcap\tpublic\n' "$n" "$((10 + n))"
+    done
+  } > .awiki/maps/actions.tsv
+
+  run bash scripts/action-recur.sh content/projects/cap.md
+  [ "$status" -eq 6 ]
+  echo "$output" | grep -q "chain \^h01 reached 200 instances; refusing to emit"
+  # Page must NOT have a 200th instance.
+  ! grep -q '\^h01~200' content/projects/cap.md
+}
+
+@test "action-recur: cap leaves no orphan temp files" {
+  mkdir -p content/projects
+  {
+    cat <<'EOF'
+---
+title: "Cap test 2"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+## Done
+
+- [x] tick @computer every:1d due:2026-04-27 done:2026-04-27 ^h02
+EOF
+    for n in $(seq 2 199); do
+      printf -- '- [ ] tick @computer every:1d due:2026-04-%02d ^h02~%d\n' $((27 + n)) "$n"
+    done
+  } > content/projects/cap2.md
+  {
+    printf 'id\tstatus\ttext\tfile\tline\tcontext\tdue\tdefer\twait\tsince\tevery\tdone\tpriority\test\tproject\tsource_kind\n'
+    printf 'h02\tx\ttick\tcontent/projects/cap2.md\t10\tcomputer\t\t\t\t\t1d\t2026-04-27\t\t\tcap2\tpublic\n'
+    for n in $(seq 2 199); do
+      printf 'h02~%d\t \ttick\tcontent/projects/cap2.md\t%d\tcomputer\t\t\t\t\t1d\t\t\t\tcap2\tpublic\n' "$n" "$((10 + n))"
+    done
+  } > .awiki/maps/actions.tsv
+
+  run bash scripts/action-recur.sh content/projects/cap2.md
+  [ "$status" -eq 6 ]
+  # No orphan tmp files in content/projects.
+  run bash -c 'ls content/projects/*.tmp.* 2>/dev/null | wc -l | tr -d " "'
+  [ "$output" = "0" ]
+}
+
+@test "action-recur: cap message goes to stderr, not stdout" {
+  mkdir -p content/projects
+  {
+    cat <<'EOF'
+---
+title: "Cap test 3"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+## Done
+
+- [x] tick @computer every:1d due:2026-04-27 done:2026-04-27 ^h03
+EOF
+    for n in $(seq 2 199); do
+      printf -- '- [ ] tick @computer every:1d due:2026-04-%02d ^h03~%d\n' $((27 + n)) "$n"
+    done
+  } > content/projects/cap3.md
+  {
+    printf 'id\tstatus\ttext\tfile\tline\tcontext\tdue\tdefer\twait\tsince\tevery\tdone\tpriority\test\tproject\tsource_kind\n'
+    printf 'h03\tx\ttick\tcontent/projects/cap3.md\t10\tcomputer\t\t\t\t\t1d\t2026-04-27\t\t\tcap3\tpublic\n'
+    for n in $(seq 2 199); do
+      printf 'h03~%d\t \ttick\tcontent/projects/cap3.md\t%d\tcomputer\t\t\t\t\t1d\t\t\t\tcap3\tpublic\n' "$n" "$((10 + n))"
+    done
+  } > .awiki/maps/actions.tsv
+
+  # Capture stdout and stderr separately.
+  stdout=$(bash scripts/action-recur.sh content/projects/cap3.md 2>/dev/null || true)
+  stderr=$(bash scripts/action-recur.sh content/projects/cap3.md 2>&1 >/dev/null || true)
+  ! echo "$stdout" | grep -q "refusing to emit"
+  echo "$stderr" | grep -q  "refusing to emit"
+}

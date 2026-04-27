@@ -96,26 +96,36 @@ recur_one_page_diff() {
   local page="$1"
   local tmp
   tmp="$(mktemp "${page}.tmp.XXXXXX")"
-  trap 'rm -f "$tmp"' RETURN
   recur_compute_new_contents "$page" > "$tmp"
   # If no change, exit cleanly with no output.
   if cmp -s "$page" "$tmp"; then
+    rm -f "$tmp"
     return 0
   fi
   diff -u "$page" "$tmp" || true
+  rm -f "$tmp"
 }
 
 recur_one_page_locked() {
   local page="$1"
   local tmp
   tmp="$(mktemp "${page}.tmp.XXXXXX")"
-  trap 'rm -f "$tmp"' EXIT
+  # Set up cleanup. The trap reads $tmp at trap-eval time, so we use a single-
+  # quoted trap body and ensure $tmp is in scope until we explicitly clear.
+  # Capture the path in a value the trap evaluates rather than relying on the
+  # function-local going out of scope.
+  AWIKI_RECUR_TMP="$tmp"
+  trap 'rm -f "${AWIKI_RECUR_TMP:-}"; unset AWIKI_RECUR_TMP' EXIT
   recur_compute_new_contents "$page" > "$tmp"
   if cmp -s "$page" "$tmp"; then
+    rm -f "$tmp"
+    AWIKI_RECUR_TMP=""
+    trap - EXIT
     return 0
   fi
   mv "$tmp" "$page"
-  trap - EXIT   # `mv` consumed the temp file; clear the cleanup trap.
+  AWIKI_RECUR_TMP=""
+  trap - EXIT
   bash "$SCRIPT_DIR/log-append.sh" recur "page=$page"
 }
 
@@ -138,23 +148,28 @@ awiki_recur_emit_pass() {
   local line
   while IFS= read -r line || [[ -n "$line" ]]; do
     if awiki_is_completed_recurring_action "$line"; then
-      local base every done_date next_due next_n new_id new_line
+      local base cur_n max_n next_n every done_date next_due new_id new_line
       base="$(awiki_extract_chain_base "$line")"
-      every="$(awiki_extract_tail_key "$line" every)"
-      done_date="$(awiki_extract_tail_key "$line" done)"
-      [[ -z "$done_date" ]] && done_date="$(date -u +%Y-%m-%d)"
-      next_due="$(awiki_recur_compute_due "$done_date" "$every")"
-      next_n="$(awiki_recur_next_instance_n "$chains" "$base")"
-      # Idempotence: if next_n already exists, emit nothing extra.
-      if awiki_recur_chain_has "$chains" "$base" "$next_n"; then
-        printf '%s\n' "$line"
-        continue
-      fi
+      cur_n="$(awiki_extract_chain_n "$line")"
+      [[ -z "$cur_n" ]] && cur_n=1
+      # next_n = max(chain) + 1 — the next mintable instance number.
+      max_n="$(awiki_recur_chain_max_n "$chains" "$base")"
+      next_n="$((max_n + 1))"
       # Cap check: refuse-to-emit at chain length >= 200.
       if [[ "$next_n" -ge 200 ]]; then
         echo "action-recur: chain ^${base} reached 200 instances; refusing to emit (exit 6)" >&2
         exit 6
       fi
+      # Idempotence: if a successor for this completed line already exists
+      # (max_n > cur_n), emit nothing extra.
+      if [[ "$max_n" -gt "$cur_n" ]]; then
+        printf '%s\n' "$line"
+        continue
+      fi
+      every="$(awiki_extract_tail_key "$line" every)"
+      done_date="$(awiki_extract_tail_key "$line" done)"
+      [[ -z "$done_date" ]] && done_date="$(date -u +%Y-%m-%d)"
+      next_due="$(awiki_recur_compute_due "$done_date" "$every")"
       new_id="${base}${AWIKI_RECUR_SEP}${next_n}"
       new_line="$(awiki_build_open_copy "$line" "$next_due" "$new_id")"
       printf '%s\n' "$new_line"

@@ -224,6 +224,22 @@ awiki_extract_chain_base() {
   fi
 }
 
+# Extract the chain instance number of an action line. Chain head (no
+# separator) is 1; ^base<sep>N is N. Empty if id missing or malformed.
+awiki_extract_chain_n() {
+  local l="$1"
+  local id
+  if [[ "$l" =~ \^([A-Za-z0-9_~]+)[[:space:]]*$ ]]; then
+    id="${BASH_REMATCH[1]}"
+    if [[ "$id" == *"${AWIKI_RECUR_SEP}"* ]]; then
+      local n="${id##*"${AWIKI_RECUR_SEP}"}"
+      [[ "$n" =~ ^[0-9]+$ ]] && printf '%s' "$n"
+    else
+      printf '%s' 1
+    fi
+  fi
+}
+
 # Extract a tail key value ("every", "done", "due") from an action line.
 # Returns empty if absent.
 awiki_extract_tail_key() {
@@ -294,9 +310,17 @@ awiki_collect_chain_state() {
 # Given collected chain state, return the next free <n> for <base>. Always >= 2.
 awiki_recur_next_instance_n() {
   local chains="$1" base="$2"
+  local max
+  max="$(awiki_recur_chain_max_n "$chains" "$base")"
+  printf '%s' "$((max + 1))"
+}
+
+# Highest existing instance number for <base>; defaults to 1 (the chain head).
+awiki_recur_chain_max_n() {
+  local chains="$1" base="$2"
   local max=1 b n
   if [[ -z "$chains" ]]; then
-    printf '%s' 2
+    printf '%s' 1
     return 0
   fi
   while IFS=$'\t' read -r b n; do
@@ -305,7 +329,7 @@ awiki_recur_next_instance_n() {
       max="$n"
     fi
   done <<<"$chains"
-  printf '%s' "$((max + 1))"
+  printf '%s' "$max"
 }
 
 # Membership check: does <base> already have <n> in chain state?
@@ -316,6 +340,22 @@ awiki_recur_chain_has() {
   while IFS=$'\t' read -r b nn; do
     [[ -z "$b" ]] && continue
     if [[ "$b" == "$base" && "$nn" == "$n" ]]; then return 0; fi
+  done <<<"$chains"
+  return 1
+}
+
+# Membership check: does <base> already have an instance with n >= <floor>?
+# Used for idempotence: a completed line at position cur_n has been "consumed"
+# if any successor with n >= cur_n+1 already exists.
+awiki_recur_chain_has_ge() {
+  local chains="$1" base="$2" floor="$3"
+  local b nn
+  [[ -z "$chains" ]] && return 1
+  while IFS=$'\t' read -r b nn; do
+    [[ -z "$b" ]] && continue
+    if [[ "$b" == "$base" && "$nn" =~ ^[0-9]+$ && "$nn" -ge "$floor" ]]; then
+      return 0
+    fi
   done <<<"$chains"
   return 1
 }

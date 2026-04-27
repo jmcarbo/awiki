@@ -2,7 +2,8 @@
 
 Run this once when the user first opens an agent in a fresh clone of the awiki template. Walk through each step in order. Do NOT skip steps; later steps depend on earlier ones.
 
-## Step 0: Submodules + dependency check
+### Step 0: Submodules + dependency check
+<!-- bootstrap-step: dep-check -->
 
 First, initialize git submodules (Hugo themes ship as submodules):
 
@@ -12,7 +13,8 @@ git submodule update --init --recursive
 
 Then run `bash scripts/check-deps.sh`. If it exits non-zero, surface the printed install hints and halt. Re-run after the user installs missing tools.
 
-## Step 1: Domain
+### Step 1: Domain
+<!-- bootstrap-step: domain -->
 
 Ask the user one of:
 
@@ -24,12 +26,14 @@ Ask the user one of:
 
 Record the answer.
 
-## Step 2: Wiki name + purpose
+### Step 2: Wiki name + purpose
+<!-- bootstrap-step: wiki-name -->
 
 Ask: "What's the wiki called?" — kebab-case identifier.
 Ask: "One-line purpose?" — single sentence, ≤120 chars.
 
-## Step 3: Encryption decision
+### Step 3: Encryption decision
+<!-- bootstrap-step: privacy -->
 
 Ask:
 
@@ -43,7 +47,8 @@ If C: run `bash scripts/encrypt-init.sh --age`.
 
 After encrypt-init, run `git status` and verify expected encrypted-vs-cleartext patterns before any commit.
 
-## Step 4: Track ingested sources?
+### Step 4: Track ingested sources?
+<!-- bootstrap-step: track-processed -->
 
 Ask: "Track ingested sources in git? (y/N)". Default N.
 
@@ -56,7 +61,8 @@ The `_originals/` and `private/` exceptions remain ignored (still privacy-protec
 
 Note to user: tracking sources may include copyrighted material. History-rewrite cost is non-trivial if revoked.
 
-## Step 5: Hugo theme
+### Step 5: Hugo theme
+<!-- bootstrap-step: theme -->
 
 Ask: "Hugo theme? (default: hugo-book)"
 
@@ -71,14 +77,16 @@ git submodule add <theme-url> themes/<theme-name>
 
 After switching, also rewrite `theme = "hugo-book"` in `hugo.toml` to the chosen theme name.
 
-## Step 6: Publish log?
+### Step 6: Publish log?
+<!-- bootstrap-step: publish-log -->
 
 Ask: "Publish log to rendered site? (y/N)". Default N.
 
 - N → leave `content/log.md` frontmatter `draft: true`.
 - y → set `content/log.md` frontmatter `draft: false`.
 
-## Step 7: Patch identity
+### Step 7: Patch identity
+<!-- bootstrap-step: patch-identity -->
 
 Edit:
 - `WIKI.md` Identity section: fill `wiki_name`, `domain`, `purpose` from steps 1-2.
@@ -86,7 +94,8 @@ Edit:
 - `content/_index.md`: set `title`, write a one-paragraph wiki landing.
 - `content/log.md`: frontmatter from step 6.
 
-## Step 8: Install qmd
+### Step 8: Install qmd
+<!-- bootstrap-step: install-qmd -->
 
 Run `just install-qmd`. Treat failure as non-fatal:
 - On success: confirm `.awiki/qmd-status=ok`, run `just reindex`.
@@ -99,13 +108,15 @@ Add this to ~/.zshrc or ~/.bashrc:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Step 9a: Wire qmd MCP server (optional)
+### Step 9a: Wire qmd MCP server (optional)
+<!-- bootstrap-step: wire-qmd-mcp -->
 
 Ask: "Wire qmd MCP server into your agent harness? (y/N)" — only if `.awiki/qmd-status=ok`.
 
 If y: run `bash scripts/wire-qmd-mcp.sh`. Print verification instructions.
 
-## Step 9b: Wire awiki wiki-ops MCP server (optional)
+### Step 9b: Wire awiki wiki-ops MCP server (optional)
+<!-- bootstrap-step: wire-awiki-mcp -->
 
 Ask: "Wire awiki wiki-ops MCP server (ingest/lint/query/update_catalog)? (y/N)".
 
@@ -122,13 +133,15 @@ The wire script registers the awiki server in:
 
 Verify registration by listing tools in the next agent session. The MCP tools are: `ingest_source`, `lint`, `query_wiki`, `update_catalog`.
 
-## Step 10: Initial log entry
+### Step 10: Initial log entry
+<!-- bootstrap-step: log-init -->
 
 ```bash
 bash scripts/log-append.sh init "wiki '$WIKI_NAME' initialized for domain '$DOMAIN'"
 ```
 
-## Step 11: Initial commit
+### Step 11: Initial commit
+<!-- bootstrap-step: stage-commit -->
 
 Stage:
 ```bash
@@ -142,7 +155,13 @@ Show user the file list. Ask: "Stage all and commit? (y/N)". On y:
 git commit -m "chore: initialize wiki '$WIKI_NAME'"
 ```
 
-## Step 12: Smoke test prompt
+### Step 12: Seed template provenance
+<!-- bootstrap-step: template-init -->
+
+Run `bash scripts/template-init.sh --repo <upstream-url> --ref main --version <version> --commit <commit>` to write `.awiki/template.json`, snapshot the template tree to `.awiki/template-cache/<commit>/`, and record `bootstrap_steps_done[]` with content_hash for all completed steps. This wires the wiki up for `just template-update` going forward.
+
+### Step 13: Smoke test prompt
+<!-- bootstrap-step: smoke-test -->
 
 Tell the user:
 

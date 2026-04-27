@@ -61,3 +61,66 @@ teardown() {
   diff /tmp/awiki-tc-1 .awiki/task-count
   rm -f /tmp/awiki-lr-1 /tmp/awiki-tc-1
 }
+
+@test "task-init creates content/inbox.md with type: inbox frontmatter" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [ -f content/inbox.md ]
+  run grep '^type: inbox$' content/inbox.md
+  [ "$status" -eq 0 ]
+  run grep '^draft: true$' content/inbox.md
+  [ "$status" -eq 0 ]
+}
+
+@test "task-init creates section indexes" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [ -f content/projects/_index.md ]
+  [ -f content/contexts/_index.md ]
+  [ -f content/agenda/_index.md ]
+}
+
+@test "task-init creates five agenda pages with managed-region pair" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  for view in next-actions today waiting someday stuck-projects; do
+    [ -f "content/agenda/$view.md" ]
+    run grep '^<!-- BEGIN managed-region -->$' "content/agenda/$view.md"
+    [ "$status" -eq 0 ]
+    run grep '^<!-- END managed-region -->$' "content/agenda/$view.md"
+    [ "$status" -eq 0 ]
+    run grep '^type: agenda$' "content/agenda/$view.md"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "task-init creates agenda/review-log.md without managed region" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [ -f content/agenda/review-log.md ]
+  run grep '^type: agenda$' content/agenda/review-log.md
+  [ "$status" -eq 0 ]
+  run grep '^<!-- BEGIN managed-region -->' content/agenda/review-log.md
+  [ "$status" -ne 0 ]
+}
+
+@test "task-init creates three starter context pages" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  for ctx in phone errands computer; do
+    [ -f "content/contexts/$ctx.md" ]
+    run grep '^type: context$' "content/contexts/$ctx.md"
+    [ "$status" -eq 0 ]
+    run grep -F "@$ctx" "content/contexts/$ctx.md"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "task-init does not overwrite an existing custom page" {
+  mkdir -p content/contexts
+  printf -- "---\ntype: context\ncustom: yes\n---\n\nMy own thing.\n" > content/contexts/phone.md
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  run grep '^custom: yes$' content/contexts/phone.md
+  [ "$status" -eq 0 ]
+}

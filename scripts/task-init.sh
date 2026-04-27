@@ -53,8 +53,115 @@ step_config() {
   fi
 }
 
+step_pages() {
+  local today; today="$(date '+%Y-%m-%d')"
+
+  # 1. content/inbox.md
+  if [[ ! -f content/inbox.md ]]; then
+    mkdir -p content
+    cat > content/inbox.md <<INBOX
+---
+title: "Inbox"
+type: inbox
+draft: true
+---
+
+INBOX
+    note "created content/inbox.md"
+  else
+    note "skip content/inbox.md (exists)"
+  fi
+
+  # 2. Section indexes.
+  mkdir -p content/projects content/contexts content/agenda
+  for sec in projects contexts agenda; do
+    local idx="content/$sec/_index.md"
+    if [[ ! -f "$idx" ]]; then
+      cat > "$idx" <<INDEX
+---
+title: "${sec^}"
+type: section
+draft: false
+---
+
+{{< page-list >}}
+INDEX
+      note "created $idx"
+    else
+      note "skip $idx (exists)"
+    fi
+  done
+
+  # 3. Five agenda views with empty managed-region pair.
+  local view
+  for view in next-actions today waiting someday stuck-projects; do
+    local f="content/agenda/$view.md"
+    if [[ ! -f "$f" ]]; then
+      cat > "$f" <<AGENDA
+---
+title: "Agenda — ${view//-/ }"
+type: agenda
+last_updated: $today
+draft: false
+---
+
+<!-- BEGIN managed-region -->
+<!-- END managed-region -->
+AGENDA
+      note "created $f"
+    else
+      note "skip $f (exists)"
+    fi
+  done
+
+  # 4. agenda/review-log.md (append-only history; no managed region).
+  if [[ ! -f content/agenda/review-log.md ]]; then
+    cat > content/agenda/review-log.md <<RLOG
+---
+title: "Review Log"
+type: agenda
+last_updated: $today
+draft: false
+---
+
+# Review Log
+
+Append-only history of weekly reviews. New entries are added by
+\`scripts/review-status.sh mark_done\` (phase 19).
+RLOG
+    note "created content/agenda/review-log.md"
+  else
+    note "skip content/agenda/review-log.md (exists)"
+  fi
+
+  # 5. Three starter context pages.
+  local ctx
+  for ctx in phone errands computer; do
+    local f="content/contexts/$ctx.md"
+    if [[ ! -f "$f" ]]; then
+      cat > "$f" <<CTX
+---
+title: "@$ctx"
+date: $today
+last_updated: $today
+type: context
+aliases: ['@$ctx']
+tools: []
+draft: false
+---
+
+Actions tagged \`@$ctx\` reference this page.
+CTX
+      note "created $f"
+    else
+      note "skip $f (exists)"
+    fi
+  done
+}
+
 main() {
   note "start"
+  step_pages
   step_config
   step_state_files
   note "done"

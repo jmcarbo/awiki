@@ -45,3 +45,6 @@ content/synthesis/.staged/*
 
 # === git worktrees ===
 .worktrees/
+
+# phase-17 spike vault — Obsidian config is per-machine
+tests/fixtures/spike-obsidian-vault/.obsidian/

@@ -80,14 +80,14 @@ teardown() {
   [ -f content/agenda/_index.md ]
 }
 
-@test "task-init creates five agenda pages with managed-region pair" {
+@test "task-init creates five agenda pages with per-region marker pair" {
   run bash scripts/task-init.sh
   [ "$status" -eq 0 ]
   for view in next-actions today waiting someday stuck-projects; do
     [ -f "content/agenda/$view.md" ]
-    run grep '^<!-- BEGIN managed-region -->$' "content/agenda/$view.md"
+    run grep "^<!-- BEGIN agenda:$view -->\$" "content/agenda/$view.md"
     [ "$status" -eq 0 ]
-    run grep '^<!-- END managed-region -->$' "content/agenda/$view.md"
+    run grep "^<!-- END agenda:$view -->\$" "content/agenda/$view.md"
     [ "$status" -eq 0 ]
     run grep '^type: agenda$' "content/agenda/$view.md"
     [ "$status" -eq 0 ]
@@ -100,7 +100,7 @@ teardown() {
   [ -f content/agenda/review-log.md ]
   run grep '^type: agenda$' content/agenda/review-log.md
   [ "$status" -eq 0 ]
-  run grep '^<!-- BEGIN managed-region -->' content/agenda/review-log.md
+  run grep '^<!-- BEGIN agenda:' content/agenda/review-log.md
   [ "$status" -ne 0 ]
 }
 

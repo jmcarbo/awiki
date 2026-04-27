@@ -1,0 +1,32 @@
+# build artifacts
+public/
+.hugo_build.lock
+.qmd/
+.awiki/*
+!.awiki/.gitkeep
+
+# inbox: source files often sensitive / copyrighted
+raw/inbox/*
+!raw/inbox/interactive/.gitkeep
+!raw/inbox/batch/.gitkeep
+!raw/inbox/checkpoint/.gitkeep
+
+# default-private until user opts in via BOOTSTRAP / encrypt-init
+raw/processed/*
+!raw/processed/.gitkeep
+content/private/**
+raw/processed/private/**
+raw/processed/_originals/**
+
+# secrets — deny all, allow only public keys
+secrets/**
+!secrets/*.pub
+
+# obsidian local state
+.obsidian/workspace*
+.obsidian/cache
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo

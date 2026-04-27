@@ -435,11 +435,90 @@ def lint_provenance_drift(root: Path) -> tuple[int, int]:
         return (0, 0)
     import json
     d = json.loads(pj.read_text(encoding="utf-8"))
+    warnings = 0
     if d.get("repo") != d.get("original_repo"):
         emit("warning", ".awiki/template.json",
              f"repo differs from original_repo (repo={d.get('repo')}, original={d.get('original_repo')})")
-        return (0, 1)
-    return (0, 0)
+        warnings += 1
+    pinned = d.get("commit", "")
+    if pinned and not (root / ".awiki" / "template-cache" / pinned).is_dir():
+        emit("warning", ".awiki/template.json",
+             f"pinned commit {pinned[:12]} not in template-cache; will auto-recover on next update")
+        warnings += 1
+    return (0, warnings)
+
+
+def lint_orphans(root: Path) -> tuple[int, int]:
+    """_fetch and _scratch-merge orphans outside an active --continue session."""
+    warnings = 0
+    fetch_state = root / ".awiki" / "template-cache" / "_fetch" / ".update-state.json"
+    if fetch_state.is_file():
+        emit("warning", ".awiki/template-cache/_fetch/.update-state.json",
+             "orphaned state file (in-progress update or crashed run); use --continue or --abort")
+        warnings += 1
+    scratch = root / ".awiki" / "template-cache" / "_fetch" / "_scratch-merge"
+    if scratch.is_dir():
+        emit("warning", ".awiki/template-cache/_fetch/_scratch-merge",
+             "orphaned plan-time scratch dir; safe to delete")
+        warnings += 1
+    return (0, warnings)
+
+
+def lint_pending_prompt_drift(root: Path) -> tuple[int, int]:
+    """Pending-prompt mtime newer than most recent applied_migrations entry for same id."""
+    pp = root / ".awiki" / "pending-prompts"
+    pj = root / ".awiki" / "template.json"
+    if not pp.is_dir() or not pj.is_file():
+        return (0, 0)
+    import json
+    from datetime import datetime as _dt, timezone as _tz
+    d = json.loads(pj.read_text(encoding="utf-8"))
+    applied_ids = {m.get("id"): m for m in d.get("applied_migrations", [])}
+    warnings = 0
+    for p in pp.glob("*.md"):
+        mid = p.stem.removesuffix(".prompt")
+        if mid in applied_ids:
+            mtime = _dt.fromtimestamp(p.stat().st_mtime, tz=_tz.utc)
+            emit("warning", str(p.relative_to(root)),
+                 f"pending prompt for {mid} present but applied_migrations[] already records it (mtime={mtime.isoformat()}) — agent may have run without recording")
+            warnings += 1
+    return (0, warnings)
+
+
+def lint_prompt_body_scope(root: Path) -> tuple[int, int]:
+    """Pending-prompt body must not reference paths outside its declared scope_glob."""
+    pp = root / ".awiki" / "pending-prompts"
+    if not pp.is_dir():
+        return (0, 0)
+    errors = 0
+    for p in pp.glob("*.md"):
+        text = p.read_text(encoding="utf-8")
+        scope = ""
+        in_fm = False
+        resolved: list[str] = []
+        in_resolved = False
+        for line in text.splitlines():
+            if line.strip() == "---":
+                in_fm = not in_fm
+                continue
+            if in_fm and line.startswith("scope_glob:"):
+                scope = line.split(":", 1)[1].strip().strip('"').strip("'")
+            if line.strip() == "## Resolved scope":
+                in_resolved = True
+                continue
+            if in_resolved:
+                if line.startswith("##"):
+                    in_resolved = False
+                elif line.startswith("- "):
+                    resolved.append(line[2:].strip())
+        # Check body lines for paths outside resolved scope.
+        if scope:
+            for rel in resolved:
+                if rel.startswith("secrets/") or rel.startswith(".awiki/") or rel.startswith(".git/") or rel.startswith("themes/"):
+                    emit("error", str(p.relative_to(root)),
+                         f"resolved scope includes blocked path: {rel}")
+                    errors += 1
+    return (errors, 0)
 
 
 def main() -> int:
@@ -447,7 +526,9 @@ def main() -> int:
     p.add_argument("--root", required=True, type=Path)
     args = p.parse_args()
     total_e = total_w = 0
-    for fn in (lint_manifest, lint_migrations, lint_pending_prompts, lint_provenance_drift):
+    for fn in (lint_manifest, lint_migrations, lint_pending_prompts,
+               lint_provenance_drift, lint_orphans, lint_pending_prompt_drift,
+               lint_prompt_body_scope):
         e, w = fn(args.root)
         total_e += e; total_w += w
     if total_e > 0:

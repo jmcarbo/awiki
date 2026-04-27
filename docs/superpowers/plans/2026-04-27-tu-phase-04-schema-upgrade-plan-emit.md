@@ -112,7 +112,9 @@ Append to `tests/template-update-fetch.bats`:
 In `scripts/template-update.sh`, replace the `# Phase 1.5 schema-upgrade itself happens in Phase 04 plan` block with:
 
 ```bash
-if [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]] && [[ $SCHEMA_UPGRADE -eq 1 ]]; then
+if should_skip_phase schema-upgrade; then
+  echo "info: resume — skipping Phase 1.5 (schema-upgrade already committed)"
+elif [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]] && [[ $SCHEMA_UPGRADE -eq 1 ]]; then
   if [[ $APPLY -eq 0 ]]; then
     echo "info: schema-upgrade required; would run migrations/schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}.sh on --apply"
   else
@@ -144,8 +146,9 @@ if [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]] && [[ $SCHEMA_UPGRADE -eq 1 ]]; then
     python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase schema-upgrade --status committed
     python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$SU_SHA"
 
-    # Record schema upgrade in template.json applied_migrations[].
-    bash "$SCRIPT_DIR/template-provenance.sh" append-migration "$PJ" "schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}" applied >/dev/null
+    # Record schema upgrade in state.applied_migrations_pending — Commit D writes template.json.
+    python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+      --id "schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}" --status applied
     echo "info: phase 1.5 schema upgrade committed ($SU_SHA)"
   fi
 fi
@@ -229,6 +232,10 @@ In `scripts/template-update.sh`, replace the trailing `echo "info: subsequent ph
 
 ```bash
 # === Phase 2: plan ===
+if [[ "${RESUMED:-0}" -eq 1 ]]; then
+  echo "info: resume — skipping Phase 2 (plan output not regenerated)"
+  PLAN_OUT=""   # downstream phases must not depend on PLAN_OUT after resume; orchestrator already committed Commit A from the original plan.
+else
 SCRATCH="$FETCH_DIR/_scratch-merge"
 mkdir -p "$SCRATCH"
 
@@ -244,7 +251,8 @@ PLAN_OUT=$(bash "$SCRIPT_DIR/template-plan.sh" \
   --user-tree "$USER_TREE_TMP" \
   --manifest "$NEW_MANIFEST" \
   --commit-old "$COMMIT_OLD" \
-  --commit-new "$COMMIT_NEW")
+  --commit-new "$COMMIT_NEW" \
+  --provenance "$PJ")
 
 echo "$PLAN_OUT"
 
@@ -271,6 +279,7 @@ if [[ $APPLY -eq 0 ]]; then
   # Spec leaves _fetch around between dry-run and --apply for cache reuse.
   exit 0
 fi
+fi  # end Phase 2 (skipped on resume)
 
 echo "info: phase 3 not yet implemented (Commit A lands in Phase 05)"
 exit 0

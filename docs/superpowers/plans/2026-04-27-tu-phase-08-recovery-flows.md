@@ -168,6 +168,33 @@ teardown() { rm -rf "$TMP"; }
   echo "$output" | grep -q "Manual commits"
 }
 
+@test "--continue: resumes mid-cycle past committed phases" {
+  cd "$TMP"
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  # Run a real update; halt by introducing a guaranteed-failing migration.
+  TMP_BAD=$(mktemp -d)
+  cp -R "$V1/." "$TMP_BAD/"
+  cat > "$TMP_BAD/migrations/0099-fail.sh" <<'EOF'
+#!/usr/bin/env bash
+# migration: 0099-fail
+# requires: agent=false
+# touches: WIKI.md
+# idempotent: yes
+[[ "${1:-}" == "--dry-run" ]] && exit 0
+exit 7
+EOF
+  chmod +x "$TMP_BAD/migrations/0099-fail.sh"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$TMP_BAD" --accept-source-change --apply --non-interactive
+  [ "$status" -ne 0 ]
+  # Commit A should have committed; Commit B halted at 0099.
+  git log --format=%s -3 | grep -q "sync to"
+  # Now skip the failing migration and continue.
+  run bash "$REPO_ROOT/scripts/template-update.sh" --continue --skip-migration 0099-fail
+  [ "$status" -eq 0 ]
+  rm -rf "$TMP_BAD"
+}
+
 @test "--continue --accept-manual-commits: bypasses HEAD check" {
   cd "$TMP"
   git checkout -q -b awiki-template-update/test
@@ -314,6 +341,21 @@ teardown() { rm -rf "$TMP"; }
   PIN_COMMIT=$(bash "$REPO_ROOT/scripts/template-provenance.sh" get .awiki/template.json commit)
   [ "$PIN_COMMIT" = "$CUR" ]
 }
+
+@test "--re-pin: invalid commit rejected when original_repo reachable" {
+  cd "$TMP"
+  run bash "$REPO_ROOT/scripts/template-update.sh" --re-pin "0000000000000000000000000000000000000000"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qE "not resolvable|cannot reach"
+}
+
+@test "repo=\"none\" disables update with informational exit" {
+  cd "$TMP"
+  bash "$REPO_ROOT/scripts/template-provenance.sh" set .awiki/template.json repo none >/dev/null
+  run bash "$REPO_ROOT/scripts/template-update.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "updates disabled"
+}
 ```
 
 - [ ] **Step 2: Run — verify failure**
@@ -333,10 +375,39 @@ if [[ -n "$RE_PIN" ]]; then
     exit 1
   fi
 
-  # Re-pin: just set the commit field. Cache rebuild deferred to next update's auto-recovery.
+  # Validate <commit> resolves in upstream repo.
+  ORIGINAL_REPO=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" original_repo)
+  TMP_VALIDATE=$(mktemp -d)
+  if [[ -d "$ORIGINAL_REPO/.git" ]] || [[ "$ORIGINAL_REPO" == http* ]]; then
+    if ! git clone --depth 50 "$ORIGINAL_REPO" "$TMP_VALIDATE/orig" >/dev/null 2>&1; then
+      echo "halt: cannot reach $ORIGINAL_REPO. Required to validate --re-pin commit." >&2
+      rm -rf "$TMP_VALIDATE"
+      exit 1
+    fi
+    if ! git -C "$TMP_VALIDATE/orig" cat-file -e "$RE_PIN^{commit}" 2>/dev/null \
+         && ! git -C "$TMP_VALIDATE/orig" fetch --depth 50 origin "$RE_PIN" >/dev/null 2>&1; then
+      echo "halt: commit $RE_PIN not resolvable in $ORIGINAL_REPO" >&2
+      rm -rf "$TMP_VALIDATE"
+      exit 1
+    fi
+  fi
+
+  # Drop orphaned <commit_new>/ cache (former pin's cache is now stale relative to new pin).
+  CUR_COMMIT=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
+  [[ -n "$CUR_COMMIT" && "$CUR_COMMIT" != "$RE_PIN" ]] && rm -rf "$REPO_ROOT/.awiki/template-cache/$CUR_COMMIT"
+
+  # Rebuild target cache from upstream so next update has the ancestor available.
+  TARGET_CACHE="$REPO_ROOT/.awiki/template-cache/$RE_PIN"
+  if [[ ! -d "$TARGET_CACHE" ]] && [[ -d "$TMP_VALIDATE/orig/.git" ]]; then
+    git -C "$TMP_VALIDATE/orig" checkout -q "$RE_PIN" 2>/dev/null || true
+    mkdir -p "$TARGET_CACHE"
+    git -C "$TMP_VALIDATE/orig" archive --format=tar HEAD | tar -x -C "$TARGET_CACHE"
+  fi
+  rm -rf "$TMP_VALIDATE"
+
   bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" commit "$RE_PIN"
-  echo "info: re-pinned to $RE_PIN. If you reverted the merge, content is back to pre-update state."
-  echo "info: run 'just template-update' to verify (cache will auto-recover)."
+  echo "info: re-pinned to $RE_PIN; cache rebuilt + orphan dropped."
+  echo "info: if you reverted the merge, content is back to pre-update state."
   exit 0
 fi
 ```
@@ -442,25 +513,34 @@ if [[ -n "$RERUN_BOOTSTRAP_STEP" ]]; then
   fi
   BODY_FILE=$(mktemp)
   echo "$BODY" > "$BODY_FILE"
-  bash "$BODY_FILE" || true
+  # Run with stripped env (matches mechanical-migration trust model).
+  env -i \
+    PATH="$PATH" HOME="$HOME" LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}" \
+    AWIKI_REPO_ROOT="$REPO_ROOT" \
+    bash "$BODY_FILE" || true
   rm -f "$BODY_FILE"
 
-  # Update content_hash in template.json.
+  # Update content_hash in template.json. Pass values via env to avoid shell-injection.
   NEW_HASH=$(python3 "$HELPERS/bootstrap_hash.py" hash "$REPO_ROOT/BOOTSTRAP.md" "$STEP_ID")
-  python3 -c "
-import json
-pj='$PJ'
-d=json.load(open(pj))
-for s in d.get('bootstrap_steps_done', []):
-    if s.get('id') == '$STEP_ID':
-        s['content_hash'] = '$NEW_HASH'
-        s['status'] = 'applied'
+  AWIKI_PJ="$PJ" AWIKI_STEP_ID="$STEP_ID" AWIKI_NEW_HASH="$NEW_HASH" python3 - <<'PY'
+import json, os
+pj = os.environ["AWIKI_PJ"]
+sid = os.environ["AWIKI_STEP_ID"]
+new_hash = os.environ["AWIKI_NEW_HASH"]
+d = json.load(open(pj))
+for s in d.get("bootstrap_steps_done", []):
+    if s.get("id") == sid:
+        s["content_hash"] = new_hash
+        s["status"] = "applied"
         break
 else:
-    d.setdefault('bootstrap_steps_done', []).append({'id':'$STEP_ID','status':'applied','content_hash':'$NEW_HASH'})
-json.dump(d, open(pj,'w'), indent=2)
-open(pj,'a').write('\n')
-"
+    d.setdefault("bootstrap_steps_done", []).append(
+        {"id": sid, "status": "applied", "content_hash": new_hash}
+    )
+with open(pj, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
 
   git add -A
   if ! git diff --cached --quiet; then

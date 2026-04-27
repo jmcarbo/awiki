@@ -226,6 +226,9 @@ Replace the trailing `echo "info: Commits C/D not yet implemented"` and `exit 0`
 
 ```bash
 # === Phase 3 — Commit C: bootstrap steps ===
+if should_skip_phase commit-c; then
+  echo "info: resume — skipping Commit C"
+else
 python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-c --status started
 
 # Manifest's ordered_steps and dangerous IDs (NEW manifest).
@@ -246,7 +249,7 @@ while IFS= read -r SID; do
   NEW_HASH=$(python3 "$HELPERS/bootstrap_hash.py" hash "$FETCH_DIR/BOOTSTRAP.md" "$SID" 2>/dev/null || true)
   [[ -z "$NEW_HASH" ]] && continue   # step not present in new BOOTSTRAP.md
 
-  # Look up existing record.
+  # Look up existing record. Use awk with -v to avoid shell interpolation hazards.
   EXISTING_LINE=$(echo "$EXISTING" | awk -v id="$SID" '$1==id {print; exit}')
   EXISTING_STATUS=$(echo "$EXISTING_LINE" | awk '{print $2}')
   EXISTING_HASH=$(echo "$EXISTING_LINE" | awk '{print $3}')
@@ -303,6 +306,7 @@ fi
 python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-c --status committed
 
 echo "info: Commit C complete"
+fi  # end Commit C
 ```
 
 (Then continue with Commit D below — same exit point.)
@@ -490,6 +494,9 @@ In `scripts/template-update.sh`, after the Commit C block, add:
 
 ```bash
 # === Phase 3 — Commit D: provenance ===
+if should_skip_phase commit-d; then
+  echo "info: resume — skipping Commit D"
+else
 python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-d --status started
 
 # Apply pending updates from state file → template.json.
@@ -503,18 +510,21 @@ if [[ $PERSIST_SOURCE -eq 1 ]]; then
   bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" repo "$RESOLVED_SOURCE" >/dev/null
 fi
 
-# Append pending migrations + bootstrap steps from state file.
-PENDING_MIGS=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" applied_migrations_pending)
-PENDING_STEPS=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" bootstrap_steps_pending)
-python3 -c "
-import json
-pj_path = '$PJ'
+# Append pending entries from state file → template.json. Use literal heredoc + env to
+# avoid shell-injection from user-controlled state contents (migration ids, reasons, paths).
+AWIKI_PJ="$PJ" AWIKI_STATE="$FETCH_DIR/.update-state.json" python3 - <<'PY'
+import json, os
+pj_path = os.environ["AWIKI_PJ"]
+state_path = os.environ["AWIKI_STATE"]
 d = json.load(open(pj_path))
-d.setdefault('applied_migrations', []).extend(json.loads('''$PENDING_MIGS'''))
-d.setdefault('bootstrap_steps_done', []).extend(json.loads('''$PENDING_STEPS'''))
-json.dump(d, open(pj_path, 'w'), indent=2)
-open(pj_path, 'a').write('\n')
-"
+s = json.load(open(state_path))
+d.setdefault("applied_migrations", []).extend(s.get("applied_migrations_pending", []))
+d.setdefault("bootstrap_steps_done", []).extend(s.get("bootstrap_steps_pending", []))
+d.setdefault("deleted", []).extend(s.get("deleted_pending", []))
+with open(pj_path, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
 
 # Move _fetch -> template-cache/<commit_new>/.
 NEW_CACHE_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_NEW"
@@ -541,6 +551,7 @@ Review with:   git diff main
 Merge with:    git switch main && git merge --no-ff $BRANCH_NAME
 Pending LLM migrations: .awiki/pending-prompts/
 EOF
+fi  # end Commit D
 
 exit 0
 ```

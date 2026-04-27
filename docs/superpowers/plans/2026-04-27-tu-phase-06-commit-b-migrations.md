@@ -185,24 +185,44 @@ def cmd_run(args: argparse.Namespace) -> int:
             rel = rel.split("->", 1)[1].strip()
         modified.append(rel)
 
-    out_of_scope: list[str] = []
-    awiki_writes: list[str] = []
-    for rel in modified:
-        if rel.startswith(".awiki/"):
-            awiki_writes.append(rel)
-            continue
-        # Check touches.
-        if not any(_glob_match(g, rel) for g in touches):
-            out_of_scope.append(rel)
+    out_of_scope_tracked: list[str] = []
+    out_of_scope_untracked: list[str] = []
+    awiki_writes_tracked: list[str] = []
+    awiki_writes_untracked: list[str] = []
 
-    if awiki_writes:
-        print(f"migration wrote to .awiki/: {awiki_writes}", file=sys.stderr)
-        # Revert.
-        subprocess.call(["git", "-C", str(repo_root), "restore", "--source=HEAD", "--", *awiki_writes])
+    # Re-parse porcelain to distinguish tracked vs untracked.
+    # Format: "XY filename" — untracked is "?? filename".
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        xy = line[:2]
+        rel = line[3:].strip()
+        if "->" in rel:
+            rel = rel.split("->", 1)[1].strip()
+        is_untracked = (xy == "??")
+        if rel.startswith(".awiki/"):
+            (awiki_writes_untracked if is_untracked else awiki_writes_tracked).append(rel)
+        elif not any(_glob_match(g, rel) for g in touches):
+            (out_of_scope_untracked if is_untracked else out_of_scope_tracked).append(rel)
+
+    def revert(tracked: list[str], untracked: list[str]) -> None:
+        if tracked:
+            subprocess.call(["git", "-C", str(repo_root), "restore", "--source=HEAD", "--", *tracked])
+        for u in untracked:
+            try:
+                (repo_root / u).unlink()
+            except FileNotFoundError:
+                pass
+
+    if awiki_writes_tracked or awiki_writes_untracked:
+        all_awiki = awiki_writes_tracked + awiki_writes_untracked
+        print(f"migration wrote to .awiki/: {all_awiki}", file=sys.stderr)
+        revert(awiki_writes_tracked, awiki_writes_untracked)
         return 1
-    if out_of_scope:
-        print(f"migration wrote outside touches:: {out_of_scope}", file=sys.stderr)
-        subprocess.call(["git", "-C", str(repo_root), "restore", "--source=HEAD", "--", *out_of_scope])
+    if out_of_scope_tracked or out_of_scope_untracked:
+        all_oos = out_of_scope_tracked + out_of_scope_untracked
+        print(f"migration wrote outside touches:: {all_oos}", file=sys.stderr)
+        revert(out_of_scope_tracked, out_of_scope_untracked)
         return 1
     return 0
 
@@ -244,6 +264,18 @@ def cmd_stage_prompt(args: argparse.Namespace) -> int:
             rel = str(p.relative_to(args.user_tree))
             if _glob_match(scope, rel):
                 matches.append(rel)
+
+    # Encrypted-path filter: reject scope_glob matching any path with filter=git-crypt.
+    if args.gitattributes is not None and args.gitattributes.is_file():
+        for rel in matches:
+            cr = subprocess.run(
+                ["git", "-c", f"core.attributesfile={args.gitattributes}",
+                 "check-attr", "filter", rel],
+                capture_output=True, text=True
+            )
+            if "filter: git-crypt" in cr.stdout:
+                print(f"scope_glob would match encrypted path: {rel}", file=sys.stderr)
+                return 1
 
     args.pending_dir.mkdir(parents=True, exist_ok=True)
     dest = args.pending_dir / args.prompt_md.name
@@ -494,6 +526,37 @@ Bump `tests/fixtures/template-update/v2-with-llm/template.manifest.toml` `templa
   grep -q "## Risk" "$TMP/pending/0002-rewrite-foo.prompt.md"
 }
 
+@test "migration risk: high under --non-interactive auto-declined" {
+  cd "$TMP"
+  TMP_V=$(mktemp -d)
+  cp -R "$REPO_ROOT/tests/fixtures/template-update/v1/." "$TMP_V/"
+  cat > "$TMP_V/migrations/0003-high-risk.prompt.md" <<'EOF'
+---
+id: 0003-high-risk
+requires: [agent]
+scope_glob: "content/**/*.md"
+risk: high
+---
+Big rewrite.
+EOF
+  cp -R "$REPO_ROOT/tests/fixtures/template-update/v0/." .
+  git init -q -b main
+  git add -A && git -c user.email=a@b -c user.name=t commit -q -m init
+  bash "$REPO_ROOT/scripts/template-init.sh" \
+    --repo "$REPO_ROOT/tests/fixtures/template-update/v1" \
+    --ref main --version 0.1.0 --commit "$(git rev-parse HEAD)" >/dev/null
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$TMP_V" --accept-source-change --apply --non-interactive
+  [ ! -f .awiki/pending-prompts/0003-high-risk.prompt.md ]
+  python3 -c "
+import json
+d = json.load(open('.awiki/template.json'))
+ids = [(m.get('id'), m.get('status')) for m in d['applied_migrations']]
+assert ('0003-high-risk', 'skipped') in ids, ids
+"
+  rm -rf "$TMP_V"
+}
+
 @test "migration stage-prompt: scope_glob secrets/ rejected" {
   cd "$TMP"
   cat > bad.prompt.md <<'EOF'
@@ -575,6 +638,9 @@ In `scripts/template-update.sh`, replace the trailing `echo "info: Commits B/C/D
 
 ```bash
 # === Phase 3 — Commit B: migrations ===
+if should_skip_phase commit-b; then
+  echo "info: resume — skipping Commit B"
+else
 python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-b --status started
 
 OLD_VERSION=$(python3 -c "import json; print(json.load(open('$PJ'))['version'])")
@@ -619,10 +685,19 @@ for MIG in $(ls "$FETCH_DIR/migrations/"*.sh "$FETCH_DIR/migrations/"*.prompt.md
   else
     # LLM prompt: stage.
     PEND_DIR="$REPO_ROOT/.awiki/pending-prompts"
-    if ! python3 "$HELPERS/migration.py" stage-prompt "$MIG" \
-         --user-tree "$REPO_ROOT" --pending-dir "$PEND_DIR"; then
+    STAGE_ARGS=(--user-tree "$REPO_ROOT" --pending-dir "$PEND_DIR")
+    [[ -f "$REPO_ROOT/.gitattributes" ]] && STAGE_ARGS+=(--gitattributes "$REPO_ROOT/.gitattributes")
+    if ! python3 "$HELPERS/migration.py" stage-prompt "$MIG" "${STAGE_ARGS[@]}"; then
       echo "halt: prompt staging failed for $MID" >&2
       exit 1
+    fi
+    # If risk: high under --non-interactive → record skipped instead of staged.
+    RISK=$(awk -F: '/^risk:/{gsub(/[ "'\'']/, "", $2); print $2; exit}' "$MIG" || echo medium)
+    if [[ "$RISK" == "high" && $NON_INTERACTIVE -eq 1 ]]; then
+      rm -f "$PEND_DIR/$(basename "$MIG")"
+      python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+        --id "$MID" --status skipped --reason "non-interactive high-risk"
+      continue
     fi
     # Note: applied_migrations[] entry for LLM prompts is appended LATER by the agent;
     # state.applied_migrations_pending only tracks staged prompts so Commit D can list them.
@@ -643,6 +718,8 @@ fi
 python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-b --status committed
 
 echo "info: Commit B complete"
+fi  # end Commit B (skipped on resume)
+
 echo "info: Commits C/D not yet implemented"
 exit 0
 ```

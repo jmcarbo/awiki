@@ -324,6 +324,7 @@ Args (all required):
   --manifest  <path>    # incoming template's template.manifest.toml
   --commit-old <sha>
   --commit-new <sha>
+  --provenance <path>   # path to .awiki/template.json (for bootstrap-step diff and user-deleted)
 """
 from __future__ import annotations
 
@@ -522,6 +523,69 @@ def emit_migrations(args: argparse.Namespace, manifest: dict) -> int:
     return count
 
 
+def emit_user_deleted(args: argparse.Namespace) -> int:
+    """Emit PLAN|user-deleted lines for paths in template.json.deleted[]."""
+    if not args.provenance or not args.provenance.is_file():
+        return 0
+    import json as _json
+    d = _json.loads(args.provenance.read_text(encoding="utf-8"))
+    count = 0
+    for entry in d.get("deleted", []):
+        rel = entry.get("path", "")
+        reason = entry.get("reason", "")
+        if rel:
+            emit("user-deleted", rel, reason)
+            count += 1
+    return count
+
+
+def emit_bootstrap_steps(args: argparse.Namespace, manifest: dict) -> int:
+    """Emit bootstrap-step-{new,content-changed,dangerous} lines."""
+    bs_md = args.new_tree / "BOOTSTRAP.md"
+    if not bs_md.is_file():
+        return 0
+    sys.path.insert(0, str(HERE))
+    import bootstrap_hash as _bh  # noqa: E402
+
+    new_bodies = _bh.parse(bs_md.read_text(encoding="utf-8"))
+    ordered = manifest.get("bootstrap", {}).get("ordered_steps", [])
+    dangerous = set(manifest.get("bootstrap", {}).get("dangerous", {}).get("ids", []))
+
+    pin_steps: dict[str, dict] = {}
+    if args.provenance and args.provenance.is_file():
+        import json as _json
+        d = _json.loads(args.provenance.read_text(encoding="utf-8"))
+        for s in d.get("bootstrap_steps_done", []):
+            pin_steps[s.get("id", "")] = s
+
+    count = 0
+    for sid in ordered:
+        if sid not in new_bodies:
+            continue
+        norm = re.sub(r"\s+", " ", new_bodies[sid]).strip()
+        new_hash = "sha256:" + hashlib.sha256(norm.encode("utf-8")).hexdigest()
+        existing = pin_steps.get(sid)
+        if existing is None:
+            if sid in dangerous:
+                emit("bootstrap-step-dangerous", sid, "marked-dangerous-new")
+            else:
+                emit("bootstrap-step-new", sid)
+            count += 1
+            continue
+        old_hash = existing.get("content_hash", "")
+        if old_hash == new_hash and existing.get("status") == "applied":
+            continue   # already done, no plan output
+        if sid in dangerous:
+            emit("bootstrap-step-dangerous", sid, "marked-dangerous-changed")
+        else:
+            emit("bootstrap-step-content-changed", sid, old_hash, new_hash)
+        count += 1
+    return count
+
+
+import re  # used by emit_bootstrap_steps
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--old-tree", required=True, type=Path)
@@ -530,6 +594,8 @@ def main() -> int:
     p.add_argument("--manifest", required=True, type=Path)
     p.add_argument("--commit-old", required=True)
     p.add_argument("--commit-new", required=True)
+    p.add_argument("--provenance", type=Path, default=None,
+                   help=".awiki/template.json (for bootstrap-step + user-deleted lines)")
     args = p.parse_args()
 
     manifest = manifest_parse.load(args.manifest)
@@ -538,6 +604,8 @@ def main() -> int:
 
     counts = emit_categories(args, manifest)
     counts["new_migrations"] = emit_migrations(args, manifest)
+    emit_user_deleted(args)
+    emit_bootstrap_steps(args, manifest)
 
     print(
         f"PLAN|footer|errors={counts['errors']}|warnings={counts['warnings']}"

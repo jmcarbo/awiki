@@ -530,6 +530,9 @@ Replace the trailing `echo "info: phase 3 not yet implemented..."` and `exit 0` 
 
 ```bash
 # === Phase 3 — Commit A: sync ===
+if should_skip_phase commit-a; then
+  echo "info: resume — skipping Commit A"
+else
 SHORT_NEW=$(echo "$COMMIT_NEW" | head -c 12)
 BRANCH_NAME="awiki-template-update/$SHORT_NEW"
 
@@ -590,6 +593,11 @@ while IFS= read -r line; do
       fi
       python3 "$HELPERS/sync.py" apply-new-file \
         --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "$REL" --decision "$DECISION"
+      # Record mark-as-user-deleted in state for Commit D to write template.json.deleted[].
+      if [[ "$DECISION" == "mark-as-user-deleted" ]]; then
+        python3 "$HELPERS/state.py" add-deleted-pending "$FETCH_DIR/.update-state.json" \
+          --rel "$REL" --reason "user marked at new_file prompt"
+      fi
       ;;
     deletion-in-template)
       REL="${parts[2]}"; LOCAL_MOD="${parts[3]}"
@@ -609,8 +617,13 @@ while IFS= read -r line; do
       python3 "$HELPERS/state.py" add-deletion-decision "$FETCH_DIR/.update-state.json" \
         --rel "$REL" --decision "$DECISION"
       ;;
-    template_only|preserve)
-      ;;  # no-op (template_only handled by overwriting in-place if needed; preserve = user wins)
+    template_only)
+      # Spec: same as overwrite but suppressed from human summary.
+      python3 "$HELPERS/sync.py" apply-overwrite \
+        --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "${parts[2]}"
+      ;;
+    preserve)
+      ;;  # no-op (user wins)
     *)
       ;;
   esac
@@ -637,6 +650,8 @@ python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase co
 python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$SYNC_SHA"
 
 echo "info: Commit A complete ($SYNC_SHA)"
+fi  # end Commit A (skipped on resume past)
+
 echo "info: Commits B/C/D not yet implemented"
 exit 0
 ```

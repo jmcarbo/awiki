@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up `scripts/template-update.sh` orchestrator with arg parsing, **Phase 0a** (pre-fetch preflight: dirty tree, branch, encryption, pending prompts, source-change), **Phase 1** (fetch + ancestor auto-recovery + state file init), and **Phase 0b** (post-fetch: schema-version check, encryption recheck, optional `--verify-signature`).
+**Goal:** Stand up `scripts/template-update.sh` orchestrator with arg parsing, **Phase 0a** (pre-fetch preflight: dirty tree, branch, encryption, pending prompts, source-change), **Phase 1** (fetch + ancestor auto-recovery + state file init), and **Phase 0b** (post-fetch: schema-version check, encryption recheck, optional `--verify-signature`). Establish the **resume gating contract** that every later phase honors so `--continue` never re-executes a committed phase.
+
+**Resume gating contract.** Each later phase block begins with a guard helper `should_skip_phase <name>` (defined here) that returns 0 (skip) when `RESUMED=1` and the named phase has already committed per state file; returns 1 otherwise. Phase order: `fetch | schema-upgrade | commit-a | commit-b | commit-c | commit-d`. If a phase's `status=started` (mid-phase crash), the helper returns 1 (re-run from clean state via `git reset --hard last_completed_commit`).
 
 **Architecture:** `template-update.sh` is the single entry point. CLI arg parser sets a flags-bag. Functions per phase. State file at `.awiki/template-cache/_fetch/.update-state.json` written/updated by every phase transition. Helpers from Phase 01–02 are composed.
 
@@ -54,7 +56,7 @@ teardown() { rm -rf "$TMP"; }
 import json
 d = json.load(open('$TMP/state.json'))
 assert d['phase'] == 'fetch'
-assert d['status'] == 'completed'
+assert d['status'] == 'committed'
 assert d['commit_old'] == 'aaa'
 assert d['commit_new'] == 'bbb'
 assert d['branch'] == 'awiki-template-update/bbb'
@@ -62,7 +64,18 @@ assert d['last_completed_commit'] is None
 assert d['applied_migrations_pending'] == []
 assert d['bootstrap_steps_pending'] == []
 assert d['deletions_user_decisions'] == {}
+assert d['deleted_pending'] == []
 "
+}
+
+@test "state validate: passes on clean init; fails on missing fields" {
+  python3 "$REPO_ROOT/scripts/_template_helpers/state.py" init "$TMP/state.json" \
+    --commit-old aaa --commit-new bbb --branch br
+  run python3 "$REPO_ROOT/scripts/_template_helpers/state.py" validate "$TMP/state.json"
+  [ "$status" -eq 0 ]
+  echo '{"phase": "fetch"}' > "$TMP/bad.json"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/state.py" validate "$TMP/bad.json"
+  [ "$status" -ne 0 ]
 }
 
 @test "state set-phase: updates phase and status" {
@@ -113,7 +126,7 @@ from pathlib import Path
 REQUIRED_FIELDS = (
     "phase", "status", "commit_old", "commit_new", "branch", "started_at",
     "last_completed_commit", "applied_migrations_pending",
-    "bootstrap_steps_pending", "deletions_user_decisions",
+    "bootstrap_steps_pending", "deletions_user_decisions", "deleted_pending",
 )
 
 
@@ -134,7 +147,7 @@ def save(path: Path, data: dict) -> None:
 def cmd_init(args: argparse.Namespace) -> int:
     data = {
         "phase": "fetch",
-        "status": "completed",
+        "status": "committed",
         "commit_old": args.commit_old,
         "commit_new": args.commit_new,
         "branch": args.branch,
@@ -143,8 +156,25 @@ def cmd_init(args: argparse.Namespace) -> int:
         "applied_migrations_pending": [],
         "bootstrap_steps_pending": [],
         "deletions_user_decisions": {},
+        "deleted_pending": [],
     }
     save(Path(args.path), data)
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    p = Path(args.path)
+    if not p.is_file():
+        print(f"state file not found: {p}", file=sys.stderr)
+        return 1
+    d = load(p)
+    missing = set(REQUIRED_FIELDS) - set(d.keys())
+    if missing:
+        print(f"missing fields: {sorted(missing)}", file=sys.stderr)
+        return 1
+    if d.get("status") not in ("started", "committed"):
+        print(f"invalid status: {d.get('status')}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -193,6 +223,17 @@ def cmd_add_deletion_decision(args: argparse.Namespace) -> int:
     p = Path(args.path)
     d = load(p)
     d.setdefault("deletions_user_decisions", {})[args.rel] = args.decision
+    save(p, d)
+    return 0
+
+
+def cmd_add_deleted_pending(args: argparse.Namespace) -> int:
+    p = Path(args.path)
+    d = load(p)
+    entry: dict = {"path": args.rel}
+    if args.reason:
+        entry["reason"] = args.reason
+    d.setdefault("deleted_pending", []).append(entry)
     save(p, d)
     return 0
 
@@ -252,6 +293,14 @@ def main() -> int:
     p_get.add_argument("path")
     p_get.add_argument("field")
 
+    p_v = sub.add_parser("validate")
+    p_v.add_argument("path")
+
+    p_amd = sub.add_parser("add-deleted-pending")
+    p_amd.add_argument("path")
+    p_amd.add_argument("--rel", required=True)
+    p_amd.add_argument("--reason", default="")
+
     args = parser.parse_args()
     dispatch = {
         "init": cmd_init,
@@ -260,7 +309,9 @@ def main() -> int:
         "add-migration-pending": cmd_add_migration_pending,
         "add-bootstrap-pending": cmd_add_bootstrap_pending,
         "add-deletion-decision": cmd_add_deletion_decision,
+        "add-deleted-pending": cmd_add_deleted_pending,
         "get": cmd_get,
+        "validate": cmd_validate,
     }
     return dispatch[args.cmd](args)
 
@@ -675,6 +726,43 @@ if [[ $DRY_RUN -eq 1 ]]; then APPLY=0; fi
 PJ="$REPO_ROOT/.awiki/template.json"
 [[ -f "$PJ" ]] || { echo "halt: no .awiki/template.json. Run 'just template-init' or 'just template-retrofit'." >&2; exit 1; }
 
+# Opt-out: repo == "none" disables update.
+PIN_REPO_OPTOUT=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" repo 2>/dev/null)
+if [[ "$PIN_REPO_OPTOUT" == "none" ]]; then
+  if [[ $STATUS -eq 1 ]]; then
+    echo "version: $(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" version)"
+    echo "commit:  $(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)"
+    echo "repo:    none (updates disabled)"
+    exit 0
+  fi
+  echo "info: template updates disabled (.awiki/template.json.repo = \"none\"). Re-enable by editing template.json or using --persist-source." >&2
+  exit 0
+fi
+
+# Phase-skip helper used by all later phases when RESUMED=1.
+# Phase order: fetch < schema-upgrade < commit-a < commit-b < commit-c < commit-d
+PHASE_ORDER=(fetch schema-upgrade commit-a commit-b commit-c commit-d)
+phase_index() {
+  local target="$1" idx=0
+  for p in "${PHASE_ORDER[@]}"; do
+    [[ "$p" == "$target" ]] && { echo $idx; return 0; }
+    idx=$((idx+1))
+  done
+  echo -1
+}
+should_skip_phase() {
+  local target="$1"
+  [[ "${RESUMED:-0}" -eq 1 ]] || return 1
+  local target_idx
+  target_idx=$(phase_index "$target")
+  local resumed_idx
+  resumed_idx=$(phase_index "$CONTINUE_FROM_PHASE")
+  if [[ $target_idx -lt $resumed_idx ]]; then return 0; fi
+  if [[ $target_idx -eq $resumed_idx && "$CONTINUE_FROM_STATUS" == "committed" ]]; then return 0; fi
+  return 1
+}
+export -f phase_index should_skip_phase
+
 # Defer --status, --re-pin, --gc, --abort, --continue, --rerun-bootstrap-step to later phases.
 if [[ -n "$RE_PIN" || $GC -eq 1 || $ABORT -eq 1 || $CONTINUE -eq 1 || $STATUS -eq 1 || -n "$RERUN_BOOTSTRAP_STEP" ]]; then
   echo "stub: this command path is implemented in a later phase" >&2
@@ -682,6 +770,9 @@ if [[ -n "$RE_PIN" || $GC -eq 1 || $ABORT -eq 1 || $CONTINUE -eq 1 || $STATUS -e
 fi
 
 # === Phase 0a: pre-fetch preflight ===
+if [[ "${RESUMED:-0}" -eq 1 ]]; then
+  echo "info: resume — skipping Phase 0a (already validated this cycle)"
+else
 DEFAULT_BRANCH=$(bash "$SCRIPT_DIR/template-config.sh" get "$REPO_ROOT/.awiki/config" default_branch main)
 
 python3 "$HELPERS/preflight.py" check-tree
@@ -701,6 +792,7 @@ SC_ARGS=(--provenance "$PJ" --source "$RESOLVED_SOURCE")
 bash "$SCRIPT_DIR/template-source-check.sh" "${SC_ARGS[@]}"
 
 echo "info: phase 0a preflight ok"
+fi  # end Phase 0a (skipped on --continue)
 
 # Phases 1, 0b, 1.5, 2, 3 — STUBBED until later tasks/phases.
 echo "info: subsequent phases not yet implemented"
@@ -770,6 +862,15 @@ Replace the `# Phases 1, 0b...` block in `scripts/template-update.sh` with:
 ```bash
 # === Phase 1: fetch ===
 FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"
+
+if should_skip_phase fetch; then
+  echo "info: resume — skipping Phase 1 (fetch already committed this cycle)"
+  # Re-derive variables from state file.
+  COMMIT_OLD=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" commit_old)
+  COMMIT_NEW=$(python3 "$HELPERS/state.py" get "$FETCH_DIR/.update-state.json" commit_new)
+  ANCESTOR_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_OLD"
+  NEW_MANIFEST="$FETCH_DIR/template.manifest.toml"
+else
 COMMIT_OLD=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" commit)
 ORIGINAL_REPO=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" original_repo)
 
@@ -847,6 +948,8 @@ python3 "$HELPERS/state.py" init "$FETCH_DIR/.update-state.json" \
   --commit-old "$COMMIT_OLD" --commit-new "$COMMIT_NEW" --branch "$BRANCH_NAME"
 
 echo "info: phase 1 fetch ok (commit_new=$COMMIT_NEW)"
+fi  # end Phase 1 (skipped on resume)
+
 echo "info: subsequent phases not yet implemented"
 exit 0
 ```
@@ -864,6 +967,35 @@ git commit -m "feat: template-update Phase 1 (fetch + ancestor auto-recovery + s
 
 ---
 
+## Task 4b: Create v3-schema-bump fixture (committed)
+
+**Files:**
+- Create: `tests/fixtures/template-update/v3-schema-bump/`
+
+- [ ] **Step 1: Copy v1 → v3, bump schema, add stub schema migration**
+
+```bash
+cp -R tests/fixtures/template-update/v1 tests/fixtures/template-update/v3-schema-bump
+sed -i.bak 's/^schema_version = 1$/schema_version = 2/' tests/fixtures/template-update/v3-schema-bump/template.manifest.toml
+rm tests/fixtures/template-update/v3-schema-bump/template.manifest.toml.bak
+mkdir -p tests/fixtures/template-update/v3-schema-bump/migrations
+cat > tests/fixtures/template-update/v3-schema-bump/migrations/schema-1-to-2.sh <<'EOF'
+#!/usr/bin/env bash
+# Schema upgrade 1 → 2 stub. Real implementation lands in Phase 04 Task 1.
+set -euo pipefail
+EOF
+chmod +x tests/fixtures/template-update/v3-schema-bump/migrations/schema-1-to-2.sh
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add tests/fixtures/template-update/v3-schema-bump/
+git commit -m "test: v3-schema-bump fixture (schema_version=2 + stub migration)"
+```
+
+---
+
 ## Task 5: Phase 0b — schema-version check + signature verification
 
 **Files:**
@@ -875,19 +1007,9 @@ git commit -m "feat: template-update Phase 1 (fetch + ancestor auto-recovery + s
 ```bash
 @test "template-update: schema-version mismatch halts without --schema-upgrade" {
   cd "$TMP"
-  # Build a v3 fixture with schema_version=2.
+  # v3 fixture is committed in the source tree (created by the dedicated task above).
   V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
-  if [[ ! -d "$V3" ]]; then
-    cp -R "$REPO_ROOT/tests/fixtures/template-update/v1" "$V3"
-    sed -i.bak 's/^schema_version = 1$/schema_version = 2/' "$V3/template.manifest.toml" && rm "$V3/template.manifest.toml.bak"
-    mkdir -p "$V3/migrations"
-    cat > "$V3/migrations/schema-1-to-2.sh" <<'EOF'
-#!/usr/bin/env bash
-# Schema upgrade stub.
-set -euo pipefail
-EOF
-    chmod +x "$V3/migrations/schema-1-to-2.sh"
-  fi
+  [ -d "$V3" ] || skip "v3-schema-bump fixture missing — run the v3 fixture creation task first"
   run bash "$REPO_ROOT/scripts/template-update.sh" \
     --source "$V3" --accept-source-change
   [ "$status" -ne 0 ]
@@ -914,6 +1036,9 @@ Insert before the `echo "info: phase 1 fetch ok"` line:
 
 ```bash
 # === Phase 0b: post-fetch preflight ===
+if [[ "${RESUMED:-0}" -eq 1 ]]; then
+  echo "info: resume — skipping Phase 0b"
+else
 NEW_MANIFEST="$FETCH_DIR/template.manifest.toml"
 [[ -f "$NEW_MANIFEST" ]] || { echo "halt: fetched template missing template.manifest.toml" >&2; exit 1; }
 
@@ -946,6 +1071,7 @@ if [[ $VERIFY_SIGNATURE -eq 1 ]] || [[ "$REQUIRE_SIG" == "true" ]]; then
 fi
 
 echo "info: phase 0b ok"
+fi  # end Phase 0b
 ```
 
 - [ ] **Step 4: Run tests — verify passing**

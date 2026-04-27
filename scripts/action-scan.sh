@@ -106,13 +106,20 @@ scan_one_file() {
   local frontmatter_done=0
   local fm_seen=0
   local project_slug=""
-  # Project slug is derived from frontmatter if type=project.
-  if awk '
+  # Project slug is derived from frontmatter if type=project. Pages with
+  # type=agenda are skipped entirely — their managed regions render
+  # actions duplicated from the project pages and would otherwise
+  # collide as dup-id.
+  local _type
+  _type="$(awk '
     BEGIN { fm = 0 }
     /^---[[:space:]]*$/ { fm = !fm; next }
-    fm && /^type:[[:space:]]*project/ { found = 1 }
-    END { exit (found ? 0 : 1) }
-  ' "$f"; then
+    fm && /^type:[[:space:]]*/ { sub(/^type:[[:space:]]*/, ""); print; exit }
+  ' "$f" | tr -d '"' | awk '{print $1}')"
+  if [[ "$_type" == "agenda" ]]; then
+    return 0
+  fi
+  if [[ "$_type" == "project" ]]; then
     project_slug="$(basename "$relpath" .md)"
   fi
 

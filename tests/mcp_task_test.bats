@@ -206,14 +206,42 @@ EOF
   grep -q '\\"ok\\":true' "$WORK/.o1.json"
 }
 
-@test "review_status returns stub:true" {
+@test "review_status returns the documented JSON shape (no stub flag)" {
+  # The mcp-task fixture lacks scripts/review-status.sh; copy it in so the
+  # MCP server's shell-out succeeds. (Phase-19 replaced the stubs with real
+  # implementations that read .awiki/maps/actions.tsv + content/inbox.md.)
+  cp "$BATS_TEST_DIRNAME/../scripts/review-status.sh" "$WORK/scripts/"
+  cp -R "$BATS_TEST_DIRNAME/../scripts/lib" "$WORK/scripts/"
   frame=$(node "$WORK/scripts/mcp-call.js" tools/call 1 review_status '' '{}')
   run mcp_call "$frame"
-  [[ "$output" == *'\"stub\":true'* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'\"stub\":true'* ]]
+  [[ "$output" == *'\"inbox_unprocessed\"'* ]]
+  [[ "$output" == *'\"someday_count\"'* ]]
 }
 
-@test "mark_review_done returns stub:true" {
+@test "mark_review_done writes .awiki/last-review and review-log line" {
+  cp "$BATS_TEST_DIRNAME/../scripts/review-status.sh" "$WORK/scripts/"
+  cp -R "$BATS_TEST_DIRNAME/../scripts/lib" "$WORK/scripts/"
+  mkdir -p "$WORK/content/agenda"
+  cat > "$WORK/content/agenda/review-log.md" <<'LOG'
+---
+title: "Review Log"
+type: agenda
+draft: false
+---
+
+# Review Log
+
+LOG
   frame=$(node "$WORK/scripts/mcp-call.js" tools/call 1 mark_review_done '' '{}')
   run mcp_call "$frame"
-  [[ "$output" == *'\"stub\":true'* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'\"stub\":true'* ]]
+  [[ "$output" == *'\"last_review\"'* ]]
+  # last-review file written with ISO timestamp.
+  [ -f "$WORK/.awiki/last-review" ]
+  grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$WORK/.awiki/last-review"
+  # review-log line appended (## [date time] review | inbox=N next=N ...).
+  grep -qE '^## \[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\] review \|' "$WORK/content/agenda/review-log.md"
 }

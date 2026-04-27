@@ -93,7 +93,14 @@ format_action_line() {
       if ($6  != "") line = line " " $6
       if ($7  != "") line = line " due:" $7
       if ($8  != "") line = line " defer:" $8
-      if ($9  != "") line = line " wait:[[" $9 "]]"
+      if ($9  != "") {
+        # The wait column may already include "[[...]]" wrapping (action-scan
+        # stores the raw token form per spec). Strip if present, then re-wrap
+        # so the rendered form is always a single set of brackets.
+        w = $9
+        sub(/^\[\[/, "", w); sub(/\]\]$/, "", w)
+        line = line " wait:[[" w "]]"
+      }
       if ($10 != "") line = line " since:" $10
       if ($11 != "") line = line " every:" $11
       if ($12 != "") line = line " done:" $12

@@ -34,3 +34,21 @@ jobs:
       - run: just check-deps
       - run: just lint
       - run: just test
+      - name: Run weekly review (informational + threshold gate)
+        env:
+          AWIKI_CI_OVERDUE_MAX: ${{ vars.AWIKI_CI_OVERDUE_MAX || '5' }}
+        run: |
+          set -euo pipefail
+          # Run scan+agenda first so review-status reads fresh data.
+          bash scripts/action-scan.sh
+          bash scripts/agenda.sh
+          REPORT="$(bash scripts/review-status.sh)"
+          echo "$REPORT"
+          # Extract overdue count.
+          OVERDUE="$(echo "$REPORT" | awk -F'[|=]' '/^REVIEW\|overdue\|/ { print $4 }')"
+          OVERDUE="${OVERDUE:-0}"
+          if [[ "$OVERDUE" -gt "$AWIKI_CI_OVERDUE_MAX" ]]; then
+            echo "::error::overdue actions ($OVERDUE) exceed threshold ($AWIKI_CI_OVERDUE_MAX)"
+            exit 1
+          fi
+          echo "overdue=$OVERDUE within threshold=$AWIKI_CI_OVERDUE_MAX"

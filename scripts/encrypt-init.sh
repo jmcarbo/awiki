@@ -4,6 +4,29 @@ set -euo pipefail
 MODE="git-crypt"
 if [[ "${1:-}" == "--age" ]]; then MODE="age"; fi
 
+# Phase 19 helper: when .awiki/config carries AWIKI_TASK_LAYER=on, ensure
+# content/inbox.md and content/agenda/** are covered by git-crypt patterns
+# in .gitattributes. Idempotent — re-runs detect existing patterns and
+# skip. The helper is called both on fresh init AND on re-runs of an
+# already-initialized repo (the latter so users who ran encrypt-init
+# before phase 19 can re-run it after enabling the task layer to extend
+# coverage).
+add_task_layer_patterns_if_enabled() {
+  if [[ ! -f .awiki/config ]] || ! grep -qE '^AWIKI_TASK_LAYER=on$' .awiki/config; then
+    return 0
+  fi
+  if [[ ! -f .gitattributes ]]; then
+    : > .gitattributes
+  fi
+  local pat
+  for pat in "content/inbox.md" "content/agenda/**"; do
+    if ! grep -qE "^$(printf '%s' "$pat" | sed 's/[].[\*\^\$\/]/\\&/g') filter=git-crypt diff=git-crypt\$" .gitattributes; then
+      printf '%s filter=git-crypt diff=git-crypt\n' "$pat" >> .gitattributes
+      echo "encrypt-init: added pattern $pat (task-layer)"
+    fi
+  done
+}
+
 case "$MODE" in
   git-crypt)
     if ! command -v git-crypt >/dev/null 2>&1; then
@@ -12,6 +35,8 @@ case "$MODE" in
     fi
     if [[ -d .git/git-crypt ]]; then
       echo "git-crypt already initialized" >&2
+      # Even on re-run, extend coverage if the task layer is now on.
+      add_task_layer_patterns_if_enabled
       exit 0
     fi
     git-crypt init
@@ -36,6 +61,8 @@ case "$MODE" in
     mkdir -p secrets
     git-crypt export-key secrets/.git-crypt-key
     chmod 600 secrets/.git-crypt-key
+
+    add_task_layer_patterns_if_enabled
 
     bash scripts/log-append.sh encrypt "git-crypt initialized; key at secrets/.git-crypt-key"
     echo "ENCRYPT-OK|mode=git-crypt|key=secrets/.git-crypt-key"

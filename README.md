@@ -91,7 +91,35 @@ Three pre-built templates under `deploy/`:
 
 ## Example
 
-Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog.
+Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog. The synthesis demo lives at `examples/sample-wiki/content/synthesis/memex-briefing.md`.
+
+### Synthesis smoke test
+
+After running the base smoke test:
+
+1. Tag 3+ sources with the same tag (e.g. `demo`):
+
+   ```bash
+   for i in 1 2 3; do echo "demo source $i" > raw/inbox/interactive/demo-$i.md; just ingest "raw/inbox/interactive/demo-$i.md"; done
+   ```
+
+2. Scaffold a briefing:
+
+   ```bash
+   just synth briefing demo --tag=demo
+   ```
+
+3. Fill the generated region (agent task; or use `tests/util/fill-good-body.sh` for a stubbed pass).
+
+4. Finalize and verify:
+
+   ```bash
+   just synth-finalize demo-briefing
+   just lint
+   just build
+   ```
+
+5. The page appears under the Synthesis section of `content/catalog.md` after running `just update-catalog` (or via the MCP `update_catalog` tool).
 
 ## License
 

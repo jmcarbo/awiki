@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Note: this script registers ONE awiki MCP server entry pointing at
+# mcp/awiki-server/index.js. The tool surface (ingest_source, lint, query_wiki,
+# update_catalog, list_synth_plugins, synthesize, finalize_synthesis) is
+# determined by the server itself at startup, NOT by this script. Adding new
+# tools to the server requires no changes here.
+
 if [[ ! -f mcp/awiki-server/index.js ]]; then
   echo "MCP server not built. Run: cd mcp/awiki-server && npm install" >&2
   exit 1

@@ -3,6 +3,17 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { listSynthPlugins } from "./lib/list-plugins.js";
+import { validate } from "./lib/validate-scope.js";
+import { runSynthesize, runFinalize, assertManifestUnderPluginDir } from "./lib/synthesize.js";
+
+const REPO_ROOT = process.cwd();
+const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
+const TOPIC_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+const SCOPE_SCHEMA = JSON.parse(
+  readFileSync(new URL("./schemas/scope.json", import.meta.url), "utf8"),
+);
 
 const TOOLS = [
   {
@@ -35,6 +46,35 @@ const TOOLS = [
     description: "Rebuild content/catalog.md from on-disk pages and current frontmatter.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
+  {
+    name: "list_synth_plugins",
+    description: "List all synthesis plugins under synthesis-plugins/. No arguments. Errors during scan are reported in the return payload.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "synthesize",
+    description: "Scaffold a synthesis page via scripts/synth.sh new. Returns {prompt_bundle, resolved_slugs, target_path}, or a structured error payload (scope_resolution_failed, target_exists, invalid_plugin) on orchestrator non-zero exit.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["plugin", "scope_descriptor", "topic_slug"],
+      properties: {
+        plugin: { type: "string" },
+        scope_descriptor: { type: "object" },
+        topic_slug: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "finalize_synthesis",
+    description: "Finalize a synthesis page via scripts/synth.sh finalize. Validates markers, runs synth lint, stamps last_generated, populates frontmatter sources. Returns {ok: true, output} on success or a structured error payload on marker/lint failure.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["topic_slug"],
+      properties: { topic_slug: { type: "string" } },
+    },
+  },
 ];
 
 const server = new Server({ name: "awiki", version: "0.1.0" }, { capabilities: { tools: {} } });
@@ -65,6 +105,63 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "update_catalog":
         out = execFileSync("bash", ["scripts/update-catalog.sh"], { encoding: "utf8" });
         break;
+      case "list_synth_plugins": {
+        const result = listSynthPlugins(REPO_ROOT);
+        out = JSON.stringify(result, null, 2);
+        break;
+      }
+      case "synthesize": {
+        const { plugin, scope_descriptor, topic_slug } = args ?? {};
+
+        // 1. Regex validation (before any filesystem access).
+        if (typeof plugin !== "string" || !PLUGIN_NAME_RE.test(plugin)) {
+          out = JSON.stringify({ error: "invalid_argument", field: "plugin", reason: "must match ^[a-z][a-z0-9-]*$" });
+          break;
+        }
+        if (typeof topic_slug !== "string" || !TOPIC_SLUG_RE.test(topic_slug)) {
+          out = JSON.stringify({ error: "invalid_argument", field: "topic_slug", reason: "must match ^[a-z0-9][a-z0-9-]*$" });
+          break;
+        }
+
+        // 2. JSON Schema validation of scope_descriptor.
+        if (scope_descriptor === null || typeof scope_descriptor !== "object" || Array.isArray(scope_descriptor)) {
+          out = JSON.stringify({ error: "invalid_argument", field: "scope_descriptor", reasons: ["must be an object"] });
+          break;
+        }
+        const scopeCheck = validate(SCOPE_SCHEMA, scope_descriptor);
+        if (!scopeCheck.valid) {
+          out = JSON.stringify({ error: "invalid_argument", field: "scope_descriptor", reasons: scopeCheck.errors });
+          break;
+        }
+
+        // 3. realpath check on the resolved manifest path (defeats symlink swap).
+        try {
+          assertManifestUnderPluginDir(REPO_ROOT, plugin);
+        } catch (e) {
+          out = JSON.stringify({ error: "invalid_plugin", reason: e.message });
+          break;
+        }
+
+        // 4. Shell-out (only after all gates pass).
+        const result = runSynthesize({
+          repoRoot: REPO_ROOT,
+          plugin,
+          topicSlug: topic_slug,
+          scope: scope_descriptor,
+        });
+        out = JSON.stringify(result, null, 2);
+        break;
+      }
+      case "finalize_synthesis": {
+        const { topic_slug } = args ?? {};
+        if (typeof topic_slug !== "string" || !TOPIC_SLUG_RE.test(topic_slug)) {
+          out = JSON.stringify({ error: "invalid_argument", field: "topic_slug", reason: "must match ^[a-z0-9][a-z0-9-]*$" });
+          break;
+        }
+        const result = runFinalize({ repoRoot: REPO_ROOT, topicSlug: topic_slug });
+        out = JSON.stringify(result, null, 2);
+        break;
+      }
       default:
         throw new Error(`unknown tool: ${name}`);
     }

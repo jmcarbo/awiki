@@ -293,3 +293,25 @@ PY
   run grep -c -F -- '- be concise' content/synthesis/memex-briefing.md
   [ "$output" = "1" ]
 }
+
+@test "smoke: new → agent-fill → finalize round trip" {
+  run bash scripts/synth.sh new briefing memex --tag=memex
+  [ "$status" -eq 0 ]
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/memex-briefing.md")
+p.write_text(p.read_text().replace(
+  "<!-- END GENERATED -->",
+  "## TL;DR\n- bush proposed memex [[s1]]\n- engelbart augmentation [[s2]]\n- nelson hypertext [[s3]]\n## Key Findings\n- finding A [[s1]]\n## Open Questions\n- q1 [[s2]]\n## Evidence\n> \"associative\" — [[s1]]\n<!-- END GENERATED -->",
+))
+PY
+  run bash scripts/synth.sh finalize memex-briefing
+  [ "$status" -eq 0 ]
+  run grep '^last_generated: 2' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+  run grep -F 'sources: ["[[s' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+  run bash scripts/synth.sh resolve memex-briefing
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"s1"* ]]
+}

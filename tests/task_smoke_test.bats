@@ -57,3 +57,39 @@ teardown() {
   run grep -c '^- ' content/inbox.md
   [[ "$output" == "2" ]]
 }
+
+@test "smoke phase 17: capture → manual triage → agenda → action under @phone" {
+  PHASE17_WORK="$(mktemp -d)"
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  cp -R "$REPO_ROOT" "$PHASE17_WORK/awiki"
+  cd "$PHASE17_WORK/awiki"
+  AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
+  just capture "call dentist about crown"
+
+  mkdir -p content/projects
+  cat > content/projects/dentist.md <<'PROJEOM'
+---
+title: "Dentist"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+## Open Actions
+
+- [ ] call dentist about crown @phone ^d01
+PROJEOM
+  awk '!/call dentist about crown/' content/inbox.md > content/inbox.md.tmp \
+    && mv content/inbox.md.tmp content/inbox.md
+
+  just agenda
+
+  run grep -F '### @phone' content/agenda/next-actions.md
+  [ -n "$output" ]
+  run grep -F 'call dentist about crown' content/agenda/next-actions.md
+  [ -n "$output" ]
+
+  cd /
+  rm -rf "$PHASE17_WORK"
+}

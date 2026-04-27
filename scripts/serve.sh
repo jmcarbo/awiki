@@ -5,6 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 
+# Clear stale Hugo resource cache and any prior public/ output. Stale
+# fingerprinted assets (e.g. en.search.min.<hash>.js) can collide with
+# fresh ones generated this session and cause the wrong asset to be
+# served, breaking search.
+rm -rf resources/_gen public/ .hugo_build.lock
+
 bash "$SCRIPT_DIR/build.sh"
 
 if command -v entr >/dev/null 2>&1; then

@@ -1,0 +1,22 @@
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+a01	 	call dentist	content/projects/q3-launch.md	5	phone	2026-04-25				1w				q3-launch	public
+a07	 	send invoice	content/projects/onboarding-revamp.md	7	computer	2026-04-26								onboarding-revamp	public
+a02	/	draft proposal	content/projects/q3-launch.md	6	computer									q3-launch	public
+a03	?	q3 budget approval	content/projects/q3-launch.md	8				bob-smith	2026-04-08			3		q3-launch	public
+a05	x	water plants	content/projects/home.md	4	home					1w	2026-04-26			home	public
+a06	x	file taxes	content/projects/admin.md	5	computer						2026-04-22			admin	public
+a08	x	book flight	content/projects/q3-launch.md	9	computer						2026-04-23			q3-launch	public
+a11	 	water plants next week	content/projects/home.md	6	home	2026-05-03				1w				home	public
+a12	 	pay credit card	content/projects/admin.md	6	computer	2026-05-15				1m				admin	public
+s01	>	item 01	content/projects/_someday.md	12										_someday	public
+s02	>	item 02	content/projects/_someday.md	13										_someday	public
+s03	>	item 03	content/projects/_someday.md	14										_someday	public
+s04	>	item 04	content/projects/_someday.md	15										_someday	public
+s05	>	item 05	content/projects/_someday.md	16										_someday	public
+s06	>	item 06	content/projects/_someday.md	17										_someday	public
+s07	>	item 07	content/projects/_someday.md	18										_someday	public
+s08	>	item 08	content/projects/_someday.md	19										_someday	public
+s09	>	item 09	content/projects/_someday.md	20										_someday	public
+s10	>	item 10	content/projects/_someday.md	21										_someday	public
+s11	>	item 11	content/projects/_someday.md	22										_someday	public
+s12	>	item 12	content/projects/_someday.md	23										_someday	public

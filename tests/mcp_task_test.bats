@@ -206,10 +206,18 @@ EOF
   grep -q '\\"ok\\":true' "$WORK/.o1.json"
 }
 
-@test "review_status returns stub:true" {
+@test "review_status returns the documented JSON shape (no stub flag)" {
+  # The mcp-task fixture lacks scripts/review-status.sh; copy it in so the
+  # MCP server's shell-out succeeds. (Phase-19 replaced the stubs with real
+  # implementations that read .awiki/maps/actions.tsv + content/inbox.md.)
+  cp "$BATS_TEST_DIRNAME/../scripts/review-status.sh" "$WORK/scripts/"
+  cp -R "$BATS_TEST_DIRNAME/../scripts/lib" "$WORK/scripts/"
   frame=$(node "$WORK/scripts/mcp-call.js" tools/call 1 review_status '' '{}')
   run mcp_call "$frame"
-  [[ "$output" == *'\"stub\":true'* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'\"stub\":true'* ]]
+  [[ "$output" == *'\"inbox_unprocessed\"'* ]]
+  [[ "$output" == *'\"someday_count\"'* ]]
 }
 
 @test "mark_review_done returns stub:true" {

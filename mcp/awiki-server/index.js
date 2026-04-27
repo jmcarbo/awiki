@@ -143,7 +143,7 @@ const TOOLS = [
   },
   {
     name: "review_status",
-    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    description: "Run scripts/review-status.sh under flock -s and return a structured JSON report: {last_review, inbox_unprocessed, raw_inbox_files, projects_no_next_action[], waiting_stale_14d[], overdue[], completed_since_last_review, stuck_projects[], someday_count}. Overdue/waiting entries are enriched with id/due/days_over and id/wait/since/days respectively.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -361,9 +361,26 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         out = JSON.stringify(rows, null, 2);
         break;
       }
-      case "review_status":
-        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+      case "review_status": {
+        // Shell out to scripts/review-status.sh. The script itself takes
+        // a brief shared lock; we do not need to wrap it in another flock
+        // call. The MCP server's job is to reshape the structured stdout
+        // into the documented JSON object.
+        let stdout;
+        try {
+          stdout = execFileSync("bash", ["scripts/review-status.sh"], {
+            cwd: REPO_ROOT,
+            encoding: "utf8",
+            env: { ...process.env, LC_ALL: "C" },
+            timeout: 30_000,
+          });
+        } catch (e) {
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          throw new Error(`review_status failed: ${stderr.trim() || e.message}`);
+        }
+        out = JSON.stringify(parseReviewStatus(REPO_ROOT, stdout));
         break;
+      }
       case "mark_review_done":
         out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
         break;
@@ -402,6 +419,155 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: "text", text: `ERROR|${e.message}` }], isError: true };
   }
 });
+
+// =============================================================================
+// review_status / mark_review_done helpers
+// =============================================================================
+
+// Parse REVIEW|<key>|... lines from scripts/review-status.sh into the JSON
+// shape documented in the spec. Enriches overdue and waiting-stale entries
+// with per-row metadata read directly from .awiki/maps/actions.tsv.
+function parseReviewStatus(repoRoot, stdout) {
+  const out = {
+    last_review: "never",
+    inbox_unprocessed: 0,
+    raw_inbox_files: 0,
+    projects_no_next_action: [],
+    waiting_stale_14d: [],
+    overdue: [],
+    completed_since_last_review: 0,
+    stuck_projects: [],
+    someday_count: 0,
+  };
+  // Helper: parse "key=value" segments. Skips the leading anchor segment
+  // ("REVIEW" or "REVIEW-SUMMARY") and, for REVIEW|<tag>|... lines, the
+  // tag segment too.
+  const parseKv = (line, skip) => {
+    const obj = {};
+    for (const seg of line.split("|").slice(skip)) {
+      const i = seg.indexOf("=");
+      if (i < 0) continue;
+      obj[seg.slice(0, i)] = seg.slice(i + 1);
+    }
+    return obj;
+  };
+
+  for (const raw of stdout.split("\n")) {
+    if (!raw.startsWith("REVIEW")) continue;
+    if (raw.startsWith("REVIEW-SUMMARY|")) {
+      const kv = parseKv(raw, 1);
+      out.last_review = kv["last-review"] ?? "never";
+      continue;
+    }
+    const kv = parseKv(raw, 2);
+    const tag = raw.split("|")[1];
+    switch (tag) {
+      case "inbox-unprocessed":
+        out.inbox_unprocessed = parseInt(kv.count, 10) || 0;
+        break;
+      case "raw-inbox-files":
+        out.raw_inbox_files = parseInt(kv.count, 10) || 0;
+        break;
+      case "projects-no-next-action":
+        out.projects_no_next_action = (kv.slugs ?? "").split(",").filter(Boolean);
+        break;
+      case "waiting-stale-14d":
+        out.waiting_stale_14d = enrichWaitingStale(
+          repoRoot,
+          (kv.ids ?? "").split(",").filter(Boolean),
+        );
+        break;
+      case "overdue":
+        out.overdue = enrichOverdue(
+          repoRoot,
+          (kv.ids ?? "").split(",").filter(Boolean),
+        );
+        break;
+      case "completed-since-last-review":
+        out.completed_since_last_review = parseInt(kv.count, 10) || 0;
+        break;
+      case "stuck-projects":
+        out.stuck_projects = (kv.slugs ?? "").split(",").filter(Boolean);
+        break;
+      case "someday-count":
+        out.someday_count = parseInt(kv.count, 10) || 0;
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+// Convert an ISO calendar date "YYYY-MM-DD" to UTC seconds-since-epoch.
+// Returns null on parse failure.
+function isoDateToEpochSec(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  return Date.UTC(Number(y), Number(mo) - 1, Number(d)) / 1000;
+}
+
+function todayEpochSec() {
+  const today =
+    process.env.AWIKI_TODAY ?? new Date().toISOString().slice(0, 10);
+  return isoDateToEpochSec(today) ?? Math.floor(Date.now() / 1000);
+}
+
+function enrichWaitingStale(repoRoot, ids) {
+  if (ids.length === 0) return [];
+  let tsv;
+  try {
+    tsv = readFileSync(`${repoRoot}/.awiki/maps/actions.tsv`, "utf8");
+  } catch {
+    return ids.map((id) => ({ id, wait: "", since: "", days: 0 }));
+  }
+  const tSec = todayEpochSec();
+  const result = [];
+  const lines = tsv.split("\n");
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i]) continue;
+    const c = lines[i].split("\t");
+    if (!ids.includes(c[0])) continue;
+    const wait = c[8] ?? "";
+    const since = c[9] ?? "";
+    let days = 0;
+    if (since) {
+      const sSec = isoDateToEpochSec(since);
+      if (sSec !== null) days = Math.floor((tSec - sSec) / 86400);
+    }
+    result.push({ id: c[0], wait, since, days });
+  }
+  return result;
+}
+
+function enrichOverdue(repoRoot, ids) {
+  if (ids.length === 0) return [];
+  let tsv;
+  try {
+    tsv = readFileSync(`${repoRoot}/.awiki/maps/actions.tsv`, "utf8");
+  } catch {
+    return ids.map((id) => ({ id, due: "", days_over: 0 }));
+  }
+  const tSec = todayEpochSec();
+  const result = [];
+  const lines = tsv.split("\n");
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i]) continue;
+    const c = lines[i].split("\t");
+    if (!ids.includes(c[0])) continue;
+    const due = c[6] ?? "";
+    let days_over = 0;
+    if (due) {
+      const dSec = isoDateToEpochSec(due);
+      if (dSec !== null) days_over = Math.floor((tSec - dSec) / 86400);
+    }
+    result.push({ id: c[0], due, days_over });
+  }
+  return result;
+}
+
+// =============================================================================
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

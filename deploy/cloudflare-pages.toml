@@ -1,0 +1,6 @@
+# Cloudflare Pages — paste into project UI:
+# Build command:    scripts/deploy-build.sh
+# Build output:     public
+# Environment vars:
+#   HUGO_VERSION = 0.120.4
+#   GIT_CRYPT_KEY = <base64> (only if wiki uses git-crypt; sets a CI-only secret)

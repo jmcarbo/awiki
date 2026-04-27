@@ -125,9 +125,26 @@ should_skip_phase() {
 }
 export -f phase_index should_skip_phase
 
-# Defer --status, --re-pin, --gc, --abort, --continue, --rerun-bootstrap-step to later phases.
-if [[ -n "$RE_PIN" || $GC -eq 1 || $ABORT -eq 1 || $CONTINUE -eq 1 || $STATUS -eq 1 || -n "$RERUN_BOOTSTRAP_STEP" ]]; then
-  echo "stub: this command path is implemented in a later phase" >&2
+# === Subcommand dispatch (recovery flows) ===
+
+# --abort: clean up _fetch + delete update branch + restore default branch.
+if [[ $ABORT -eq 1 ]]; then
+  FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"
+  STATE="$FETCH_DIR/.update-state.json"
+  if [[ -f "$STATE" ]]; then
+    BRANCH=$(python3 "$HELPERS/state.py" get "$STATE" branch 2>/dev/null || echo "")
+    DEFAULT_BRANCH=$(bash "$SCRIPT_DIR/template-config.sh" get "$REPO_ROOT/.awiki/config" default_branch main)
+    git checkout -q "$DEFAULT_BRANCH" 2>/dev/null || true
+    if [[ -n "$BRANCH" && "$BRANCH" != "null" ]] && git rev-parse --verify --quiet "refs/heads/$BRANCH" >/dev/null; then
+      git branch -D "$BRANCH" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$FETCH_DIR"
+    echo "info: aborted update; $DEFAULT_BRANCH restored"
+  else
+    # Even with no state, clean up bare _fetch if present.
+    [[ -d "$FETCH_DIR" ]] && rm -rf "$FETCH_DIR"
+    echo "info: no in-progress update"
+  fi
   exit 0
 fi
 

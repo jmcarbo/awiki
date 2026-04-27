@@ -208,6 +208,204 @@ synth_scope_hash() {
   printf -- '%s\n' "$slugs" | tr -d '\r' | shasum -a 256 | awk '{print substr($1,1,6)}'
 }
 
+# Build the lead-paragraph + frontmatter snippet for the {{pages}} interpolation.
+synth_pages_block() {
+  local slugs="$1"
+  while IFS= read -r slug; do
+    [[ -z "$slug" ]] && continue
+    local path; path="$(synth_slug_to_path "$slug")"
+    [[ -z "$path" ]] && continue
+    local title; title="$(synth_fm_field "$path" "title")"
+    local type;  type="$(synth_fm_field "$path" "type")"
+    title="${title#\"}"; title="${title%\"}"
+    # First non-blank non-frontmatter line as lead paragraph (truncated to ~200 chars).
+    local lead
+    lead="$(awk 'BEGIN{c=0} /^---$/ {c++; next} c==2 && NF>0 {print; exit}' "$path")"
+    local lead_short="${lead:0:200}"
+    printf -- '- [[%s]] (%s) — %s\n' "$slug" "$type" "$lead_short"
+  done <<< "$slugs"
+}
+
+# Render the prompt bundle to stdout.
+synth_emit_prompt() {
+  local slugs="$1" scope_desc="$2" feedback="$3"
+  local body; body="$(synth_plugin_extract_prompt)"
+  # Interpolate {{scope_description}} (single-line replace).
+  body="${body//\{\{scope_description\}\}/$scope_desc}"
+  # Interpolate {{#pages}}...{{/pages}} block: replace whole tag-pair with
+  # page rows. Only one such block in v1 plugin templates.
+  local pages_rows pages_file
+  pages_rows="$(synth_pages_block "$slugs")"
+  pages_file="$(mktemp)"
+  printf -- '%s\n' "$pages_rows" > "$pages_file"
+  body="$(printf -- '%s\n' "$body" | awk -v rowsfile="$pages_file" '
+    BEGIN{
+      in_pages=0
+      while ((getline line < rowsfile) > 0) { rows = rows line "\n" }
+      close(rowsfile)
+      sub(/\n$/, "", rows)
+    }
+    /\{\{#pages\}\}/ { in_pages=1; next }
+    /\{\{\/pages\}\}/ { in_pages=0; if (rows != "") print rows; next }
+    in_pages==0 { print }
+  ')"
+  rm -f "$pages_file"
+  # Interpolate {{#feedback}}...{{/feedback}}.
+  # Phase 13: feedback is empty on `new` and emits a stub note for plugin authors.
+  if [[ -z "$feedback" ]]; then
+    body="$(printf -- '%s\n' "$body" | awk '
+      BEGIN{ in_fb=0 }
+      /\{\{#feedback\}\}/ { in_fb=1; next }
+      /\{\{\/feedback\}\}/ { in_fb=0; print "<!-- feedback channel arrives in phase 15 -->"; next }
+      in_fb==0 { print }
+    ')"
+  else
+    body="${body//\{\{feedback\}\}/$feedback}"
+    body="$(printf -- '%s\n' "$body" | sed -e 's/{{#feedback}}//g' -e 's/{{\/feedback}}//g')"
+  fi
+  printf -- '%s\n' "$body"
+}
+
+# Write the synthesis-page scaffold (frontmatter + lead placeholder + ## Notes + markers).
+synth_write_scaffold() {
+  local page="$1" plugin="$2" scope_block="$3" scope_hash="$4" sources_yaml="$5" topic="$6"
+  local today; today="$(date '+%Y-%m-%d')"
+  mkdir -p "$(dirname "$page")"
+  {
+    echo '---'
+    printf -- 'title: "%s — %s"\n' "$topic" "$plugin"
+    printf -- 'date: %s\n' "$today"
+    printf -- 'last_updated: %s\n' "$today"
+    printf -- 'last_generated:\n'
+    printf -- 'type: synthesis\n'
+    printf -- 'plugin: %s\n' "$plugin"
+    printf -- '%s' "$scope_block"
+    printf -- 'tags: [%s, %s]\n' "$topic" "$plugin"
+    printf -- 'aliases: []\n'
+    printf -- '%s' "$sources_yaml"
+    printf -- 'draft: false\n'
+    echo '---'
+    echo
+    echo "Lead paragraph — written once by user/agent, NOT regenerated."
+    echo
+    echo "## Notes"
+    echo
+    echo "<!-- user notes; survives regen -->"
+    echo
+    printf -- '<!-- BEGIN GENERATED plugin=%s scope_hash=%s -->\n' "$plugin" "$scope_hash"
+    echo
+    echo '<!-- END GENERATED -->'
+  } > "$page"
+}
+
+cmd_new() {
+  local plugin="" topic="" scope_arg_kind="" scope_arg_val=""
+  local exclude_tags="" min_last_updated="" types="" allow_private=0
+
+  if [[ $# -lt 2 ]]; then
+    EXIT_CODE=1 die "usage: synth.sh new <plugin> <topic-slug> (--tag=X|--slugs=a,b|--query=\"...\") [...]"
+  fi
+  plugin="$1"; topic="$2"; shift 2
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --tag=*)              scope_arg_kind="tag";   scope_arg_val="${1#--tag=}" ;;
+      --slugs=*)            scope_arg_kind="slugs"; scope_arg_val="${1#--slugs=}" ;;
+      --query=*)            scope_arg_kind="query"; scope_arg_val="${1#--query=}" ;;
+      --exclude-tags=*)     exclude_tags="${1#--exclude-tags=}" ;;
+      --min-last-updated=*) min_last_updated="${1#--min-last-updated=}" ;;
+      --types=*)            types="${1#--types=}" ;;
+      --allow-private)      allow_private=1 ;;
+      --) shift; break ;;
+      *) EXIT_CODE=1 die "unknown flag: $1" ;;
+    esac
+    shift
+  done
+
+  require_slug "$topic" "topic-slug"
+  if ! synth_plugin_load "$plugin"; then EXIT_CODE=1 die "plugin load failed: $plugin"; fi
+  [[ -n "$scope_arg_kind" ]] || { EXIT_CODE=1 die "must pass --tag, --slugs or --query"; }
+
+  # Build scope state.
+  SCOPE_TAG=""; SCOPE_SLUGS=""; SCOPE_QUERY=""
+  SCOPE_EXCLUDE_TAGS="$exclude_tags"; SCOPE_MIN_LAST_UPDATED="$min_last_updated"; SCOPE_TYPES="$types"
+  case "$scope_arg_kind" in
+    tag)   SCOPE_TAG="$scope_arg_val" ;;
+    slugs) SCOPE_SLUGS="$scope_arg_val" ;;
+    query) SCOPE_QUERY="$scope_arg_val" ;;
+  esac
+
+  local target="$SYNTH_DIR/$topic-$plugin.md"
+  if [[ "$target" == content/private/* ]]; then SCOPE_TARGET_PRIVATE=1; else SCOPE_TARGET_PRIVATE=0; fi
+
+  # First pass: resolve WITHOUT private-stripping, so we can detect leakage.
+  local saved_target_priv=$SCOPE_TARGET_PRIVATE
+  SCOPE_TARGET_PRIVATE=1   # force "no privacy strip" so we see private slugs
+  local raw_slugs; raw_slugs="$(synth_resolve_to_slugs)"
+  SCOPE_TARGET_PRIVATE=$saved_target_priv
+
+  local has_private=0
+  while IFS= read -r slug; do
+    [[ -z "$slug" ]] && continue
+    local path; path="$(synth_slug_to_path "$slug")"
+    [[ -z "$path" ]] && continue
+    local tags; tags="$(synth_fm_tags "$path")"
+    if [[ " $tags " == *" private "* ]]; then has_private=1; fi
+  done <<< "$raw_slugs"
+
+  if [[ "$has_private" -eq 1 && "$SCOPE_TARGET_PRIVATE" -ne 1 && "$allow_private" -ne 1 ]]; then
+    EXIT_CODE=2 die "private source in scope; either tag the synthesis page private and place under content/private/, or pass --allow-private"
+  fi
+
+  # Second pass: post-filter slug list (the canonical one used for scope_hash + sources:).
+  local slugs; slugs="$(synth_resolve_to_slugs)"
+  local nslugs; nslugs="$(printf -- '%s\n' "$slugs" | grep -c . || true)"
+
+  if [[ -n "$SYNTH_PLUGIN_MIN_SOURCES" && "$nslugs" -lt "$SYNTH_PLUGIN_MIN_SOURCES" ]]; then
+    EXIT_CODE=2 die "scope resolves to $nslugs sources; plugin requires min_sources=$SYNTH_PLUGIN_MIN_SOURCES"
+  fi
+  if [[ -n "$SYNTH_PLUGIN_MAX_SOURCES" && "$nslugs" -gt "$SYNTH_PLUGIN_MAX_SOURCES" ]]; then
+    EXIT_CODE=2 die "scope resolves to $nslugs sources; plugin allows max_sources=$SYNTH_PLUGIN_MAX_SOURCES"
+  fi
+
+  if [[ -e "$target" ]]; then
+    EXIT_CODE=3 die "target already exists: $target — use 'synth.sh regen' to refresh"
+  fi
+
+  local scope_hash; scope_hash="$(synth_scope_hash "$slugs")"
+
+  # Build scope: YAML block.
+  local scope_block; scope_block="scope:"$'\n'
+  case "$scope_arg_kind" in
+    tag)   scope_block+="  tag: $scope_arg_val"$'\n' ;;
+    slugs) scope_block+="  slugs: [$scope_arg_val]"$'\n' ;;
+    query) scope_block+="  query: \"$scope_arg_val\""$'\n' ;;
+  esac
+  [[ -n "$exclude_tags"     ]] && scope_block+="  exclude_tags: [$exclude_tags]"$'\n'
+  [[ -n "$min_last_updated" ]] && scope_block+="  min_last_updated: $min_last_updated"$'\n'
+  [[ -n "$types"            ]] && scope_block+="  types: [$types]"$'\n'
+
+  # Build sources: list (empty on `new`; populated at finalize-time, per spec).
+  local sources_yaml; sources_yaml="sources: []"$'\n'
+
+  synth_write_scaffold "$target" "$plugin" "$scope_block" "$scope_hash" "$sources_yaml" "$topic"
+
+  # Emit prompt bundle to stdout.
+  local scope_desc
+  case "$scope_arg_kind" in
+    tag)   scope_desc="pages tagged '$scope_arg_val'" ;;
+    slugs) scope_desc="explicit slug list ($nslugs pages)" ;;
+    query) scope_desc="qmd query: $scope_arg_val" ;;
+  esac
+  synth_emit_prompt "$slugs" "$scope_desc" ""
+
+  bash "$REPO_ROOT/scripts/log-append.sh" synth-scaffold -- "$plugin $topic"
+  if [[ "$allow_private" -eq 1 && "$has_private" -eq 1 ]]; then
+    bash "$REPO_ROOT/scripts/log-append.sh" synth-declassify -- "$topic sources=$nslugs"
+  fi
+
+  echo "SYNTH-NEW|target=$target|plugin=$plugin|sources=$nslugs|scope_hash=$scope_hash" >&2
+}
+
 cmd_resolve() {
   if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh resolve <slug>"; fi
   local slug="$1"; require_slug "$slug" "synthesis-page-slug"
@@ -236,7 +434,8 @@ USAGE
   case "$sub" in
     list) cmd_list "$@" ;;
     resolve) cmd_resolve "$@" ;;
-    new|regen|accept-stage|finalize|refine)
+    new) cmd_new "$@" ;;
+    regen|accept-stage|finalize|refine)
       EXIT_CODE=1 die "subcommand '$sub' not yet implemented"
       ;;
     *) EXIT_CODE=1 die "unknown subcommand: $sub" ;;

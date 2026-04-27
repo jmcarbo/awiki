@@ -3,7 +3,7 @@ title: "Confidential Memo"
 date: 2026-04-01
 last_updated: 2026-04-27
 type: source
-tags: [memex, private]
+tags: [private]
 aliases: []
 sources: []
 draft: false

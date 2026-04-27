@@ -70,3 +70,19 @@ Example end-to-end:
     # later:
     just synth-refine memex-briefing "shorten Key Findings to 5 bullets"
     just synth-regen memex-briefing
+
+synth-regen <slug> [--force | --stage]
+    Re-resolve scope and re-emit prompt for an existing synthesis page.
+    --force: skip the hand-edit guard (S6 warning becomes informational).
+    --stage: write to content/synthesis/.staged/<slug>.md instead of the
+             live page. After agent fills, finalize, then accept-stage to promote.
+
+synth-accept-stage <slug>
+    Promote a staged regen into the live page. Runs lint --only=synth on the
+    staged file first; on lint failure, leaves the staged file in place and
+    exits 6 so the agent can retry.
+
+Lint: `just lint --only=synth` runs only S1-S6/S9 synth rules. With --fix,
+it normalizes smart quotes, em-dashes, and zero-width spaces inside
+generated regions only. Marker repair, missing-section repair, and S9
+reductions are NOT auto-fixable — they require regen.

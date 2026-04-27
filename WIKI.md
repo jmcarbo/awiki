@@ -87,41 +87,88 @@ No script needed — the agent decides when image content is load-bearing. For d
 
 If the user has installed one of the configs in `scheduled/`, lint runs automatically on a cadence. Lint output is captured to logs (`/tmp/awiki-lint.{out,err}` for launchd; `journalctl --user -u awiki-lint` for systemd; the Actions run log for CI). Agent should treat scheduled lint failures as the next-session priority.
 
-### 4.6 Synthesis (briefing-only)
+### 4.6 Synthesis
 
-1. Pick a scope. Either a tag (`--tag=memex`), an explicit slug list
-   (`--slugs=s1,s2,s3`), or a saved query (`--query="…"` — requires qmd).
-2. Run `just synth briefing <topic-slug> --tag=<tag>`.
-   - Orchestrator validates the plugin, resolves scope, fails closed if
-     any source is tagged `private` and the target page is not under
-     `content/private/` (pass `--allow-private` to acknowledge intentional
-     declassification).
-   - Scaffolds `content/synthesis/<topic>-briefing.md` with frontmatter,
-     a lead-paragraph placeholder, `## Notes`, and the BEGIN/END markers.
-   - Emits the prompt bundle to stdout. The bundle is the briefing plugin
-     template with the resolved page list interpolated.
-3. Read the prompt. Generate the briefing body (TL;DR / Key Findings /
-   Open Questions / Evidence) and write it between the BEGIN and END
-   markers. Do not edit anything outside the markers.
-4. Run `just synth-finalize <topic>-briefing`.
-   - Validates marker integrity (exit 5 if broken).
-   - Runs scoped lint (`scripts/lint.sh --only=synth --file=<path>`;
-     phase 13 covers markers and required sections only — full S1–S9
-     arrives in phase 14).
-   - Stamps `last_generated`, populates frontmatter `sources:` from the
-     resolved scope, log-appends.
-5. To refresh later: `just synth-regen <topic>-briefing`. The orchestrator
-   re-runs the privacy check, refuses if it detects a manual edit inside
-   the marker region (pass `--force` to override or `--stage` to write to
+1. Pick a plugin from `synthesis-plugins/`. Available: `briefing`, `mindmap`,
+   `timeline`, `study-guide`. `just synth-list` prints the catalog with
+   `<name> | <output_subtype> | <description>`.
+2. `just synth <plugin> <topic-slug> --tag=<tag>` (or `--slugs=a,b,c` or
+   `--query="..."`) scaffolds `content/synthesis/<topic>-<plugin>.md` and
+   emits the prompt bundle on stdout. Quote the topic slug if it contains
+   underscores; the orchestrator validates `^[a-z0-9][a-z0-9-]*$`. Plugin
+   name constraint: `^[a-z][a-z0-9-]*$`. The orchestrator fails closed if
+   any source is tagged `private` and the target page is not under
+   `content/private/` (pass `--allow-private` to acknowledge intentional
+   declassification).
+3. The agent (you) reads the bundle, generates content **only between the
+   BEGIN GENERATED and END GENERATED markers**, then calls
+   `just synth-finalize <slug>`. Finalize runs `lint.sh --only=synth
+   --file=<path>` and stamps `last_generated`.
+4. Lint discipline (synth-namespaced rules):
+   - **S1 marker integrity** — exactly one BEGIN, one END, BEGIN before
+     END. Hard error.
+   - **S2 required sections** — every section the plugin manifest's
+     `required_sections` lists must appear inside the markers. Hard error.
+   - **S3 evidence quote substring** — every `> "quote" — [[slug]]` line
+     must appear verbatim in the cited source's body (after Unicode NFC
+     normalization, zero-width strip, hyphen-variant collapse, smart→
+     straight quotes, NBSP→space, whitespace collapse, and wikilink-to-
+     title rewrite for inlined `[[other-slug]]` references). Hard error.
+     If you draft a quote that fails S3, do NOT paraphrase to make it pass
+     — go back to the source and copy the exact span.
+   - **S4 citation in scope** — every `[[slug]]` inside markers must
+     resolve and be in the page's resolved scope. Hard error.
+   - **S5 scope drift** — warning if the recomputed `scope_hash` differs
+     from the BEGIN-marker value. Skipped for `query`-scoped pages
+     (qmd is non-deterministic). Resolution: `just synth-regen <slug>`.
+   - **S6 hand-edit inside markers** — warning if frontmatter
+     `last_updated` advanced past `last_generated` AND the working-tree
+     diff vs HEAD intersects the BEGIN..END region. Diffs to lead
+     paragraph, `## Notes`, `## Feedback`, or non-`last_generated`/
+     `sources` frontmatter do NOT trigger. If you intentionally edited
+     inside markers, run `synth-regen` to re-stamp.
+   - **S9 aggregate evidence words** — sum of words across all
+     `> "..."` lines is hard-capped by the plugin manifest's
+     `max_evidence_total_words` (default 500; `study-guide` is 300 to
+     defend against accidental near-reproduction of a single source).
+   - `just lint --only=synth` runs only synth rules. `just lint
+     --only=synth --fix` applies S3 normalization (zero-width strip,
+     hyphen→ASCII, smart→straight quotes) inside generated regions only.
+     Marker repair, missing-section repair, S9 reductions are NOT in
+     `--fix` (they need regen).
+5. Plugin-specific notes:
+   - **`briefing`** — TL;DR / Key Findings / Open Questions / Evidence.
+     Bias toward `type: source` over derivative pages to reduce echo.
+   - **`mindmap`** — `## Mindmap` is a fenced ```mermaid``` block with
+     the `mindmap` directive. Mermaid mindmap leaves cannot be markdown
+     links, so the `## Pages` section bridges display text → wikilinks.
+     Max depth 3, max ~40 nodes. The `synth-mindmap-validate.sh`
+     post-hook runs `mmdc --dry-run` if installed (regex fallback
+     otherwise). Post-hook is gated by `ALLOW_PLUGIN_POST_HOOKS=1` in
+     `.awiki/config`.
+   - **`timeline`** — `render: mermaid|table` config. Mermaid mode
+     groups by decade. **Source dates from page bodies**, not just
+     frontmatter `date:` (which is page-creation date). Mark uncertain
+     dates `c.<year>` or `<year>?`.
+   - **`study-guide`** — Concept Checklist / Short-Answer Questions
+     (`<details>` blocks) / Flashcards (Anki-importable Q:/A: separated
+     by `---`) / Suggested Deep-Dives / Evidence. `min_sources: 1` so a
+     single textbook chapter is a valid scope; the tighter
+     `max_evidence_total_words: 300` cap protects against
+     near-reproduction.
+6. To refresh later: `just synth-regen <slug>`. The orchestrator re-runs
+   the privacy check, refuses if it detects a manual edit inside the
+   marker region (pass `--force` to override or `--stage` to write to
    `.staged/<slug>.md` for review). After review, promote with
-   `just synth-accept-stage <topic>-briefing`.
+   `just synth-accept-stage <slug>`.
+7. Plugin post-hooks (third-party `synthesis-plugins/<name>/post.sh`)
+   are arbitrary shell code. Default is `ALLOW_PLUGIN_POST_HOOKS=0` —
+   the orchestrator refuses to invoke any post-hook until you flip the
+   flag. Review the hook source first; treat unfamiliar plugin
+   directories as untrusted.
 
-Topic-slug constraint: `^[a-z0-9][a-z0-9-]*$` (no leading hyphen). Plugin
-name constraint: `^[a-z][a-z0-9-]*$`. All justfile recipes use `--` to
-terminate flag parsing before positional args.
-
-Mindmap, timeline, and study-guide plugins arrive in phase 14, with the
-full lint suite (S1–S9) and feedback channel.
+All justfile recipes use `--` to terminate flag parsing before positional
+args.
 
 ## 5. Inbox Queues
 
@@ -149,13 +196,15 @@ Mechanical (`scripts/lint.sh`):
 - Catalog dangling/missing entries.
 - Slug uniqueness.
 - Privacy: `tags: [private]` outside `**/private/` paths.
-- **S1 (synth, error)** — synthesis pages with `plugin:` frontmatter must
-  contain exactly one BEGIN GENERATED marker and one END GENERATED marker,
-  in that order.
-- **S2 (synth, error)** — every section listed in the plugin manifest's
-  `required_sections` must appear inside the marker region.
+- S1 (error): synthesis page has exactly one BEGIN/END marker pair, BEGIN before END.
+- S2 (error): synthesis page contains every heading from its plugin's required_sections list inside the markers.
+- S3 (error): every `> "quote" — [[slug]]` evidence line is a verbatim substring of the cited source body, after Unicode normalization, zero-width strip, hyphen-variant collapse, smart→straight quote conversion, NBSP→space, whitespace collapse, and wikilink-to-title rewrite. Fuzzy suggestion provided on miss.
+- S4 (error): every `[[slug]]` inside the generated region is in the page's resolved scope.
+- S5 (warning): recomputed scope_hash differs from BEGIN-marker value. Skipped for query-scoped pages.
+- S6 (warning): last_updated > last_generated AND working-tree diff vs HEAD intersects the generated region. Frontmatter-driven (not mtime).
+- S9 (error): sum of evidence-quote words ≤ plugin manifest's max_evidence_total_words (default 500; study-guide 300).
 
-(S3–S9 ship in phase 14.)
+(S7 and S8 deferred to phase 15.)
 
 Semantic (agent-driven, post-lint review):
 - Contradictions between pages.

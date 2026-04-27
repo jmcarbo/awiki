@@ -7,6 +7,22 @@ set -euo pipefail
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 
+# Source repo config if present (defines ALLOW_PLUGIN_POST_HOOKS et al.).
+if [[ -f "$REPO_ROOT/.awiki/config" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.awiki/config"
+fi
+
+# Post-hook gate. Returns 0 if the hook is allowed to run, 1 if blocked.
+# Callers must check the return code and skip invocation on block.
+synth_post_hooks_allowed() {
+  if [[ "${ALLOW_PLUGIN_POST_HOOKS:-0}" = "1" ]]; then
+    return 0
+  fi
+  echo "SYNTH|post-hook-blocked|ALLOW_PLUGIN_POST_HOOKS=0; set to 1 in .awiki/config to enable" >&2
+  return 1
+}
+
 # shellcheck disable=SC1091
 source "$REPO_ROOT/scripts/synth-plugin-load.sh"
 
@@ -491,6 +507,19 @@ cmd_finalize() {
   local now_utc; now_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   synth_fm_set_scalar "$target" "last_generated" "$now_utc"
 
+  # Plugin post-hook (gated by ALLOW_PLUGIN_POST_HOOKS).
+  local plugin_name; plugin_name="$(synth_fm_field "$target" plugin)"
+  if synth_plugin_load "$plugin_name" 2>/dev/null && [[ -n "${SYNTH_PLUGIN_POST_HOOK:-}" ]]; then
+    if synth_post_hooks_allowed; then
+      if [[ -x "$SYNTH_PLUGIN_POST_HOOK" ]] || [[ -f "$SYNTH_PLUGIN_POST_HOOK" ]]; then
+        if ! bash "$SYNTH_PLUGIN_POST_HOOK" -- "$target"; then
+          echo "SYNTH|post-hook-failed|$SYNTH_PLUGIN_POST_HOOK exit non-zero" >&2
+          EXIT_CODE=6 die "post-hook failed for $target"
+        fi
+      fi
+    fi
+  fi
+
   # If we operated on a staged file, leave it staged; user runs `accept-stage`.
   bash "$REPO_ROOT/scripts/log-append.sh" synth -- "$(synth_fm_field "$target" plugin) $slug"
 
@@ -632,6 +661,20 @@ cmd_accept_stage() {
     EXIT_CODE=6 die "scoped lint failed for staged file"
   fi
   mv "$staged" "$live"
+
+  # Plugin post-hook on the promoted live file.
+  local plugin_name; plugin_name="$(synth_fm_field "$live" plugin)"
+  if synth_plugin_load "$plugin_name" 2>/dev/null && [[ -n "${SYNTH_PLUGIN_POST_HOOK:-}" ]]; then
+    if synth_post_hooks_allowed; then
+      if [[ -x "$SYNTH_PLUGIN_POST_HOOK" ]] || [[ -f "$SYNTH_PLUGIN_POST_HOOK" ]]; then
+        if ! bash "$SYNTH_PLUGIN_POST_HOOK" -- "$live"; then
+          echo "SYNTH|post-hook-failed|$SYNTH_PLUGIN_POST_HOOK exit non-zero" >&2
+          EXIT_CODE=6 die "post-hook failed for $live"
+        fi
+      fi
+    fi
+  fi
+
   bash "$REPO_ROOT/scripts/log-append.sh" synth -- "$(synth_fm_field "$live" plugin) $slug accept-stage"
   echo "SYNTH-ACCEPT-STAGE|target=$live" >&2
 }

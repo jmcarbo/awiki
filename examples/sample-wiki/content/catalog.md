@@ -12,6 +12,9 @@ LLM-maintained index of every page. Updated on every ingest.
 
 - [[vannevar-bush]] — engineer, OSRD director, originator of the memex.
 - [[claude-shannon]] — mathematician, founder of information theory.
+- [[bob-smith]] — colleague (Q3 launch counterpart).
+- [[city-hall]] — municipal permits office.
+- [[contractor-jane-doe]] — contractor on the kitchen renovation.
 
 ## Concepts
 
@@ -25,7 +28,18 @@ LLM-maintained index of every page. Updated on every ingest.
 ## Sources
 
 - [[s-as-we-may-think]] — Vannevar Bush, *The Atlantic*, July 1945.
+- [[s-vannevar-bush-bio]] — short biographical source on Vannevar Bush.
 
 ## Synthesis
 
-(none in this sample)
+- [[memex-briefing]] — synthesis briefing on the memex.
+
+## Task layer
+
+- [[inbox]] — capture queue.
+- [[renovate-kitchen]] — example active project.
+- [[q3-launch]] — example active project.
+- [[_loose]] — catch-all bucket project.
+- [[_someday]] — someday/maybe bucket project.
+- [[phone]], [[errands]], [[computer]], [[home]] — context pages.
+- [[next-actions]], [[today]], [[waiting]], [[someday]], [[stuck-projects]], [[review-log]] — agenda views.

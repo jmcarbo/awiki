@@ -139,3 +139,29 @@ TASK LAYER (phase 17)
                                 stuck-projects). Atomic write; takes exclusive
                                 lock. Privacy filter excludes source_kind=private
                                 actions; emits "_N hidden_" placeholder.
+
+## Triage
+
+just triage
+  Walks content/inbox.md + raw/inbox/interactive/ one item at a time.
+  Prompts for outcome and per-outcome params; regex-validated. Slug
+  prompts surface existing project/context slugs as autocomplete
+  hints. Ctrl-C aborts the current item; previously-applied items
+  remain applied. Per-item-atomic.
+
+just triage-apply <id> <outcome> [k=v ...]
+  Non-interactive single-item application. <id> is the synthesized
+  inbox-<sha>-<lineno>, file-<sha>, or block-id form. <outcome> is
+  one of: trash, do-now, act, defer-scheduled, waiting, reference,
+  someday. k=v params per outcome; see `bash scripts/triage.sh --help`.
+
+## Recurrence
+
+just recur
+  Re-emit open copies for every page with completed [x] every:...
+  lines that have no open instance for the next due date. Runs across
+  the whole content tree. Idempotent.
+
+just recur-dry
+  Dry-run variant: prints the unified diff of would-be changes and
+  exits without writing.

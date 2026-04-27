@@ -46,3 +46,27 @@ QUEUE SEMANTICS
 ARGUMENT QUOTING
   Multi-word args MUST be quoted: `just commit "fix: foo"`, `just search "memex history"`.
   Variadic recipes (log, rename) accept space-separated remaining args; quote if any contain spaces.
+
+## synthesis
+
+just synth <plugin> <topic-slug> --tag=<tag>
+just synth <plugin> <topic-slug> --slugs=<slug1>,<slug2>
+just synth-regen <synthesis-slug> [--force|--stage]
+just synth-finalize <synthesis-slug>
+just synth-accept-stage <synthesis-slug>
+just synth-refine <synthesis-slug> "tighten the TL;DR"
+just synth-list
+just synth-resolve <synthesis-slug>
+
+Quoting: refinement notes must be quoted because they're variadic.
+Topic slugs must match ^[a-z0-9][a-z0-9-]*$ (no leading hyphen).
+All recipes use -- to terminate flag parsing before positional args.
+
+Example end-to-end:
+
+    just synth briefing memex --tag=memex
+    # agent reads the prompt bundle and fills between markers
+    just synth-finalize memex-briefing
+    # later:
+    just synth-refine memex-briefing "shorten Key Findings to 5 bullets"
+    just synth-regen memex-briefing

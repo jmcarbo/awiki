@@ -87,6 +87,42 @@ No script needed — the agent decides when image content is load-bearing. For d
 
 If the user has installed one of the configs in `scheduled/`, lint runs automatically on a cadence. Lint output is captured to logs (`/tmp/awiki-lint.{out,err}` for launchd; `journalctl --user -u awiki-lint` for systemd; the Actions run log for CI). Agent should treat scheduled lint failures as the next-session priority.
 
+### 4.6 Synthesis (briefing-only)
+
+1. Pick a scope. Either a tag (`--tag=memex`), an explicit slug list
+   (`--slugs=s1,s2,s3`), or a saved query (`--query="…"` — requires qmd).
+2. Run `just synth briefing <topic-slug> --tag=<tag>`.
+   - Orchestrator validates the plugin, resolves scope, fails closed if
+     any source is tagged `private` and the target page is not under
+     `content/private/` (pass `--allow-private` to acknowledge intentional
+     declassification).
+   - Scaffolds `content/synthesis/<topic>-briefing.md` with frontmatter,
+     a lead-paragraph placeholder, `## Notes`, and the BEGIN/END markers.
+   - Emits the prompt bundle to stdout. The bundle is the briefing plugin
+     template with the resolved page list interpolated.
+3. Read the prompt. Generate the briefing body (TL;DR / Key Findings /
+   Open Questions / Evidence) and write it between the BEGIN and END
+   markers. Do not edit anything outside the markers.
+4. Run `just synth-finalize <topic>-briefing`.
+   - Validates marker integrity (exit 5 if broken).
+   - Runs scoped lint (`scripts/lint.sh --only=synth --file=<path>`;
+     phase 13 covers markers and required sections only — full S1–S9
+     arrives in phase 14).
+   - Stamps `last_generated`, populates frontmatter `sources:` from the
+     resolved scope, log-appends.
+5. To refresh later: `just synth-regen <topic>-briefing`. The orchestrator
+   re-runs the privacy check, refuses if it detects a manual edit inside
+   the marker region (pass `--force` to override or `--stage` to write to
+   `.staged/<slug>.md` for review). After review, promote with
+   `just synth-accept-stage <topic>-briefing`.
+
+Topic-slug constraint: `^[a-z0-9][a-z0-9-]*$` (no leading hyphen). Plugin
+name constraint: `^[a-z][a-z0-9-]*$`. All justfile recipes use `--` to
+terminate flag parsing before positional args.
+
+Mindmap, timeline, and study-guide plugins arrive in phase 14, with the
+full lint suite (S1–S9) and feedback channel.
+
 ## 5. Inbox Queues
 
 - `raw/inbox/interactive/` — single source, supervised.
@@ -96,6 +132,11 @@ If the user has installed one of the configs in `scheduled/`, lint runs automati
 ## 6. Output Formats
 
 Markdown, comparison table, Marp slide deck (`type: deck`), Matplotlib chart (`type: chart`), Mermaid diagram (inline in markdown), Obsidian canvas (`type: canvas`). All filed under `content/synthesis/`.
+
+- Synthesis pages may carry `plugin: <name>` frontmatter pointing to a
+  manifest under `synthesis-plugins/`. Phase 13 ships `briefing`; phase 14
+  adds `mindmap`, `timeline`, `study-guide`. Required sections per plugin
+  are enforced by lint S2.
 
 ## 7. Lint Checklist
 
@@ -108,6 +149,13 @@ Mechanical (`scripts/lint.sh`):
 - Catalog dangling/missing entries.
 - Slug uniqueness.
 - Privacy: `tags: [private]` outside `**/private/` paths.
+- **S1 (synth, error)** — synthesis pages with `plugin:` frontmatter must
+  contain exactly one BEGIN GENERATED marker and one END GENERATED marker,
+  in that order.
+- **S2 (synth, error)** — every section listed in the plugin manifest's
+  `required_sections` must appear inside the marker region.
+
+(S3–S9 ship in phase 14.)
 
 Semantic (agent-driven, post-lint review):
 - Contradictions between pages.

@@ -1,0 +1,2 @@
+# git-crypt section — fixture only
+content/private/** filter=git-crypt diff=git-crypt

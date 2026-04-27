@@ -63,7 +63,11 @@ Layer boundaries: fetch is pure git ops, plan is pure read+diff, apply mutates o
   "ref": "main",
   "version": "1.0.0",
   "commit": "abc123def456...",
-  "applied_migrations": ["0001", "0002", "0003"],
+  "applied_migrations": [
+    { "id": "0001", "status": "applied" },
+    { "id": "0002", "status": "applied" },
+    { "id": "0003", "status": "skipped", "reason": "user --skip-migration" }
+  ],
   "deleted": [
     { "path": "scripts/ingest-audio.sh", "reason": "no audio sources" }
   ],
@@ -160,6 +164,8 @@ Bootstrap steps: `bootstrap.ordered_steps` IDs not in `bootstrap_steps_done[]`.
 
 Plan emitted as structured stdout (`PLAN|<phase>|<action>|<path>|<note>`) plus human summary. Exit 0 if no `--apply`.
 
+Dry-run defers all interactive prompts (new files, deleted-locally-but-present-in-template, declined bootstrap steps): plan lists them as `PROMPT|...` lines so user knows what apply will ask. Apply re-prompts inline.
+
 ### Phase 3 — apply (only with `--apply`)
 
 Create branch `awiki-template-update/<short-commit_new>`. Halt if exists.
@@ -210,7 +216,7 @@ Two kinds. Numbered sequence shared. Numbering: four-digit zero-padded, monotoni
 - Runner injects env: `AWIKI_REPO_ROOT`, `AWIKI_TEMPLATE_OLD_VERSION`, `AWIKI_TEMPLATE_NEW_VERSION`.
 - Operates on user content (`content/`, `raw/`, `WIKI.md`, etc.). MUST NOT touch `.awiki/`.
 - Failure (nonzero exit) → halt update at Commit B. User fixes, runs `just template-update --continue`.
-- Skip via `--skip-migration NNNN`. Skipped IDs recorded as `{id: "NNNN", skipped: true, reason}` in `applied_migrations[]` — never re-attempted unless manually unskipped.
+- Skip via `--skip-migration NNNN`. Recorded as `{id: "NNNN", status: "skipped", reason}` in `applied_migrations[]`; runner advances to NNNN+1; never re-attempted unless manually unskipped (edit `template.json` by hand).
 - Examples: rename frontmatter field across `content/**/*.md`, add new section to `WIKI.md`, move file location, patch `hugo.toml` key.
 
 ### LLM-assisted (`migrations/NNNN-<slug>.prompt.md`)
@@ -233,7 +239,9 @@ After update merge, agent picks up next session: `WIKI.md` workflow updated to s
 
 Lint warns on aged pending prompts (>14d).
 
-Update tool refuses to advance pin if any LLM migration in scope is still pending — avoids skipping over.
+**Pending-prompts gating.** Commit D advances pin even if `.awiki/pending-prompts/` is non-empty — current cycle finishes. The check is at Phase 0 of the *next* update: if `pending-prompts/` has leftovers from a previous cycle, halt with "Resolve pending LLM migrations (run agent against `.awiki/pending-prompts/`) before next update." Forces serialization without blocking single-cycle completion.
+
+After agent completes a prompt: delete the file in `pending-prompts/`, append `{id, status: "applied"}` to `applied_migrations[]` in `.awiki/template.json`, commit with message `chore(template): apply LLM migration <NNNN>`.
 
 ---
 
@@ -277,7 +285,7 @@ Re-run a step manually: `just bootstrap-step <id>`.
 
 | script                          | purpose                                                                                  |
 |---------------------------------|------------------------------------------------------------------------------------------|
-| `scripts/template-update.sh`    | Orchestrator. Args: `--ref`, `--source`, `--apply`, `--continue`, `--abort`, `--status`, `--skip-migration NNNN`. |
+| `scripts/template-update.sh`    | Orchestrator. Args: `--ref`, `--source`, `--apply`, `--continue`, `--abort`, `--status`, `--skip-migration NNNN`, `--schema-upgrade`. `--status` prints current pin (commit + version), pending-prompts list with ages, count of unapplied template commits at `--ref`, and last update branch (if any). Read-only. |
 | `scripts/template-init.sh`      | Seeds `.awiki/template.json` + cache. Run by BOOTSTRAP.                                  |
 | `scripts/template-plan.sh`      | Pure read; emits plan as `PLAN|...` stdout. Reused by update tool + future MCP exposure. |
 | `scripts/template-merge.sh`     | Wraps `git merge-file --diff3` for `three_way` strategy. Conflict detection.             |

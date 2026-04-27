@@ -154,3 +154,32 @@ E
   run bash scripts/lint.sh "$TMP"
   [[ "$output" != *"LINT|INFO"*"_index.md"*"orphan"* ]]
 }
+
+@test "lint warns on page missing from catalog" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/catalog.md" <<E
+---
+title: "Catalog"
+type: catalog
+---
+
+# Catalog
+E
+  cat > "$TMP/entities/uncatalogued.md" <<E
+---
+title: "Uncatalogued"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Uncatalogued [[uncatalogued]] self-reference for connectivity.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|WARN"*"uncatalogued.md"*"missing from catalog"* ]]
+}

@@ -136,6 +136,29 @@ while IFS= read -r -d '' page; do
   fi
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
+# Catalog cross-link check
+CATALOG="$CONTENT_DIR/catalog.md"
+if [[ -f "$CATALOG" ]]; then
+  declare -A IN_CATALOG
+  while read -r link; do
+    target="${link%%|*}"
+    IN_CATALOG[$target]=1
+  done < <(grep -oE '\[\[[^]]+\]\]' "$CATALOG" | sed -E 's/^\[\[|\]\]$//g')
+
+  while IFS= read -r -d '' page; do
+    slug="$(basename "$page" .md)"
+    [[ "$slug" =~ ^(_index|catalog|log)$ ]] && continue
+    type_field="$(awk -F'[:[:space:]]+' '/^type:/{print $2; exit}' "$page" | tr -d '"')"
+    if [[ "$type_field" =~ ^(log|catalog|section-index)$ ]]; then
+      continue
+    fi
+    if [[ -z "${IN_CATALOG[$slug]:-}" ]]; then
+      echo "LINT|WARN|$page|missing from catalog"
+      WARNS=$((WARNS + 1))
+    fi
+  done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+fi
+
 echo "LINT-SUMMARY|errors=$ERRORS|warnings=$WARNS|info=$INFOS"
 
 if [[ "$ERRORS" -gt 0 ]]; then exit 2; fi

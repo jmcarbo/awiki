@@ -8,10 +8,24 @@ import { listSynthPlugins } from "./lib/list-plugins.js";
 import { validate } from "./lib/validate-scope.js";
 import { runSynthesize, runFinalize, assertManifestUnderPluginDir } from "./lib/synthesize.js";
 import { sanitizeCapture, SanitizeError } from "./lib/sanitize-capture.js";
-import { LockTimeoutError, runLockedShared } from "./lib/lock.js";
+import { LockTimeoutError, runLockedShared, runLockedExclusive } from "./lib/lock.js";
 import { scanInbox } from "./lib/triage-inbox-scan.js";
 import { triageApply } from "./lib/triage-apply.js";
 import { PathGuardError } from "./lib/path-guard.js";
+import { loadActionsTsv, applyFilter, isTsvStale } from "./lib/list-actions.js";
+
+const FILTER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { enum: ["[ ]", "[x]", "[/]", "[?]", "[>]"] },
+    context: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+    project: { type: "string", pattern: "^[a-z0-9_][a-z0-9_-]{0,63}$" },
+    due_before: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    wait: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+    overdue: { type: "boolean" },
+  },
+};
 
 const REPO_ROOT = process.cwd();
 const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -110,6 +124,22 @@ const TOOLS = [
         params: { type: "object" },
       },
     },
+  },
+  {
+    name: "list_actions",
+    description: "Return rows from .awiki/maps/actions.tsv, optionally filtered by status/context/project/due_before/wait/overdue. Re-runs scripts/action-scan.sh under flock -x first if the TSV is stale relative to content/**/*.md.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        filter: { type: "object" },
+      },
+    },
+  },
+  {
+    name: "rebuild_agenda",
+    description: "Run scripts/action-scan.sh + scripts/agenda.sh under flock -x. Returns {rebuilt:[<file>], duration_ms}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
@@ -275,6 +305,77 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           throw e;
         }
         out = JSON.stringify(result);
+        break;
+      }
+      case "list_actions": {
+        const filter = args?.filter ?? {};
+        const filterCheck = validate(FILTER_SCHEMA, filter);
+        if (!filterCheck.valid) {
+          out = JSON.stringify({
+            error: "invalid_argument",
+            field: "filter",
+            reasons: filterCheck.errors,
+          });
+          break;
+        }
+        // Stale-check: re-run action-scan.sh under flock -x if needed.
+        if (isTsvStale(REPO_ROOT)) {
+          try {
+            runLockedExclusive({
+              repoRoot: REPO_ROOT,
+              argv: ["bash", "scripts/action-scan.sh"],
+              timeoutSec: 30,
+            });
+          } catch (e) {
+            if (e instanceof LockTimeoutError) {
+              throw new Error(`list_actions: lock timeout after 30s during scan`);
+            }
+            throw e;
+          }
+        }
+        // Briefly take flock -s as a privacy/consistency gesture (does not
+        // hold the lock during the JS read; documented limitation).
+        try {
+          runLockedShared({
+            repoRoot: REPO_ROOT,
+            argv: ["true"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`list_actions: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        const rows = applyFilter(loadActionsTsv(REPO_ROOT), filter);
+        out = JSON.stringify(rows, null, 2);
+        break;
+      }
+      case "rebuild_agenda": {
+        const t0 = Date.now();
+        try {
+          runLockedExclusive({
+            repoRoot: REPO_ROOT,
+            argv: ["bash", "-c", "scripts/action-scan.sh && scripts/agenda.sh"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`rebuild_agenda: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        const duration_ms = Date.now() - t0;
+        // The list of regenerated files is fixed (the five managed-region
+        // pages from phase 16/17). agenda.sh rewrites all five.
+        const rebuilt = [
+          "content/agenda/next-actions.md",
+          "content/agenda/today.md",
+          "content/agenda/waiting.md",
+          "content/agenda/someday.md",
+          "content/agenda/stuck-projects.md",
+        ];
+        out = JSON.stringify({ rebuilt, duration_ms });
         break;
       }
       default:

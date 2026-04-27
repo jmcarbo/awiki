@@ -180,6 +180,15 @@ E
   [[ "$output" != *"duplicate slug: _index"* ]]
 }
 
+@test "lint --hugo-check runs hugo render and passes on clean content" {
+  if ! command -v hugo >/dev/null 2>&1; then
+    skip "hugo not installed"
+  fi
+  run bash scripts/lint.sh --hugo-check content
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"LINT|ERROR|hugo|"* ]]
+}
+
 @test "lint warns on page missing from catalog" {
   TMP="$(mktemp -d)/content"
   mkdir -p "$TMP/entities"

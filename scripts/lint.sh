@@ -4,12 +4,14 @@ set -uo pipefail
 FIX=0
 ONLY=""
 ONLY_FILE=""
+HUGO_CHECK=0
 CONTENT_DIR="content"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fix) FIX=1; shift ;;
     --only=*) ONLY="${1#--only=}"; shift ;;
     --file=*) ONLY_FILE="${1#--file=}"; shift ;;
+    --hugo-check) HUGO_CHECK=1; shift ;;
     --) shift; break ;;
     *) CONTENT_DIR="$1"; shift ;;
   esac
@@ -213,6 +215,18 @@ if [[ -z "$ONLY" || "$ONLY" = "synth" || "$ONLY" = "all" ]]; then
     else
       synth_lint_dir "$CONTENT_DIR"
     fi
+  fi
+fi
+
+if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then
+  if command -v hugo >/dev/null 2>&1; then
+    if ! hugo --source . --renderToMemory --logLevel error >/dev/null 2>&1; then
+      echo "LINT|ERROR|hugo|template render failed (run 'just build' for details)"
+      ERRORS=$((ERRORS + 1))
+    fi
+  else
+    echo "LINT|INFO|hugo|--hugo-check requested but hugo not on PATH; skipping"
+    INFOS=$((INFOS + 1))
   fi
 fi
 

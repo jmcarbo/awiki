@@ -1,0 +1,4 @@
+# awiki runtime config — edit as needed
+AWIKI_LINT_AFTER_N=5
+AWIKI_STALE_DAYS=90
+AWIKI_LOG_QUERIES=0

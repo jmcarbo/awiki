@@ -4,6 +4,7 @@ public/
 .qmd/
 .awiki/*
 !.awiki/.gitkeep
+!.awiki/config
 
 # inbox: source files often sensitive / copyrighted
 raw/inbox/*

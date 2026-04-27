@@ -30,3 +30,27 @@ EOF
   run python3 "$REPO_ROOT/scripts/_template_helpers/migration.py" parse-header "$TMP/0001-x.sh"
   [ "$status" -ne 0 ]
 }
+
+@test "migration validate-touches: secrets/ blocked" {
+  cat > "$TMP/m.sh" <<'EOF'
+#!/usr/bin/env bash
+# migration: 0001-x
+# requires: agent=false
+# touches: secrets/foo.age
+# idempotent: yes
+EOF
+  run python3 "$REPO_ROOT/scripts/_template_helpers/migration.py" validate-touches "$TMP/m.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "migration validate-touches: clean touches passes" {
+  cat > "$TMP/m.sh" <<'EOF'
+#!/usr/bin/env bash
+# migration: 0001-x
+# requires: agent=false
+# touches: WIKI.md
+# idempotent: yes
+EOF
+  run python3 "$REPO_ROOT/scripts/_template_helpers/migration.py" validate-touches "$TMP/m.sh"
+  [ "$status" -eq 0 ]
+}

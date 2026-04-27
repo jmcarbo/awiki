@@ -188,10 +188,11 @@ Conditional. Skip if the spike confirmed `~` works.
 grep -n 'AWIKI_RECUR_SEP\|~' scripts/lib/action-grammar.sh
 # Edit to set AWIKI_RECUR_SEP="__" and rebuild the chain regex around it.
 
-# 2. Patch the spec.
-sed -i'' -e 's/\^<base>~<n>/\^<base>__<n>/g' \
-         -e "s/\\\`\\~\\\` is unambiguous/\\\`__\\\` is unambiguous/g" \
+# 2. Patch the spec. Use sed -i.bak for BSD/GNU portability.
+sed -i.bak -e 's/\^<base>~<n>/\^<base>__<n>/g' \
+           -e "s/\\\`\\~\\\` is unambiguous/\\\`__\\\` is unambiguous/g" \
   docs/superpowers/specs/2026-04-27-task-layer-design.md
+rm -f docs/superpowers/specs/2026-04-27-task-layer-design.md.bak
 
 # 3. Re-run the phase-16 grammar tests to confirm the lib still parses the new shape.
 bats tests/action_grammar_test.bats
@@ -232,12 +233,16 @@ Expected: ten lines (five files × two markers). If a file is missing markers en
 
 For each of the five files, swap the bare markers for the per-region shape. The body between the markers stays empty.
 
+Use `sed -i.bak` (portable across BSD/GNU; bare `sed -i''` is BSD-incompatible
+on macOS unless you write `sed -i ''` with a space, which then fails on Linux).
+Strip the `.bak` files at the end.
+
 ```bash
 for region in next-actions today waiting someday stuck-projects; do
   f="content/agenda/${region}.md"
-  # Replace BEGIN
-  sed -i'' -e "s|<!-- BEGIN managed-region -->|<!-- BEGIN agenda:${region} -->|" "$f"
-  sed -i'' -e "s|<!-- END managed-region -->|<!-- END agenda:${region} -->|" "$f"
+  sed -i.bak -e "s|<!-- BEGIN managed-region -->|<!-- BEGIN agenda:${region} -->|" "$f"
+  sed -i.bak -e "s|<!-- END managed-region -->|<!-- END agenda:${region} -->|" "$f"
+  rm -f "${f}.bak"
 done
 ```
 
@@ -254,9 +259,40 @@ Expected: each file prints exactly two lines, both naming its own region.
 
 - [ ] **Step 3: Add a placeholder bats case**
 
+The bats case exercises a temporary copy of the working tree — running
+`task-init` afresh inside the test's sandbox guarantees the agenda
+placeholders exist regardless of whether the operator has invoked
+`just task-init` in their checkout. Without this isolation the test
+fails on a fresh CI clone where `task-init` has never run.
+
 ```bash
 cat > tests/agenda_test.bats <<'EOF'
 #!/usr/bin/env bats
+
+setup() {
+  AGENDA_TMP="$(mktemp -d)"
+  export AGENDA_TMP
+  # Sandboxed wiki copy: just the bits agenda.sh + task-init touch.
+  mkdir -p "$AGENDA_TMP/content/agenda" "$AGENDA_TMP/.awiki"
+  cd "$AGENDA_TMP"
+  for region in next-actions today waiting someday stuck-projects; do
+    cat > "content/agenda/${region}.md" <<HEAD
+---
+title: "${region}"
+type: agenda
+last_updated: 2026-04-27
+draft: false
+---
+
+<!-- BEGIN agenda:${region} -->
+<!-- END agenda:${region} -->
+HEAD
+  done
+}
+
+teardown() {
+  rm -rf "$AGENDA_TMP"
+}
 
 @test "phase-17 placeholder agenda pages carry per-region markers" {
   for region in next-actions today waiting someday stuck-projects; do
@@ -336,19 +372,30 @@ EOF
 
 The alias map is what `lint.sh` would have produced; phase 17's scanner reads it but does not regenerate it (per spec). The line shape is `<alias>\t<slug>\t<path>\t<source_kind>`:
 
+**Use `printf '%s\t%s\t%s\t%s\n'` per row, not a heredoc.** Markdown
+copy-paste through editors silently converts tabs to spaces;
+heredocs preserve the original bytes only when typed in a true
+terminal. The TSV scanner uses `awk -F'\t'` and will mis-classify
+rows if any tab became a space. Per-row `printf` is fool-proof.
+
 ```bash
-cat > tests/fixtures/wiki-task-good/.awiki/maps/alias-to-slug.tsv <<'EOF'
-@phone	phone	content/contexts/phone.md	public
-@computer	computer	content/contexts/computer.md	public
-@home	home	content/contexts/home.md	public
-bob-smith	bob-smith	content/entities/bob-smith.md	public
-bob-private	bob-private	content/private/people/bob-private.md	private
-renovate-kitchen	renovate-kitchen	content/projects/renovate-kitchen.md	public
-q3-launch	q3-launch	content/projects/q3-launch.md	public
-water-plants	water-plants	content/projects/water-plants.md	public
-secret-project	secret-project	content/private/secret-project.md	private
-onboarding-revamp	onboarding-revamp	content/projects/onboarding-revamp.md	public
-EOF
+{
+  printf '%s\t%s\t%s\t%s\n' '@phone'           'phone'             'content/contexts/phone.md'                      'public'
+  printf '%s\t%s\t%s\t%s\n' '@computer'        'computer'          'content/contexts/computer.md'                   'public'
+  printf '%s\t%s\t%s\t%s\n' '@home'            'home'              'content/contexts/home.md'                       'public'
+  printf '%s\t%s\t%s\t%s\n' 'bob-smith'        'bob-smith'         'content/entities/bob-smith.md'                  'public'
+  printf '%s\t%s\t%s\t%s\n' 'bob-private'      'bob-private'       'content/private/people/bob-private.md'          'private'
+  printf '%s\t%s\t%s\t%s\n' 'renovate-kitchen' 'renovate-kitchen'  'content/projects/renovate-kitchen.md'           'public'
+  printf '%s\t%s\t%s\t%s\n' 'q3-launch'        'q3-launch'         'content/projects/q3-launch.md'                  'public'
+  printf '%s\t%s\t%s\t%s\n' 'water-plants'     'water-plants'      'content/projects/water-plants.md'               'public'
+  printf '%s\t%s\t%s\t%s\n' 'secret-project'   'secret-project'    'content/private/secret-project.md'              'private'
+  printf '%s\t%s\t%s\t%s\n' 'onboarding-revamp' 'onboarding-revamp' 'content/projects/onboarding-revamp.md'         'public'
+} > tests/fixtures/wiki-task-good/.awiki/maps/alias-to-slug.tsv
+
+# Guard: confirm every row has 4 tab-separated columns. Fails loudly
+# if any tab got eaten on the way in.
+awk -F'\t' 'NF != 4 { printf "row %d has %d cols (need 4): %s\n", NR, NF, $0 > "/dev/stderr"; bad=1 } END { exit bad+0 }' \
+  tests/fixtures/wiki-task-good/.awiki/maps/alias-to-slug.tsv
 ```
 
 (The format is fixture-only; the actual phase-19 alias-map shape may differ. The scanner reads only the alias and the source_kind columns, so additional columns are tolerated.)
@@ -1994,8 +2041,6 @@ awiki_lint_fix_sort_keys() {
           text = (text == "" ? tok : text " " tok)
         }
         out = head text
-        for (k in (a = "")) { } # no-op
-        for (tok in (a = "")) {} # no-op
         if (ctx   != "") out = out " " ctx
         if (due   != "") out = out " " due
         if (defer != "") out = out " " defer

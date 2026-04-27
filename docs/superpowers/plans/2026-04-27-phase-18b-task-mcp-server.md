@@ -1471,7 +1471,7 @@ Simpler: since reads of `inbox.md` and a directory listing are very brief, we ac
 
 `triage_apply` is mutating: validates args (Phase 18b.4), resolves destination paths (Phase 18b.5), TOCTOU-re-verifies inbox-line IDs (Phase 18b.3), then shells out to `scripts/triage.sh <id> <outcome> [k=v ...]` (Phase 18a) under exclusive lock. Returns the structured payload `{ok, actions_taken[], created_pages[], updated_pages[], stale_id?}`.
 
-> **Cross-phase contract:** `scripts/triage.sh` MUST emit a final-line JSON trailer `TRIAGE-RESULT|<json>` on success (matching Phase 15's `SYNTH-RESULT|<json>` convention). The JSON contains `actions_taken`, `created_pages`, `updated_pages`. On stale-id failure, `triage.sh` exits non-zero (e.g., 7) and the MCP tool returns `{ok: false, stale_id: true}`. **Confirm with Phase 18a.**
+> **Cross-phase contract (PINNED, agreed with Phase 18a):** `scripts/triage.sh` MUST emit a final-line JSON trailer `TRIAGE-RESULT|<json>` on success (matching Phase 15's `SYNTH-RESULT|<json>` convention). The JSON contains `actions_taken`, `created_pages`, `updated_pages`. On stale-id failure, `triage.sh` exits **9** (NOT 7 — exit 7 is reserved for flock contention by `scripts/lib/lock.sh`). The MCP tool catches exit 9 and returns `{ok: false, stale_id: true}`.
 
 - [ ] **Step 1: Write `lib/triage-inbox-scan.js` + its unit test**
 
@@ -1693,8 +1693,9 @@ export function triageApply(repoRoot, rawArgs) {
     if (e instanceof LockTimeoutError) {
       return { ok: false, errors: [{ field: "(lock)", reason: "30s flock timeout" }] };
     }
-    if (e.status === 7) {
-      // Phase 18a contract: exit 7 = stale_id detected by triage.sh itself.
+    if (e.status === 9) {
+      // Phase 18a contract: exit 9 = stale_id detected by triage.sh itself.
+      // (exit 7 is reserved for flock contention; do not collide.)
       return { ok: false, stale_id: true };
     }
     const stderr = e.stderr ? e.stderr.toString() : "";
@@ -2758,7 +2759,7 @@ Tick every box before opening the PR. If a box can't be ticked, surface the gap 
 - [ ] `SanitizeError` translates to MCP error in `capture`.
 - [ ] `LockTimeoutError` returns a structured `{ok:false}` payload (not an unhandled exception) in `triage_apply`.
 - [ ] `PathGuardError` translates to MCP error in `triage_apply`.
-- [ ] `triage.sh` exit 7 (stale_id contract) translates to `{ok:false, stale_id:true}`.
+- [ ] `triage.sh` exit 9 (stale_id contract; exit 7 reserved for flock contention) translates to `{ok:false, stale_id:true}`.
 - [ ] Unknown `triage.sh` non-zero exits surface as MCP errors with stderr in the message.
 - [ ] Missing `TRIAGE-RESULT|<json>` trailer surfaces as a clear error message.
 
@@ -2778,7 +2779,7 @@ Tick every box before opening the PR. If a box can't be ticked, surface the gap 
 
 ### Cross-phase coordination
 - [ ] `scripts/triage.sh` (Phase 18a) emits `TRIAGE-RESULT|<json>` trailer on success.
-- [ ] `scripts/triage.sh` exits non-zero (recommended: 7) when it detects stale_id itself.
+- [ ] `scripts/triage.sh` exits **9** (PINNED) when it detects stale_id itself; exit 7 is reserved for flock contention.
 - [ ] `scripts/capture.sh` (Phase 18a) honors `AWIKI_CAPTURE_PRESANITIZED=1` env var to skip in-script neutralization.
 - [ ] `scripts/capture.sh` acquires its own `flock -x` (so the MCP tool does NOT double-lock).
 - [ ] Phase 17's `.awiki/maps/actions.tsv` columns match the order this plan's `lib/list-actions.js` decodes: `id status text file line context due defer wait since every priority est done project source_kind`.
@@ -2791,7 +2792,7 @@ These are spec / cross-phase ambiguities surfaced during plan drafting. Each mus
 
 1. **`scripts/capture.sh` lock-and-env contract (Phase 18a coordination):** Does `capture.sh` (a) acquire `flock -x` itself, (b) honor `AWIKI_CAPTURE_PRESANITIZED=1` to skip its in-script neutralization step? This plan assumes both. If 18a does NOT take the lock, switch the `capture` tool's dispatch to wrap the `execFileSync` call in `runLockedExclusive` (already imported). If 18a does NOT honor the env flag, the MCP tool re-sanitizes; the spec table is idempotent under double-application except for the length-truncation rule, which would truncate twice — coordinate with 18a to skip the second pass when the input ends in `…`.
 
-2. **`scripts/triage.sh` trailer + exit code contract (Phase 18a coordination):** Confirm `triage.sh` (a) emits exactly one `TRIAGE-RESULT|<json>` trailer line on success, with `actions_taken`, `created_pages`, `updated_pages` keys; (b) exits 7 specifically for stale_id (or pick a different code, but pin it). The `lib/triage-apply.js` parser is brittle to deviations; align both phases' plans before implementation.
+2. **`scripts/triage.sh` trailer + exit code contract (RESOLVED in coordination with Phase 18a):** `triage.sh` (a) emits exactly one `TRIAGE-RESULT|<json>` trailer line on success, with `actions_taken`, `created_pages`, `updated_pages` keys; (b) exits **9** for stale_id (exit 7 is taken by `lock.sh` flock contention). Both phases' plans pinned to this contract.
 
 3. **Strict shared-lock semantics on read-only tools:** The spec says read-only tools take `flock -s`. Our implementation acquires-then-releases the shared lock around the no-op `bash -c true`, then performs the JS read OUTSIDE the lock. This means a concurrent writer COULD modify `inbox.md` mid-`scanInbox`. We accept this because (a) any race result is caught by `triage_apply`'s TOCTOU re-verify; (b) writing a Node fcntl binding is out of scope. **Recommendation:** document the limitation in `WIKI.md` and revisit in Phase 19 if a Node `fs.flock` API lands or we adopt `proper-lockfile`.
 

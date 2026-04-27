@@ -50,7 +50,7 @@ Phases 16-19 are governed by [`2026-04-27-task-layer-design.md`](../specs/2026-0
 - **Cumulative test gate.** Every phase merge requires `bats tests/ && just lint` clean on the merged result. The optional pre-commit hook (installed by `task-init` step 6 in phase 19) enforces this locally for users who opt in.
 - **Shared grammar library is canonical.** Every consumer of action-line syntax (scanner, lint, recur, triage) sources `scripts/lib/action-grammar.sh`. New consumers MUST source it; do not re-implement the regex set.
 - **Lock-acquisition is mandatory.** Every mutating script and every mutating MCP handler acquires `flock -x .awiki/lock` via `scripts/lib/lock.sh`. Read-only paths take `flock -s`. No bypass.
-- **No deferrals.** Anything unfinished in a phase stays in the same phase. Do not push work to a later phase or to a v2 bucket. The four phases listed are the entire task layer.
+- **No deferrals.** Anything unfinished in a phase stays in the same phase. Do not push work to a later phase or to a v2 bucket. The five phase plans listed (16, 17, 18a, 18b, 19) are the entire task layer.
 
 ## Self-Review Checklist (run after completing all phases)
 
@@ -86,7 +86,7 @@ Phases 16-19 are governed by [`2026-04-27-task-layer-design.md`](../specs/2026-0
 
 ## Definition of done (entire task layer)
 
-- All 4 phases merged to `main`.
+- All 5 phase plans (16, 17, 18a, 18b, 19) merged to `main`.
 - `bats tests/ && just lint` clean.
 - Spec smoke test from "Manual smoke test (added to README task-layer section)" runs end-to-end against `examples/sample-wiki/`.
 - Sample wiki at `examples/sample-wiki/` ships `content/inbox.md`, `content/projects/{renovate-kitchen,q3-launch}.md`, `content/contexts/{phone,errands,computer,home}.md`, populated `content/agenda/*.md`, and a `content/agenda/review-log.md` entry — all hand-curated examples that pass lint.

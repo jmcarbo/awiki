@@ -88,8 +88,8 @@ state files are only created when the user runs `task-init`.
   `mark_review_done`.
 - WIKI.md additions: page-kind enum entries, system-page entries,
   inline-grammar table, triage workflow, weekly-review workflow, lint
-  rules T1-T14. All bracketed for clean removal.
-- Lint rules T1-T14 (mechanical + semantic).
+  rules T1-T15. All bracketed for clean removal.
+- Lint rules T1-T15 (mechanical + semantic).
 - Justfile recipes: `task-init`, `capture`, `triage`, `agenda`, `scan`,
   `review`.
 - Pre-commit hook variant that runs `action-scan.sh`.
@@ -1030,7 +1030,7 @@ risks:
 | `triage_apply` writes outside intended directory | All slug params regex-validated AND path-resolution-guarded against canonical parent directories. `..`-traversal rejected even if regex loosens. |
 | `capture` injects markdown / wikilinks / managed-region markers | Sanitization at both MCP and `capture.sh` entrypoints: control chars rejected, `<!--`/`-->`/`[[`/`]]` neutralized with space-padding, block-ID-shaped tokens backslash-escaped, length capped at 2000 chars. |
 | Concurrent triage / agenda regen / Obsidian edit corrupts files | `flock -x .awiki/lock` around every mutating script and MCP handler; managed-region writes via temp+atomic rename; user edits inside managed regions during regen window may be lost (documented). |
-| Wait-for points to a non-existent entity | Lint rule `T6`-style (extended to `wait:`) flags broken `[[entity-slug]]`; existing wikilink lint catches. |
+| Wait-for points to a non-existent entity | Caught by the existing v1 broken-wikilink lint rule (the `wait:[[slug]]` token is a regular wikilink that the v1 wikilink-resolution pass already validates). T6 itself fires only on `@<context>` action-grammar lines; no special "T6 extended to wait:" rule is needed. |
 | Recurrence runs unbounded | `action-recur.sh` refuses to emit at ≥200 per chain (exit 6, no write). Lint `T12` warns at 150, errors at 200, independently. |
 | Block-ID collision under random-mint | 8-char base32 (1.1T namespace) + collision-check-and-retry on mint against current `actions.tsv`. Birthday collision <1e-4 up to ~470k IDs. |
 | User-typed `^a-2` collides with recurrence chain | Recurrence chain uses `~` separator (`^a~2`). `~` in user-typed IDs is forbidden by `T14`. |

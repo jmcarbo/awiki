@@ -2112,11 +2112,109 @@ bats tests/triage_test.bats -f "triage "
 
 Expected: all 9 pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Emit `TRIAGE-RESULT|<json>` trailer on success**
+
+The MCP layer (phase 18b) parses a single trailer line of the form
+`TRIAGE-RESULT|{"actions_taken":[...],"created_pages":[...],"updated_pages":[...]}`
+on `triage.sh` stdout. Each outcome handler must populate three
+arrays during its work and the dispatcher prints the trailer last.
+
+Add tracking arrays to the dispatcher and modify each handler to push
+into them. Failing test first:
+
+```bash
+cat >> tests/triage_test.bats <<'EOF'
+
+@test "triage emits TRIAGE-RESULT trailer with structured payload" {
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" act lineno=7 project_slug=renovate-kitchen context_slug=phone
+  [ "$status" -eq 0 ]
+  # Last non-blank line is the trailer.
+  local trailer
+  trailer="$(printf '%s\n' "$output" | awk 'NF{last=$0} END{print last}')"
+  [[ "$trailer" == TRIAGE-RESULT\|* ]]
+  # Strip prefix and parse.
+  local json="${trailer#TRIAGE-RESULT|}"
+  echo "$json" | jq -e '.actions_taken | type == "array"' >/dev/null
+  echo "$json" | jq -e '.created_pages | type == "array"' >/dev/null
+  echo "$json" | jq -e '.updated_pages | type == "array"' >/dev/null
+}
+EOF
+```
+
+Run — expect failure (no trailer emitted):
+
+```bash
+bats tests/triage_test.bats -f "TRIAGE-RESULT"
+```
+
+Implement the trailer in `scripts/triage.sh`. Add three globals
+declared near the top of the dispatcher, populate them inside each
+`triage_outcome_*` handler with the human-readable action verbs +
+page paths, then emit the trailer just before the dispatcher exits 0.
+
+```bash
+# Add near the top of the dispatcher (after arg parsing):
+declare -a TRIAGE_ACTIONS_TAKEN=()
+declare -a TRIAGE_CREATED_PAGES=()
+declare -a TRIAGE_UPDATED_PAGES=()
+
+# Helper: emit JSON array from bash array.
+_triage_json_array() {
+  local arr_name="$1"
+  local -n arr="$arr_name"
+  if [[ ${#arr[@]} -eq 0 ]]; then
+    printf '[]'
+    return
+  fi
+  printf '['
+  local first=1
+  for item in "${arr[@]}"; do
+    [[ $first -eq 0 ]] && printf ','
+    # Escape backslashes and double-quotes for JSON.
+    item="${item//\\/\\\\}"
+    item="${item//\"/\\\"}"
+    printf '"%s"' "$item"
+    first=0
+  done
+  printf ']'
+}
+
+# Each outcome handler appends:
+#   TRIAGE_ACTIONS_TAKEN+=("strikethrough inbox line 7")
+#   TRIAGE_UPDATED_PAGES+=("content/inbox.md")
+#   TRIAGE_CREATED_PAGES+=("content/projects/_loose.md")  # only if newly created
+# (Edit each of the seven outcome handlers in step 4 above to push into these.)
+
+# At dispatcher end, just before `exit 0`:
+emit_trailer() {
+  local at cp up
+  at="$(_triage_json_array TRIAGE_ACTIONS_TAKEN)"
+  cp="$(_triage_json_array TRIAGE_CREATED_PAGES)"
+  up="$(_triage_json_array TRIAGE_UPDATED_PAGES)"
+  printf 'TRIAGE-RESULT|{"actions_taken":%s,"created_pages":%s,"updated_pages":%s}\n' \
+    "$at" "$cp" "$up"
+}
+trap 'rc=$?; if [[ $rc -eq 0 ]]; then emit_trailer; fi' EXIT
+```
+
+Important: the trailer is emitted ONLY on success (rc=0). On stale-id
+(exit 9) or any other failure, no trailer is emitted — the MCP layer
+parses the exit code instead.
+
+Re-run:
+
+```bash
+bats tests/triage_test.bats -f "TRIAGE-RESULT"
+```
+
+Expected: pass.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add scripts/triage.sh tests/triage_test.bats
-git commit -m "feat(triage): implement seven outcome handlers + lazy _loose/_someday creation
+git commit -m "feat(triage): implement seven outcome handlers + TRIAGE-RESULT trailer
 
 Phase 18a: each outcome (trash, do-now, act, defer-scheduled, waiting,
 reference, someday) writes the right destination, removes the source
@@ -2124,7 +2222,13 @@ inbox line atomically, and validates per-outcome params at the bash
 boundary (slugs, page_type enum, ISO calendar dates). _loose.md and
 _someday.md are created lazily on first use with the correct status
 (active vs someday). Reference outcome resolves and verifies the
-destination path is under content/<page_type>s/ before writing."
+destination path is under content/<page_type>s/ before writing.
+
+Dispatcher emits a final TRIAGE-RESULT|<json> stdout trailer on rc=0
+with actions_taken / created_pages / updated_pages arrays so the
+phase 18b MCP layer can parse the structured payload. The trailer is
+suppressed on any non-zero exit (stale-id exits 9; flock contention
+exits 7) — callers parse the exit code instead."
 ```
 
 ---

@@ -306,7 +306,10 @@ The grammar library is sourced by phase-17 scanner / phase-17 lint task-rules / 
 
 - `AWIKI_ACTION_LINE_RE` — extended-regex string matching a canonical action line (use with `[[ "$line" =~ $AWIKI_ACTION_LINE_RE ]]`).
 - `AWIKI_TAIL_KEY_RE` — extended-regex matching one `key:value` token (one of the eight allowed keys).
-- `AWIKI_BLOCK_ID_RE` — extended-regex matching `^<id>` where `<id>` is `[a-z0-9]{3,16}` optionally followed by `~<digits>`.
+- `AWIKI_RECUR_SEP` — recurrence-chain separator, default `~`. Settable via env (the phase-17 spike may flip it to `__`). All consumers MUST read this constant; do not inline the literal separator.
+- `AWIKI_BLOCK_ID_RE` — extended-regex matching `^<id>` where `<id>` is `[a-z0-9]{3,16}` optionally followed by `<AWIKI_RECUR_SEP><digits>`. Rebuilt from `AWIKI_RECUR_SEP` at source time so a spike-driven flip propagates with zero edits.
+- `awiki_date_add_days <YYYY-MM-DD> <N>` — emits a YYYY-MM-DD string equal to the input plus `N` days (negative `N` allowed). Portable across BSD `date -j -v+Nd` and GNU `date -d "+N days"`. Used by phase 18a's `action-recur.sh` for non-monthly intervals.
+- `awiki_date_add_months <YYYY-MM-DD> <N>` — month-add with **last-day clamp** per spec (`done:2026-01-31, +1m → 2026-02-28`). Used by phase 18a's `action-recur.sh` for `every:Nm` / `monthly`.
 - `AWIKI_STATUS_MARKERS` — bash array of valid status chars: `' ' '/' '?' '>' 'x' '-'`.
 - `awiki_grammar_parse_action <line>` — pure-bash parser. On match, sets `AWIKI_AG_STATUS`, `AWIKI_AG_TEXT`, `AWIKI_AG_CONTEXT`, `AWIKI_AG_TAIL` (raw `key:value...` substring), `AWIKI_AG_ID` (block-id including the leading `^`, or empty); returns 0. On non-match, returns 1.
 - `awiki_grammar_split_tail <tail-string>` — splits the tail into one `key=value` pair per line on stdout. Reject reasons (bad-key / bad-date / bad-format) are flagged via `AWIKI_AG_REJECT_REASON` if a key fails the per-key shape check; the function still emits whatever it can parse so the caller (lint, scanner) can decide to keep or reject.
@@ -480,11 +483,19 @@ AWIKI_ACTION_LINE_RE='^[[:space:]]*[-*][[:space:]]+\[([ /?>x-])\][[:space:]]+(.+
 # Values are checked separately (per-key shape) by awiki_grammar_split_tail.
 AWIKI_TAIL_KEY_RE='^(due|defer|wait|since|every|done|priority|est):[^[:space:]]+$'
 
+# Recurrence-chain separator. Default `~`; phase-17 spike may flip to `__`
+# if `~` breaks Obsidian/Hugo round-trip. Every consumer (lint, scanner,
+# recur, triage) reads this constant; do NOT inline the literal anywhere.
+AWIKI_RECUR_SEP="${AWIKI_RECUR_SEP:-~}"
+
 # Block-ID:
-#   ^<base>           where <base> = [a-z0-9]{3,16}
-#   OR ^<base>~<n>    recurrence chain instance, n = 1+ digits
+#   ^<base>                              where <base> = [a-z0-9]{3,16}
+#   OR ^<base><AWIKI_RECUR_SEP><n>       recurrence chain instance, n = 1+ digits
 # The leading ^ is part of the literal token in the source line.
-AWIKI_BLOCK_ID_RE='^\^[a-z0-9]{3,16}(~[0-9]+)?$'
+# Regex is rebuilt from the separator so a spike-driven flip to `__` only
+# requires editing this one line.
+_awiki_quote_re() { printf '%s' "$1" | sed 's/[][\\.^$*+?()|{}]/\\&/g'; }
+AWIKI_BLOCK_ID_RE='^\^[a-z0-9]{3,16}('"$(_awiki_quote_re "$AWIKI_RECUR_SEP")"'[0-9]+)?$'
 
 # Internal: per-key value shape regexes.
 _AWIKI_RE_DATE='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
@@ -646,6 +657,144 @@ Expected: every test passes (14 cases).
 ```bash
 git add scripts/lib/action-grammar.sh tests/action_grammar_test.bats
 git commit -m "feat(task): add scripts/lib/action-grammar.sh canonical grammar lib + tests"
+```
+
+---
+
+## Task 16.3a: Date arithmetic helpers in `action-grammar.sh`
+
+`action-recur.sh` (phase 18a) needs portable date math: add `<N>` days,
+add `<N>` months with last-day clamp. Both helpers live in the grammar
+lib so all consumers get them by sourcing one file.
+
+**Files:** Modify: `scripts/lib/action-grammar.sh`. Test: `tests/action_grammar_test.bats`.
+
+- [ ] **Step 1: Append failing tests for date helpers**
+
+```bash
+cat >> tests/action_grammar_test.bats <<'EOF'
+
+@test "awiki_date_add_days adds positive days" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-04-27 7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-05-04" ]
+}
+
+@test "awiki_date_add_days handles month boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-01-30 5'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-02-04" ]
+}
+
+@test "awiki_date_add_days handles year boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-12-30 7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2027-01-06" ]
+}
+
+@test "awiki_date_add_days rejects bad date" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-02-30 1'
+  [ "$status" -ne 0 ]
+}
+
+@test "awiki_date_add_months clamps to last day of target month" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2026-01-31 1'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-02-28" ]
+}
+
+@test "awiki_date_add_months handles leap year" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2024-01-31 1'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2024-02-29" ]
+}
+
+@test "awiki_date_add_months crosses year boundary" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months 2026-11-15 3'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2027-02-15" ]
+}
+
+@test "awiki_date_add_months rejects bad input" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_months not-a-date 1'
+  [ "$status" -ne 0 ]
+}
+EOF
+```
+
+- [ ] **Step 2: Run — expect failure**
+
+```bash
+bats tests/action_grammar_test.bats
+```
+
+Expected: 8 new failures (functions not yet defined).
+
+- [ ] **Step 3: Implement helpers — append to `scripts/lib/action-grammar.sh`**
+
+```bash
+cat >> scripts/lib/action-grammar.sh <<'EOF'
+
+# awiki_date_add_days <YYYY-MM-DD> <N>  — emit YYYY-MM-DD plus N days.
+# Portable: prefers GNU `date -d`, falls back to BSD `date -j -v`.
+awiki_date_add_days() {
+  local in="$1" n="$2"
+  _awiki_is_calendar_date "$in" || { echo "awiki_date_add_days: bad date $in" >&2; return 1; }
+  [[ "$n" =~ ^-?[0-9]+$ ]] || { echo "awiki_date_add_days: bad delta $n" >&2; return 1; }
+  if date -d "$in +$n days" "+%Y-%m-%d" >/dev/null 2>&1; then
+    date -d "$in +$n days" "+%Y-%m-%d"
+  else
+    # BSD/macOS form
+    local sign="+"
+    if [[ "$n" =~ ^- ]]; then sign=""; fi
+    date -j -v"${sign}${n#-}d" -f "%Y-%m-%d" "$in" "+%Y-%m-%d"
+  fi
+}
+
+# awiki_date_add_months <YYYY-MM-DD> <N>  — month-add with last-day clamp.
+# 2026-01-31 + 1m -> 2026-02-28 (clamp). 2024-01-31 + 1m -> 2024-02-29 (leap).
+awiki_date_add_months() {
+  local in="$1" n="$2"
+  _awiki_is_calendar_date "$in" || { echo "awiki_date_add_months: bad date $in" >&2; return 1; }
+  [[ "$n" =~ ^-?[0-9]+$ ]] || { echo "awiki_date_add_months: bad delta $n" >&2; return 1; }
+  local y="${in:0:4}" m="${in:5:2}" d="${in:8:2}"
+  y=$((10#$y)); m=$((10#$m)); d=$((10#$d))
+  # Add months, normalize.
+  local total=$(( (y * 12 + (m - 1)) + n ))
+  local ny=$(( total / 12 ))
+  local nm=$(( (total % 12) + 1 ))
+  # Compute last day of target month.
+  local maxday=31
+  case "$nm" in
+    4|6|9|11) maxday=30 ;;
+    2)
+      if (( ny % 4 == 0 && (ny % 100 != 0 || ny % 400 == 0) )); then
+        maxday=29
+      else
+        maxday=28
+      fi
+      ;;
+  esac
+  local nd="$d"
+  (( nd > maxday )) && nd=$maxday
+  printf '%04d-%02d-%02d\n' "$ny" "$nm" "$nd"
+}
+EOF
+```
+
+- [ ] **Step 4: Run — expect pass**
+
+```bash
+bats tests/action_grammar_test.bats
+```
+
+Expected: all tests pass (original 14 + 8 new = 22).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/lib/action-grammar.sh tests/action_grammar_test.bats
+git commit -m "feat(task): add portable awiki_date_add_days + awiki_date_add_months helpers"
 ```
 
 ---
@@ -849,6 +998,13 @@ if [[ -z "$raw" ]]; then
   exit 4
 fi
 
+# AWIKI_CAPTURE_PRESANITIZED=1 — caller already ran sanitization (e.g.,
+# the MCP `capture` handler in phase 18b). Skip the sanitization pass
+# but KEEP the hard-rejection scan as a defense-in-depth check.
+# When set, do not emit `SANITIZATION-APPLIED|...` (already reported by
+# the upstream caller).
+presanitized="${AWIKI_CAPTURE_PRESANITIZED:-0}"
+
 # === Hard-rejections ===
 
 # Newline / CR / NUL / non-tab control chars.
@@ -871,6 +1027,12 @@ applied=()
 
 # Tab → space (always; not counted as a sanitization since it's a benign normalization).
 text="${text//$'\t'/ }"
+
+if [[ "$presanitized" == "1" ]]; then
+  # Caller (e.g. the MCP capture handler) already sanitized.
+  # Skip neutralization; do NOT populate $applied.
+  :
+else
 
 # Length > 2000.
 if [[ ${#text} -gt 2000 ]]; then
@@ -898,6 +1060,8 @@ if [[ "$text" =~ \^[a-z0-9]{4,} ]]; then
   text="$(printf -- '%s' "$text" | sed -E 's/(\^)([a-z0-9]{4,})/\\\1\2/g')"
   applied+=("block-id-escaped")
 fi
+
+fi  # end !presanitized branch
 
 # === Emit ===
 

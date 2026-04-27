@@ -1223,7 +1223,7 @@ git commit -m "feat: add Weekly Review WIKI.md subsection + migration helper"
 
 ## Task 19.7: Pre-commit hook installer integrated into `task-init.sh` step 6
 
-Phase 16 left `task-init.sh` step 6 as a printed prompt with a TODO. Phase 19 implements the actual hook installation. The hook runs `lint.sh` (alias-build only) plus `action-scan.sh`. A `# task-layer` marker keeps re-runs idempotent and lets the installer detect prior installation cleanly. If a non-task-layer pre-commit hook already exists (e.g. from v1 phase 12's `install-hooks.sh`), the installer **appends** rather than overwrites.
+Phase 16 deferred the pre-commit hook entirely (its self-review explicitly states "task-init does NOT install a pre-commit hook (deferred to phase 19 per spec)"); `main()` ships with five steps and no pre-commit stub. Phase 19 adds a new `step_precommit` function and wires it into `main()` between `step_state_files` and the smoke-instructions print. The hook runs `lint.sh` (alias-build only) plus `action-scan.sh`. A `# task-layer` marker keeps re-runs idempotent and lets the installer detect prior installation cleanly. If a non-task-layer pre-commit hook already exists (e.g. from v1 phase 12's `install-hooks.sh`), the installer **appends** rather than overwrites.
 
 - [ ] **Step 1: Write the failing test FIRST — `tests/task_init_pre_commit_test.sh`**
 
@@ -1302,7 +1302,7 @@ Run:
 bats tests/task_init_pre_commit_test.sh
 ```
 
-Expected: 4 failures (the current task-init prints a TODO instead of writing).
+Expected: 4 failures (the current task-init has no `step_precommit` function and `main()` does not install any hook; the hook file is absent after `task-init` runs).
 
 - [ ] **Step 2: Implement step 6 of `scripts/task-init.sh`**
 

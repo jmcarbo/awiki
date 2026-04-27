@@ -100,6 +100,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     awiki_writes_tracked: list = []
     awiki_writes_untracked: list = []
 
+    # If the migration script itself lives under repo_root, exclude it from audit
+    # (it's the script being executed, not a write produced by execution).
+    script_rel = None
+    try:
+        script_rel = str(Path(args.script).resolve().relative_to(Path(repo_root).resolve()))
+    except (ValueError, RuntimeError):
+        script_rel = None
+
     # Parse porcelain to distinguish tracked vs untracked.
     # Format: "XY filename" — untracked is "?? filename".
     for line in out.splitlines():
@@ -109,6 +117,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         rel = line[3:].strip()
         if "->" in rel:
             rel = rel.split("->", 1)[1].strip()
+        if script_rel is not None and rel == script_rel:
+            continue
         is_untracked = (xy == "??")
         if rel.startswith(".awiki/"):
             (awiki_writes_untracked if is_untracked else awiki_writes_tracked).append(rel)

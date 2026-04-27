@@ -131,3 +131,10 @@ review:
     bash scripts/agenda.sh
     bash scripts/lint.sh
     bash scripts/review-status.sh
+
+# === template ===
+template-init:
+    bash scripts/template-init.sh --repo "${TEMPLATE_REPO:?TEMPLATE_REPO required}" \
+                                   --ref "${TEMPLATE_REF:-main}" \
+                                   --version "${TEMPLATE_VERSION:?TEMPLATE_VERSION required}" \
+                                   --commit "${TEMPLATE_COMMIT:?TEMPLATE_COMMIT required}"

@@ -67,3 +67,8 @@ run_synth_lint_file() {
   [[ "$output" == *"LINT|ERROR"*"S3"*"hallucinat"* || "$output" == *"LINT|ERROR"*"S3"*"not found"* ]]
   [[ "$output" == *"suggestion:"* ]]
 }
+
+@test "S4: out-of-scope citation → error" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s4-out-of-scope.md"
+  [[ "$output" == *"LINT|ERROR"*"S4"*"some-other-slug-not-in-scope"* ]]
+}

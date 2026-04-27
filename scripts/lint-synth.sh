@@ -212,6 +212,124 @@ synth_check_s3() {
   rm -f "$region_file"
 }
 
+# --- S4: citation slug in scope ----------------------------------------------
+# Parse the page's scope: block and resolve to a slug list using the
+# wiki-root's slug-to-path.tsv. Every [[slug]] inside markers must be present.
+synth_resolve_scope_slugs() {
+  local page="$1"
+  local content_dir="${2:-content}"
+  local wiki_root="${content_dir%/content}"
+  [[ "$wiki_root" = "$content_dir" ]] && wiki_root="$(dirname "$content_dir")"
+  local map="$wiki_root/.awiki/maps/slug-to-path.tsv"
+
+  # Read scope block from frontmatter.
+  local scope_kind="" scope_val=""
+  local in_fm=0 in_scope=0
+  while IFS= read -r line; do
+    if [[ "$line" == "---" ]]; then
+      in_fm=$((in_fm + 1))
+      continue
+    fi
+    [[ "$in_fm" -ne 1 ]] && continue
+    if [[ "$line" =~ ^scope:[[:space:]]*$ ]]; then in_scope=1; continue; fi
+    if [[ "$in_scope" -eq 1 ]]; then
+      if [[ "$line" =~ ^[^[:space:]] ]]; then in_scope=0; continue; fi
+      if [[ "$line" =~ ^[[:space:]]+tag:[[:space:]]+(.+)$ ]]; then
+        scope_kind="tag"
+        scope_val="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^[[:space:]]+slugs:[[:space:]]+\[(.+)\]$ ]]; then
+        scope_kind="slugs"
+        scope_val="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^[[:space:]]+query:[[:space:]]+(.+)$ ]]; then
+        scope_kind="query"
+        scope_val="${BASH_REMATCH[1]}"
+      fi
+    fi
+  done < "$page"
+
+  case "$scope_kind" in
+    slugs)
+      printf -- '%s' "$scope_val" | tr ',' '\n' | sed -E 's/^[[:space:]"'\'']+|[[:space:]"'\'']+$//g' | grep -v '^$' | sort -u
+      ;;
+    tag)
+      # Walk the map; for each slug, check tags from the source file.
+      [[ -f "$map" ]] || return 0
+      local tag="$scope_val"
+      while IFS=$'\t' read -r slug rel; do
+        [[ -z "$slug" || -z "$rel" ]] && continue
+        local p
+        if [[ "$rel" = /* ]]; then p="$rel"; else p="$wiki_root/$rel"; fi
+        [[ -f "$p" ]] || continue
+        local tags_line
+        tags_line=$(awk '/^tags:/{print; exit}' "$p")
+        # tags: [memex, foo]
+        if [[ "$tags_line" =~ \[(.*)\] ]]; then
+          local raw="${BASH_REMATCH[1]}"
+          local found=0
+          local IFS_OLD="$IFS"
+          IFS=','
+          for t in $raw; do
+            t="$(echo "$t" | sed -E 's/^[[:space:]"'\'']+|[[:space:]"'\'']+$//g')"
+            if [[ "$t" == "$tag" ]]; then found=1; break; fi
+          done
+          IFS="$IFS_OLD"
+          [[ "$found" -eq 1 ]] && echo "$slug"
+        fi
+      done < "$map" | sort -u
+      ;;
+    query)
+      # Query-scope is non-deterministic; lint cannot verify in-scope without
+      # running qmd. Emit a sentinel "" (empty) and let S4 short-circuit.
+      return 0
+      ;;
+  esac
+}
+
+synth_check_s4() {
+  local page="$1"
+  local content_dir="${2:-content}"
+
+  # If scope is query, skip S4 (cannot deterministically resolve).
+  local scope_kind=""
+  local in_fm=0 in_scope=0
+  while IFS= read -r line; do
+    [[ "$line" == "---" ]] && in_fm=$((in_fm + 1)) && continue
+    [[ "$in_fm" -ne 1 ]] && continue
+    if [[ "$line" =~ ^scope:[[:space:]]*$ ]]; then in_scope=1; continue; fi
+    if [[ "$in_scope" -eq 1 ]]; then
+      if [[ "$line" =~ ^[^[:space:]] ]]; then in_scope=0; continue; fi
+      [[ "$line" =~ ^[[:space:]]+tag:    ]] && scope_kind="tag"
+      [[ "$line" =~ ^[[:space:]]+slugs:  ]] && scope_kind="slugs"
+      [[ "$line" =~ ^[[:space:]]+query:  ]] && scope_kind="query"
+    fi
+  done < "$page"
+  [[ "$scope_kind" = "query" ]] && return 0
+
+  local resolved_slugs
+  resolved_slugs="$(synth_resolve_scope_slugs "$page" "$content_dir")"
+  [[ -n "$resolved_slugs" ]] || return 0
+
+  local region
+  region=$(awk '
+    /^<!-- BEGIN GENERATED .* -->$/ { in_region=1; next }
+    /^<!-- END GENERATED -->$/      { in_region=0 }
+    in_region { print }
+  ' "$page")
+
+  local seen=" "
+  local link target
+  while IFS= read -r link; do
+    target="${link%%|*}"
+    [[ "$target" =~ ^[a-z0-9][a-z0-9-]*$ ]] || continue
+    [[ "$seen" == *" $target "* ]] && continue
+    seen="$seen$target "
+    if ! grep -qxF "$target" <<<"$resolved_slugs"; then
+      echo "LINT|ERROR|$page|S4: citation [[$target]] is out of scope"
+      ERRORS=$((ERRORS + 1))
+    fi
+  done < <(grep -oE '\[\[[a-z0-9][a-z0-9|-]*\]\]' <<<"$region" | sed -E 's/^\[\[|\]\]$//g')
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -230,7 +348,8 @@ synth_lint_file() {
   synth_check_s1 "$page" || return 0  # bail on broken markers — downstream rules need them
   synth_check_s2 "$page"
   synth_check_s3 "$page" "$content_dir"
-  # synth_check_s4..S9 added in subsequent tasks.
+  synth_check_s4 "$page" "$content_dir"
+  # synth_check_s5..S9 added in subsequent tasks.
 }
 
 synth_lint_dir() {

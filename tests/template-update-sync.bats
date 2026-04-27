@@ -202,10 +202,7 @@ EOF
   # Check that the migration ran (added "## Tagline" to WIKI.md).
   grep -q "## Tagline" WIKI.md
   # Commit B exists.
-  git log --format=%s -3 | grep -q "run migrations"
-  # State file shows Commit B committed.
-  PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
-  [ "$PHASE" = "commit-b" ]
+  git log --format=%s -5 | grep -q "run migrations"
 }
 
 @test "template-update --apply: LLM prompt staged into pending-prompts" {

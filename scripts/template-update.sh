@@ -582,5 +582,87 @@ python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase co
 echo "info: Commit B complete"
 fi  # end Commit B (skipped on resume)
 
-echo "info: Commits C/D not yet implemented"
+# === Phase 3 — Commit C: bootstrap steps ===
+if should_skip_phase commit-c; then
+  echo "info: resume — skipping Commit C"
+else
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-c --status started
+
+# Manifest's ordered_steps and dangerous IDs (NEW manifest).
+ORDERED=$(bash "$SCRIPT_DIR/template-manifest.sh" bootstrap-ids "$NEW_MANIFEST")
+
+# Existing applied steps in pin: emit "id status content_hash" lines.
+EXISTING=$(bash "$SCRIPT_DIR/template-provenance.sh" list-steps "$PJ")
+
+while IFS= read -r SID; do
+  [[ -z "$SID" ]] && continue
+
+  # Compute upstream content_hash from FETCH_DIR/BOOTSTRAP.md.
+  NEW_HASH=$(python3 "$HELPERS/bootstrap_hash.py" hash "$FETCH_DIR/BOOTSTRAP.md" "$SID" 2>/dev/null || true)
+  [[ -z "$NEW_HASH" ]] && continue   # step not present in new BOOTSTRAP.md
+
+  # Look up existing record. Use awk -v to avoid shell interpolation hazards.
+  EXISTING_LINE=$(echo "$EXISTING" | awk -v id="$SID" '$1==id {print; exit}')
+  EXISTING_STATUS=$(echo "$EXISTING_LINE" | awk '{print $2}')
+  EXISTING_HASH=$(echo "$EXISTING_LINE" | awk '{print $3}')
+
+  # Already applied with matching hash → skip.
+  if [[ "$EXISTING_STATUS" == "applied" && "$EXISTING_HASH" == "$NEW_HASH" ]]; then
+    continue
+  fi
+
+  # Classify (dangerous?).
+  CLASS=$(python3 "$HELPERS/bootstrap_replay.py" classify \
+    --bootstrap "$FETCH_DIR/BOOTSTRAP.md" --manifest "$NEW_MANIFEST" --id "$SID")
+  if [[ "$CLASS" == "dangerous" ]]; then
+    echo "info: skipping dangerous step $SID — re-run with --rerun-bootstrap-step"
+    continue
+  fi
+
+  # Replay (or auto-decline under --non-interactive).
+  if [[ $NON_INTERACTIVE -eq 1 ]]; then
+    python3 "$HELPERS/state.py" add-bootstrap-pending "$FETCH_DIR/.update-state.json" \
+      --id "$SID" --status skipped --reason "non-interactive default" --content-hash "$NEW_HASH"
+    continue
+  fi
+
+  echo "Bootstrap step '$SID':"
+  python3 "$HELPERS/bootstrap_replay.py" body --bootstrap "$FETCH_DIR/BOOTSTRAP.md" --id "$SID"
+  read -r -p "Run this step now? [y/N] " ans
+  if [[ "$ans" =~ ^[Yy] ]]; then
+    BODY=$(python3 "$HELPERS/bootstrap_replay.py" body --bootstrap "$FETCH_DIR/BOOTSTRAP.md" --id "$SID")
+    BODY_FILE=$(mktemp)
+    printf '%s' "$BODY" > "$BODY_FILE"
+    # Replay with stripped env (matching migration trust model).
+    if env -i \
+        PATH="$PATH" HOME="$HOME" LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" \
+        AWIKI_REPO_ROOT="$REPO_ROOT" \
+        bash "$BODY_FILE"; then
+      python3 "$HELPERS/state.py" add-bootstrap-pending "$FETCH_DIR/.update-state.json" \
+        --id "$SID" --status applied --content-hash "$NEW_HASH"
+    else
+      python3 "$HELPERS/state.py" add-bootstrap-pending "$FETCH_DIR/.update-state.json" \
+        --id "$SID" --status skipped --reason "user replay failed" --content-hash "$NEW_HASH"
+    fi
+    rm -f "$BODY_FILE"
+  else
+    python3 "$HELPERS/state.py" add-bootstrap-pending "$FETCH_DIR/.update-state.json" \
+      --id "$SID" --status skipped --reason "user declined" --content-hash "$NEW_HASH"
+  fi
+done <<< "$ORDERED"
+
+git add -A
+if git diff --cached --quiet; then
+  echo "info: no bootstrap-step changes to commit"
+else
+  git commit -q -m "chore(template): bootstrap steps"
+  COMMIT_C_SHA=$(git rev-parse HEAD)
+  python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$COMMIT_C_SHA"
+fi
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-c --status committed
+
+echo "info: Commit C complete"
+fi  # end Commit C
+
+echo "info: Commit D not yet implemented"
 exit 0

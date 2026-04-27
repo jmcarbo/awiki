@@ -133,7 +133,7 @@ teardown() { rm -rf "$TMP"; }
     --source "$V3" --accept-source-change --schema-upgrade --apply --non-interactive
   # Phase progresses through commit-a, commit-b as later phases come online.
   PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
-  [[ "$PHASE" =~ ^(schema-upgrade|commit-a|commit-b)$ ]]
+  [[ "$PHASE" =~ ^(schema-upgrade|commit-a|commit-b|commit-c)$ ]]
   STATUS=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json status)
   [ "$STATUS" = "committed" ]
   # Verify schema upgrade was recorded in applied_migrations_pending.

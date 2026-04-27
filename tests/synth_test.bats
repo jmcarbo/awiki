@@ -207,3 +207,42 @@ PY
   run grep '## TL;DR' content/synthesis/memex-briefing.md
   [ "$status" -ne 0 ]
 }
+
+@test "synth regen on clean tree rescaffolds region" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  # Commit so HEAD has the page.
+  git -C "$WORK" init -q . 2>/dev/null || true
+  git -C "$WORK" add -A 2>/dev/null || true
+  git -C "$WORK" -c user.email=t@t -c user.name=t commit -q -m init 2>/dev/null || true
+  run bash scripts/synth.sh regen memex-briefing --force
+  [ "$status" -eq 0 ]
+  run grep '<!-- BEGIN GENERATED plugin=briefing scope_hash=' content/synthesis/memex-briefing.md
+  [ "$status" -eq 0 ]
+}
+
+@test "synth regen exits 4 on hand-edit inside markers" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  git -C "$WORK" init -q . 2>/dev/null || true
+  git -C "$WORK" add -A 2>/dev/null || true
+  git -C "$WORK" -c user.email=t@t -c user.name=t commit -q -m init 2>/dev/null || true
+  python3 - <<PY
+import pathlib
+p = pathlib.Path("content/synthesis/memex-briefing.md")
+p.write_text(p.read_text().replace(
+  "<!-- END GENERATED -->",
+  "manually inserted line inside marker region\n<!-- END GENERATED -->",
+))
+PY
+  run bash scripts/synth.sh regen memex-briefing
+  [ "$status" -eq 4 ]
+}
+
+@test "synth regen --stage writes only to .staged file" {
+  bash scripts/synth.sh new briefing memex --tag=memex >/dev/null
+  git -C "$WORK" init -q . 2>/dev/null || true
+  git -C "$WORK" add -A 2>/dev/null || true
+  git -C "$WORK" -c user.email=t@t -c user.name=t commit -q -m init 2>/dev/null || true
+  run bash scripts/synth.sh regen memex-briefing --stage
+  [ "$status" -eq 0 ]
+  [ -f content/synthesis/.staged/memex-briefing.md ]
+}

@@ -502,6 +502,125 @@ cmd_finalize() {
   echo "SYNTH-FINALIZE|target=$target|sources=$(printf -- '%s' "$slugs" | grep -c . || true)|scope_hash=$hash" >&2
 }
 
+# Detect hand-edits inside the marker region by diffing against HEAD.
+# Returns 0 if no marker-region diff, 1 if intersecting diff found, 2 if untracked/no HEAD.
+synth_handedit_check() {
+  local page="$1"
+  if ! git ls-files --error-unmatch -- "$page" >/dev/null 2>&1; then
+    return 2  # untracked: treat as fresh
+  fi
+  if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+    return 2  # no HEAD yet
+  fi
+  local head_tmp work_tmp; head_tmp="$(mktemp)"; work_tmp="$(mktemp)"
+  git show "HEAD:$page" > "$head_tmp" 2>/dev/null || { rm -f "$head_tmp" "$work_tmp"; return 2; }
+  cp "$page" "$work_tmp"
+
+  # Extract the BEGIN..END block from each side.
+  local extract='
+    /^<!-- BEGIN GENERATED / { p=1 }
+    p { print }
+    /^<!-- END GENERATED -->/ { p=0 }
+  '
+  local h w
+  h="$(awk "$extract" "$head_tmp")"
+  w="$(awk "$extract" "$work_tmp")"
+  rm -f "$head_tmp" "$work_tmp"
+  if [[ "$h" != "$w" ]]; then return 1; fi
+  return 0
+}
+
+# Rewrite the marker region of $page with empty body and updated scope_hash.
+synth_clear_region() {
+  local page="$1" plugin="$2" hash="$3"
+  awk -v plugin="$plugin" -v hash="$hash" '
+    BEGIN{ in_region=0 }
+    /^<!-- BEGIN GENERATED / {
+      print "<!-- BEGIN GENERATED plugin=" plugin " scope_hash=" hash " -->"
+      print ""
+      in_region=1; next
+    }
+    /^<!-- END GENERATED -->/ {
+      print
+      in_region=0; next
+    }
+    in_region==0 { print }
+  ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+}
+
+cmd_regen() {
+  if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh regen <slug> [--force] [--stage]"; fi
+  local slug="$1"; shift; require_slug "$slug" "synthesis-page-slug"
+
+  local force=0 stage=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1 ;;
+      --stage) stage=1 ;;
+      --) shift; break ;;
+      *) EXIT_CODE=1 die "unknown flag: $1" ;;
+    esac
+    shift
+  done
+
+  local live="$SYNTH_DIR/$slug.md"
+  [[ -f "$live" ]] || { EXIT_CODE=1 die "synthesis page not found: $live"; }
+
+  local plugin; plugin="$(synth_fm_field "$live" "plugin")"
+  [[ -n "$plugin" ]] || { EXIT_CODE=1 die "$live missing 'plugin:' frontmatter"; }
+  if ! synth_plugin_load "$plugin"; then EXIT_CODE=1 die "plugin load failed: $plugin"; fi
+
+  if [[ "$force" -eq 0 && "$stage" -eq 0 ]]; then
+    set +e
+    synth_handedit_check "$live"
+    local rc=$?
+    set -e
+    case $rc in
+      1) EXIT_CODE=4 die "hand-edit detected inside marker region; pass --force or --stage" ;;
+      2) : ;;  # untracked or no HEAD; proceed
+    esac
+  fi
+
+  synth_read_scope "$live"
+  if [[ "$live" == */private/* ]]; then SCOPE_TARGET_PRIVATE=1; else SCOPE_TARGET_PRIVATE=0; fi
+
+  # Re-run privacy fail-closed check (catches newly-private sources).
+  local saved=$SCOPE_TARGET_PRIVATE
+  SCOPE_TARGET_PRIVATE=1
+  local raw_slugs; raw_slugs="$(synth_resolve_to_slugs)"
+  SCOPE_TARGET_PRIVATE=$saved
+  while IFS= read -r s; do
+    [[ -z "$s" ]] && continue
+    local sp; sp="$(synth_slug_to_path "$s")"
+    [[ -z "$sp" ]] && continue
+    local stags; stags="$(synth_fm_tags "$sp")"
+    if [[ " $stags " == *" private "* && "$SCOPE_TARGET_PRIVATE" -ne 1 ]]; then
+      EXIT_CODE=2 die "private source $s now in scope; tag the synthesis page private or pass --allow-private (regen)"
+    fi
+  done <<< "$raw_slugs"
+
+  local slugs; slugs="$(synth_resolve_to_slugs)"
+  local hash;  hash="$(synth_scope_hash "$slugs")"
+
+  local target="$live"
+  if [[ "$stage" -eq 1 ]]; then
+    mkdir -p "$STAGED_DIR"
+    target="$STAGED_DIR/$slug.md"
+    cp "$live" "$target"
+  fi
+
+  synth_clear_region "$target" "$plugin" "$hash"
+
+  # Emit prompt bundle (no feedback in phase 13).
+  local scope_desc=""
+  [[ -n "$SCOPE_TAG"   ]] && scope_desc="pages tagged '$SCOPE_TAG'"
+  [[ -n "$SCOPE_SLUGS" ]] && scope_desc="explicit slug list"
+  [[ -n "$SCOPE_QUERY" ]] && scope_desc="qmd query: $SCOPE_QUERY"
+  synth_emit_prompt "$slugs" "$scope_desc" ""
+
+  echo "SYNTH-REGEN|target=$target|stage=$stage|scope_hash=$hash" >&2
+}
+
 cmd_resolve() {
   if [[ $# -lt 1 ]]; then EXIT_CODE=1 die "usage: synth.sh resolve <slug>"; fi
   local slug="$1"; require_slug "$slug" "synthesis-page-slug"
@@ -532,7 +651,8 @@ USAGE
     resolve) cmd_resolve "$@" ;;
     new) cmd_new "$@" ;;
     finalize) cmd_finalize "$@" ;;
-    regen|accept-stage|refine)
+    regen) cmd_regen "$@" ;;
+    accept-stage|refine)
       EXIT_CODE=1 die "subcommand '$sub' not yet implemented"
       ;;
     *) EXIT_CODE=1 die "unknown subcommand: $sub" ;;

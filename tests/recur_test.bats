@@ -264,6 +264,80 @@ EOF
   [ "$output" = "0" ]
 }
 
+@test "action-recur: mid-chain every: change reads interval from completed line" {
+  mkdir -p content/projects
+  cat > content/projects/garden2.md <<'EOF'
+---
+title: "Garden 2"
+type: project
+status: active
+last_updated: 2026-05-25
+draft: false
+---
+
+## Open Actions
+
+## Done
+
+- [x] water plants @home every:2w due:2026-05-25 done:2026-05-25 ^a05~3
+- [x] water plants @home every:1w due:2026-05-18 done:2026-05-18 ^a05~2
+- [x] water plants @home every:1w due:2026-05-04 done:2026-05-04 ^a05
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+a05	x	water plants	content/projects/garden2.md	16	home		    	1w	2026-05-04				garden2	public
+a05~2	x	water plants	content/projects/garden2.md	15	home		    	1w	2026-05-18				garden2	public
+a05~3	x	water plants	content/projects/garden2.md	14	home		    	2w	2026-05-25				garden2	public
+EOF
+
+  run bash scripts/action-recur.sh content/projects/garden2.md
+  [ "$status" -eq 0 ]
+  # Top of chain (the most recent [x]) is ~3 with every:2w done:2026-05-25.
+  # Next emit is ^a05~4 with due = 2026-05-25 + 14d = 2026-06-08.
+  grep -q '^- \[ \] water plants @home every:2w due:2026-06-08 \^a05~4$' content/projects/garden2.md
+  # And the older [x] lines should NOT each have spawned a new emit because
+  # their next instance numbers (~2 onward) are already present in the chain.
+  emit_count=$(grep -c '^- \[ \] water plants' content/projects/garden2.md)
+  [ "$emit_count" -eq 1 ]
+}
+
+@test "action-recur: chain detection works under AWIKI_RECUR_SEP=~ (default)" {
+  source scripts/lib/action-grammar.sh
+  [ "$AWIKI_RECUR_SEP" = "~" ] || skip "spike pinned a different separator"
+  seed_weekly_done_a05
+  run bash scripts/action-recur.sh content/projects/garden.md
+  [ "$status" -eq 0 ]
+  grep -q '\^a05~2$' content/projects/garden.md
+}
+
+@test "action-recur: chain detection works under AWIKI_RECUR_SEP=__ (fallback)" {
+  # Override the separator via the env var (the lib uses ${AWIKI_RECUR_SEP:-~}).
+  export AWIKI_RECUR_SEP=__
+  mkdir -p content/projects
+  cat > content/projects/sep.md <<'EOF'
+---
+title: "Sep test"
+type: project
+status: active
+last_updated: 2026-05-04
+draft: false
+---
+
+## Done
+
+- [x] water plants @home every:1w due:2026-05-04 done:2026-05-04 ^a05
+EOF
+  cat > .awiki/maps/actions.tsv <<EOF
+id	status	text	file	line	context	due	defer	wait	since	every	done	priority	est	project	source_kind
+a05	x	water plants	content/projects/sep.md	10	home		    	1w	2026-05-04				sep	public
+EOF
+  run bash scripts/action-recur.sh content/projects/sep.md
+  [ "$status" -eq 0 ]
+  grep -q '\^a05__2$' content/projects/sep.md
+  # The ~ shape MUST NOT appear under fallback mode.
+  ! grep -q '\^a05~2' content/projects/sep.md
+}
+
 @test "action-recur: cap message goes to stderr, not stdout" {
   mkdir -p content/projects
   {

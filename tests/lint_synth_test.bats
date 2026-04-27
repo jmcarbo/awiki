@@ -164,6 +164,19 @@ PY
   [[ "$output" == *"LINT-SUMMARY"* ]]
 }
 
+@test "lint.sh --only=synth --fix normalizes inside markers but not outside" {
+  cp "$FIXTURES/content/synthesis/fix-input.md" "$BATS_TMPDIR/fix.md"
+  bash scripts/lint.sh --only=synth --fix --file="$BATS_TMPDIR/fix.md" "$FIXTURES/content" || true
+  # Outside markers: smart quotes and em-dash preserved.
+  run grep -F '“smart quotes”' "$BATS_TMPDIR/fix.md"
+  [ "$status" -eq 0 ]
+  run grep -F 'em-dash —' "$BATS_TMPDIR/fix.md"
+  [ "$status" -eq 0 ]
+  # Inside markers (## Evidence line): straight quotes only, no ZWSP.
+  run grep -F '"smart-quoted text - with em-dash and' "$BATS_TMPDIR/fix.md"
+  [ "$status" -eq 0 ]
+}
+
 @test "S6: feedback-only edit + last_updated bump → no warning" {
   s6_setup_repo
   cat > content/synthesis/s6-page.md <<'P'

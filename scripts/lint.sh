@@ -51,6 +51,23 @@ if [[ "$FIX" -eq 1 && ( -z "$ONLY" || "$ONLY" = "all" ) ]]; then
   done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 fi
 
+# --- Synth --fix: S3 normalization steps 2/3/4 inside markers only ----------
+if [[ "$FIX" -eq 1 && ( -z "$ONLY" || "$ONLY" = "synth" || "$ONLY" = "all" ) ]]; then
+  if [[ -n "$ONLY_FILE" ]]; then
+    if [[ -f "$ONLY_FILE" ]]; then
+      python3 "$(dirname "$0")/lint-synth-fix-region.py" -- "$ONLY_FILE"
+      echo "FIX|$ONLY_FILE|synth normalization (steps 2/3/4) applied inside markers"
+    fi
+  else
+    while IFS= read -r -d '' page; do
+      head -40 "$page" | grep -q '^type: synthesis$' || continue
+      head -40 "$page" | grep -qE '^plugin: [a-z][a-z0-9-]*$' || continue
+      python3 "$(dirname "$0")/lint-synth-fix-region.py" -- "$page"
+      echo "FIX|$page|synth normalization (steps 2/3/4) applied inside markers"
+    done < <(find "$CONTENT_DIR/synthesis" -maxdepth 2 -name '*.md' -type f -print0 2>/dev/null)
+  fi
+fi
+
 ERRORS=0
 WARNS=0
 INFOS=0

@@ -126,21 +126,18 @@ teardown() { rm -rf "$TMP"; }
   git log --format=%s | grep -q "schema upgrade 1"
 }
 
-@test "template-update --schema-upgrade: state file phase=schema-upgrade after Commit 0" {
+@test "template-update --schema-upgrade: schema migration recorded in template.json" {
   cd "$TMP"
   V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
   run bash "$REPO_ROOT/scripts/template-update.sh" \
     --source "$V3" --accept-source-change --schema-upgrade --apply --non-interactive
-  # Phase progresses through commit-a, commit-b as later phases come online.
-  PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
-  [[ "$PHASE" =~ ^(schema-upgrade|commit-a|commit-b|commit-c)$ ]]
-  STATUS=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json status)
-  [ "$STATUS" = "committed" ]
-  # Verify schema upgrade was recorded in applied_migrations_pending.
+  [ "$status" -eq 0 ] || { echo "STATUS=$status"; echo "$output"; false; }
+  # Commit D removes the state file; schema-upgrade entry lands in template.json.applied_migrations.
+  [ ! -f .awiki/template-cache/_fetch/.update-state.json ]
   python3 -c "
 import json
-d = json.load(open('.awiki/template-cache/_fetch/.update-state.json'))
-ids = [m['id'] for m in d.get('applied_migrations_pending', [])]
+d = json.load(open('.awiki/template.json'))
+ids = [m['id'] for m in d.get('applied_migrations', [])]
 assert 'schema-1-to-2' in ids, ids
 "
 }

@@ -664,5 +664,65 @@ python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase co
 echo "info: Commit C complete"
 fi  # end Commit C
 
-echo "info: Commit D not yet implemented"
+# === Phase 3 — Commit D: provenance ===
+if should_skip_phase commit-d; then
+  echo "info: resume — skipping Commit D"
+else
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-d --status started
+
+# Apply pending updates from state file → template.json.
+NEW_VERSION=$(awk -F= '$1=="template_version"{print $2}' <(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST"))
+NEW_REF="${REF:-main}"
+
+bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" commit "$COMMIT_NEW" >/dev/null
+bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" version "$NEW_VERSION" >/dev/null
+bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" ref "$NEW_REF" >/dev/null
+if [[ $PERSIST_SOURCE -eq 1 ]]; then
+  bash "$SCRIPT_DIR/template-provenance.sh" set "$PJ" repo "$RESOLVED_SOURCE" >/dev/null
+fi
+
+# Append pending entries from state file → template.json. Use literal heredoc + os.environ to
+# avoid shell-injection from user-controlled state contents (migration ids, reasons, paths).
+AWIKI_PJ="$PJ" AWIKI_STATE="$FETCH_DIR/.update-state.json" python3 - <<'PY'
+import json, os
+pj_path = os.environ["AWIKI_PJ"]
+state_path = os.environ["AWIKI_STATE"]
+with open(pj_path) as f:
+    d = json.load(f)
+with open(state_path) as f:
+    s = json.load(f)
+d.setdefault("applied_migrations", []).extend(s.get("applied_migrations_pending", []))
+d.setdefault("bootstrap_steps_done", []).extend(s.get("bootstrap_steps_pending", []))
+d.setdefault("deleted", []).extend(s.get("deleted_pending", []))
+with open(pj_path, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
+
+# Move _fetch -> template-cache/<commit_new>/.
+NEW_CACHE_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_NEW"
+[[ -d "$NEW_CACHE_DIR" ]] && rm -rf "$NEW_CACHE_DIR"
+# Strip ephemeral artefacts to keep cache lean.
+rm -rf "$FETCH_DIR/.git"
+rm -rf "$FETCH_DIR/_scratch-merge"
+rm -f "$FETCH_DIR/.update-state.json"
+mv "$FETCH_DIR" "$NEW_CACHE_DIR"
+
+# Rotate cache: keep current + immediate previous.
+python3 "$HELPERS/cache_rotate.py" --cache-dir "$REPO_ROOT/.awiki/template-cache" --current "$COMMIT_NEW"
+
+# Stage + commit template.json (the only file touched in Commit D).
+git add "$PJ"
+git commit -q -m "chore(template): pin to $NEW_VERSION"
+echo "info: Commit D complete; pinned to $COMMIT_NEW ($NEW_VERSION)"
+
+cat <<EOF
+Update branch ready: $BRANCH_NAME
+
+Review with:   git diff main
+Merge with:    git switch main && git merge --no-ff $BRANCH_NAME
+Pending LLM migrations: .awiki/pending-prompts/
+EOF
+fi  # end Commit D
+
 exit 0

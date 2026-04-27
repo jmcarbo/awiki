@@ -126,10 +126,13 @@ EOF
   run bash "$REPO_ROOT/scripts/template-update.sh" \
     --source "$TMP_V" --accept-source-change --apply --non-interactive
   [ "$status" -eq 0 ] || { echo "STATUS=$status"; echo "$output"; false; }
-  # State file carries the pending entry until Commit D consolidates it.
-  PENDING=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get \
-    .awiki/template-cache/_fetch/.update-state.json bootstrap_steps_pending)
-  echo "$PENDING" | grep -q '"id": "domain"'
-  echo "$PENDING" | grep -q '"reason": "non-interactive default"'
+  # After Commit D, pending entries are written into template.json.bootstrap_steps_done.
+  python3 -c "
+import json
+d=json.load(open('.awiki/template.json'))
+done=d.get('bootstrap_steps_done', [])
+hits=[s for s in done if s.get('id')=='domain' and s.get('reason')=='non-interactive default']
+assert hits, f'expected domain skipped (non-interactive default); got {done}'
+"
   rm -rf "$TMP_V"
 }

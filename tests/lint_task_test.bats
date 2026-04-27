@@ -606,6 +606,85 @@ EOF
   grep -E 'LINT\|ERROR\|.*\|T12: .*\^h99.*length=250' <<< "$output"
 }
 
+# --- T13: context-unused (info) ------------------------------------------
+
+@test "T13 fires when a context page has zero referencing actions" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/garage.md" <<'EOF'
+---
+title: "@garage"
+type: context
+aliases: ['@garage']
+draft: false
+---
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T13:"* ]]
+  [[ "$output" == *"content/contexts/garage.md"* ]]
+}
+
+@test "T13 silent when at least one action references the context" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/phone.md" <<'EOF'
+---
+title: "@phone"
+type: context
+aliases: ['@phone']
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/p13.md" <<'EOF'
+---
+title: "P13"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [ ] call x @phone ^p13a
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/contexts/phone\.md\|T13' <<< "$output"
+}
+
+@test "T13 honors aliases (alias parity check)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/contexts/computer.md" <<'EOF'
+---
+title: "@computer"
+type: context
+aliases: ['@computer', '@laptop']
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/p13b.md" <<'EOF'
+---
+title: "P13b"
+type: project
+status: active
+last_updated: 2026-04-27
+draft: false
+---
+
+- [ ] code @laptop ^p13bx
+EOF
+  # Rebuild alias map (lint.sh does this in its main pass), then re-scan so
+  # actions.tsv's context column reflects the canonical slug.
+  # The alias-build step in this checkout is the existing fixture's
+  # alias-to-slug.tsv; refresh it via the lint --only=task path which doesn't
+  # rebuild aliases. We manually append @laptop->computer for parity.
+  printf '@laptop\tcomputer\tcontent/contexts/computer.md\tpublic\n' \
+    >> "$WORK/.awiki/maps/alias-to-slug.tsv"
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  # @laptop alias resolves to computer in the alias map; computer is
+  # therefore referenced (no T13 on computer.md).
+  ! grep -E 'content/contexts/computer\.md\|T13' <<< "$output"
+}
+
 @test "T11 boundary: exactly 90d is silent, 91d is warn" {
   cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
   local d90; d90="$(_n_days_ago 90)"

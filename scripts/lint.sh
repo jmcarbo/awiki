@@ -124,6 +124,7 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T10  "$actions_tsv"
   awiki_lint_task_rule_T11  "$actions_tsv"
   awiki_lint_task_rule_T12  "$actions_tsv"
+  awiki_lint_task_rule_T13  "$actions_tsv" "$alias_map"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
 }
@@ -494,6 +495,59 @@ awiki_lint_task_rule_T12() {
       }
     }
   ' "$act"
+}
+
+# T13: type:context pages with zero referencing actions (after alias
+# resolution). Informational only — never raises the lint exit code.
+#
+# Implementation note: actions.tsv's `context` column stores the raw
+# `@<token>` from the action line (NOT the alias-resolved canonical slug —
+# the scanner does not resolve here). T13 uses the alias map
+# (.awiki/maps/alias-to-slug.tsv) to map each `@<token>` to its canonical
+# slug, then checks which type:context pages are unreferenced.
+awiki_lint_task_rule_T13() {
+  local act="$1" alias_map="$2"
+  local content_dir="$AWIKI_REPO_ROOT/content"
+  [[ -d "$content_dir" ]] || return 0
+
+  # Build alias -> canonical-slug map.
+  declare -A alias_slug=()
+  if [[ -f "$alias_map" ]]; then
+    while IFS=$'\t' read -r al slug _rest; do
+      [[ -z "$al" ]] && continue
+      alias_slug["$al"]="$slug"
+    done < "$alias_map"
+  fi
+
+  # Build set of referenced canonical slugs from actions.tsv.
+  declare -A referenced=()
+  if [[ -f "$act" ]]; then
+    while IFS= read -r ctx; do
+      [[ -z "$ctx" ]] && continue
+      local resolved="${alias_slug[$ctx]:-}"
+      if [[ -z "$resolved" ]]; then
+        # Fall back to stripping the leading `@`.
+        resolved="${ctx#@}"
+      fi
+      referenced["$resolved"]=1
+    done < <(awk -F'\t' 'NR>1 && $6!="" { print $6 }' "$act")
+  fi
+
+  # Walk every content/contexts/*.md page; emit T13 for each unreferenced one.
+  local ctx_dir="$content_dir/contexts"
+  [[ -d "$ctx_dir" ]] || return 0
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local slug; slug="$(basename "$f" .md)"
+    [[ "$slug" == "_index" ]] && continue
+    local fm_type; fm_type="$(awiki_frontmatter_value "$f" type)"
+    [[ "$fm_type" == "context" ]] || continue
+    if [[ -z "${referenced[$slug]:-}" ]]; then
+      local relpath="${f#"$AWIKI_REPO_ROOT/"}"
+      printf 'LINT|INFO|%s|T13: context-unused (no actions reference @%s)\n' \
+        "$relpath" "$slug"
+    fi
+  done < <(find "$ctx_dir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
 }
 
 awiki_lint_task_rule_T14() {

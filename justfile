@@ -37,7 +37,7 @@ serve:
     bash scripts/serve.sh
 
 build:
-    bash scripts/build.sh
+    bash scripts/build.sh --full
 
 # === bootstrap / setup ===
 init:

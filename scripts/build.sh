@@ -6,7 +6,20 @@ REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd
 cd "$REPO_ROOT"
 
 MAPS_ONLY=0
-[[ "${1:-}" == "--maps-only" ]] && MAPS_ONLY=1
+FULL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --maps-only) MAPS_ONLY=1; shift ;;
+    --full) FULL=1; shift ;;
+    -*) echo "unknown flag: $1" >&2; exit 1 ;;
+    *) echo "unexpected positional: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ "$MAPS_ONLY" -eq 1 && "$FULL" -eq 1 ]]; then
+  echo "--maps-only and --full are mutually exclusive" >&2
+  exit 1
+fi
 
 CONTENT_DIR="content"
 BUILD_DIR=".awiki/build-content"
@@ -21,7 +34,6 @@ TITLE_MAP="$MAPS_DIR/slug-to-title.tsv"
 : > "$ALIAS_MAP"
 : > "$TITLE_MAP"
 
-# Build maps
 while IFS= read -r -d '' page; do
   rel="${page#"$CONTENT_DIR"/}"
   slug="$(basename "$page" .md)"
@@ -32,8 +44,7 @@ while IFS= read -r -d '' page; do
     [[ "$line" == "---" ]] && { in_fm=$((in_fm + 1)); continue; }
     [[ "$in_fm" -ge 2 ]] && break
     if [[ "$line" =~ ^title:[[:space:]]*\"?([^\"]+)\"?[[:space:]]*$ ]]; then
-      title="${BASH_REMATCH[1]}"
-      printf '%s\t%s\n' "$slug" "$title" >> "$TITLE_MAP"
+      printf '%s\t%s\n' "$slug" "${BASH_REMATCH[1]}" >> "$TITLE_MAP"
     fi
     if [[ "$line" =~ ^aliases:[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
       raw="${BASH_REMATCH[1]}"
@@ -47,9 +58,11 @@ while IFS= read -r -d '' page; do
   done < "$page"
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
-[[ "$MAPS_ONLY" -eq 1 ]] && exit 0
+if [[ "$MAPS_ONLY" -eq 1 ]]; then
+  echo "BUILD-OK|maps-only=1"
+  exit 0
+fi
 
-# Rewrite content into build-content
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
@@ -89,7 +102,8 @@ def repl(m):
     section, _ = os.path.split(rel)
     if display == target:
         display = titles.get(resolved_slug, target)
-    url = '/' + section + '/' + os.path.splitext(os.path.basename(rel))[0] + '/'
+    base = os.path.splitext(os.path.basename(rel))[0]
+    url = '/' + (section + '/' if section else '') + base + '/'
     return f'[{display}]({url})'
 text = re.sub(r'\[\[([^\]]+)\]\]', repl, text)
 open(out, 'w').write(text)
@@ -97,3 +111,8 @@ PY
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
 echo "BUILD-OK|content=$CONTENT_DIR|build=$BUILD_DIR"
+
+if [[ "$FULL" -eq 1 ]]; then
+  hugo --minify --destination public
+  echo "HUGO-OK|out=public"
+fi

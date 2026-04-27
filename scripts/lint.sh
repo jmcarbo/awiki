@@ -1,12 +1,38 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-CONTENT_DIR="${1:-content}"
+FIX=0
+CONTENT_DIR="content"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fix) FIX=1; shift ;;
+    *) CONTENT_DIR="$1"; shift ;;
+  esac
+done
+
+apply_fixes() {
+  local page="$1"
+  if ! grep -q '^last_updated:' "$page"; then
+    today="$(date '+%Y-%m-%d')"
+    # Portable insertion: use awk (handles BSD/GNU sed differences in \n).
+    awk -v today="$today" '
+      /^date: / { print; print "last_updated: " today; next }
+      { print }
+    ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
+    echo "FIX|$page|added last_updated: $today"
+  fi
+}
+
+if [[ "$FIX" -eq 1 ]]; then
+  while IFS= read -r -d '' page; do
+    apply_fixes "$page"
+  done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+fi
+
 ERRORS=0
 WARNS=0
 INFOS=0
 
-# Build slug map and alias map
 declare -A SLUG_TO_PATH
 declare -A ALIAS_TO_SLUG
 declare -A ALIAS_COUNT
@@ -19,7 +45,6 @@ while IFS= read -r -d '' page; do
   fi
   SLUG_TO_PATH[$slug]="$page"
 
-  # Extract aliases via grep on YAML frontmatter
   in_fm=0
   while IFS= read -r line; do
     [[ "$line" == "---" ]] && { in_fm=$((in_fm + 1)); continue; }
@@ -37,7 +62,6 @@ while IFS= read -r -d '' page; do
   done < "$page"
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
-# Per-page checks
 while IFS= read -r -d '' page; do
   body_len=$(awk '/^---$/{c++; next} c==2{print}' "$page" | wc -c | tr -d ' ')
   if [[ "$body_len" -lt 50 ]]; then
@@ -45,7 +69,6 @@ while IFS= read -r -d '' page; do
     WARNS=$((WARNS + 1))
   fi
 
-  # Broken wikilinks: extract [[slug]] or [[slug|x]]
   while read -r link; do
     target="${link%%|*}"
     if [[ -z "${SLUG_TO_PATH[$target]:-}" && -z "${ALIAS_TO_SLUG[$target]:-}" ]]; then
@@ -55,7 +78,6 @@ while IFS= read -r -d '' page; do
   done < <(grep -oE '\[\[[^]]+\]\]' "$page" | sed -E 's/^\[\[|\]\]$//g')
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
 
-# Alias collisions
 for a in "${!ALIAS_COUNT[@]}"; do
   if [[ "${ALIAS_COUNT[$a]}" -gt 1 ]]; then
     echo "LINT|ERROR|content|alias collision: '$a' used by multiple pages"

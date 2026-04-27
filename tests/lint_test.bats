@@ -49,3 +49,24 @@ EOF2
   run bash scripts/lint.sh "$CLEAN"
   [ "$status" -eq 0 ]
 }
+
+@test "lint --fix adds missing last_updated" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/needs-fix.md" <<EOF2
+---
+title: "Needs Fix"
+date: 2026-01-01
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body referencing [[needs-fix]] for self-connectivity, sufficient length.
+EOF2
+  bash scripts/lint.sh --fix "$TMP" || true
+  run grep '^last_updated:' "$TMP/entities/needs-fix.md"
+  [ "$status" -eq 0 ]
+}

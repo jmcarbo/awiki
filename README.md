@@ -2,6 +2,8 @@
 
 A template repository for building personal LLM-maintained wikis. Domain-agnostic. Multi-agent (Claude Code, Codex, OpenCode). Hugo-renderable. Obsidian-friendly. Search via qmd.
 
+awiki is an implementation of the LLM Wiki pattern described by Andrej Karpathy: <https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>.
+
 ## Quick start
 
 ```bash

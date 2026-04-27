@@ -3,6 +3,12 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { listSynthPlugins } from "./lib/list-plugins.js";
+
+const REPO_ROOT = process.cwd();
+const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
+const TOPIC_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 const TOOLS = [
   {
@@ -35,6 +41,11 @@ const TOOLS = [
     description: "Rebuild content/catalog.md from on-disk pages and current frontmatter.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
+  {
+    name: "list_synth_plugins",
+    description: "List all synthesis plugins under synthesis-plugins/. No arguments. Errors during scan are reported in the return payload.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const server = new Server({ name: "awiki", version: "0.1.0" }, { capabilities: { tools: {} } });
@@ -65,6 +76,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "update_catalog":
         out = execFileSync("bash", ["scripts/update-catalog.sh"], { encoding: "utf8" });
         break;
+      case "list_synth_plugins": {
+        const result = listSynthPlugins(REPO_ROOT);
+        out = JSON.stringify(result, null, 2);
+        break;
+      }
       default:
         throw new Error(`unknown tool: ${name}`);
     }

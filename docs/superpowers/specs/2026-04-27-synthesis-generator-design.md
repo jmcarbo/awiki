@@ -1,7 +1,7 @@
 # Synthesis Generator Framework — Design
 
 **Date:** 2026-04-27
-**Status:** Round 2 — code-review fixes applied (pending user written-spec review)
+**Status:** Round 3 — code-review fixes applied (pending user written-spec review)
 **Type:** Feature on top of awiki v1 (post-master-plan addition)
 **Depends on:** Master plan phases 1, 2, 3, 6, 8, 12
 
@@ -126,7 +126,8 @@ Adds one new layer (`synthesis-plugins/`) and extends three existing ones
   via plugin registry. Existing `synthesis|deck|chart|canvas` enum gains
   optional frontmatter `plugin: <name>`.
 - `WIKI.md` Section 7 (Lint Checklist): add S1-S9 to mechanical list, with
-  S5/S6/S8 as warnings, S7 as info, S1-S4/S9 as errors.
+  S5/S6/S8 as warnings, S7 as info (promotes to warning at N>20),
+  S1-S4/S9 as errors.
 - `scripts/lint.sh` sources `scripts/lint-synth.sh` for synth-specific rules;
   new `--only=synth` flag.
 - `scripts/update-catalog.sh` recognizes synthesis pages with `plugin:` and
@@ -356,7 +357,10 @@ want. Treated as additional context (knowledge), not as instructions.
   records the resolved slug list into frontmatter `sources:` at gen-time,
   and S5 is a no-op for query-scoped pages. Re-resolution still happens on
   every `regen`; the user can compare current `sources:` to the prior
-  version via git diff.
+  version via git diff. Recommended recipe to inspect query-scope drift
+  before promoting: `synth.sh regen --stage <slug>` then
+  `git diff content/synthesis/<slug>.md content/synthesis/.staged/<slug>.md`
+  (frontmatter `sources:` delta shows which slugs entered/left the scope).
 - Region between markers = exclusively machine-managed. Lint warns on edits
   inside (S6).
 - Plugin prompt explicitly instructs agent NOT to touch content outside
@@ -433,14 +437,20 @@ Operates on `.staged/<slug>.md` if present, otherwise on the live page (see
    END). Exit 5 if invalid.
 2. Run scoped lint: `lint.sh --only=synth --file=<path>` — checks required
    sections, evidence-quote substrings, citation-slug existence,
-   aggregate-evidence cap. Exit 6 on lint failure.
+   aggregate-evidence cap. Exit 6 on lint failure. **Phase note:** phase 13
+   ships `synth.sh` before `lint.sh` learns `--only=synth` / `--file`
+   (those land in phase 14). During phase 13, `finalize`'s lint shell-out
+   is a no-op pass-through (unknown flags swallowed; exit 0 assumed); full
+   S1–S9 enforcement at finalize-time activates with phase 14.
 3. On clean lint: stamp `last_generated` to now-UTC, re-hash scope, update
    BEGIN marker `scope_hash`, populate frontmatter `sources:` from resolved
    slug list.
 4. Append `log-append.sh synth "<plugin> <topic>"`.
 5. Increment `.awiki/ingest-count` (synthesis counts toward auto-lint
    cadence).
-6. Suggest catalog update (`scripts/update-catalog.sh`).
+6. Suggest catalog update: print `next: bash scripts/update-catalog.sh` to
+   stderr. The orchestrator does NOT auto-invoke it (catalog rebuilds are
+   user-paced and may aggregate multiple synth runs).
 7. Exit 0. Lint failures = exit 6 with structured output, agent retries.
 
 ### `synth.sh regen`
@@ -511,7 +521,13 @@ plugin parses, exit 1 if none do.
 1. Read target page; locate `## Feedback` section. Create it (above markers,
    below `## Notes` if present) if absent.
 2. Append `- <note>` as a bullet. Idempotent: skip if exact-duplicate bullet
-   already present.
+   already present. **Backtick handling:** before appending, replace any
+   run of three-or-more backticks in `<note>` with three single-quoted
+   `'''` characters (or any non-backtick placeholder). Reason: the regen
+   prompt wraps feedback bullets in a ` ```text ` fenced block; an
+   unescaped triple-backtick inside a bullet would close the fence early
+   and break the prompt-injection guard. Escape happens at append-time so
+   the on-disk page is the canonical safe form.
 3. Bump frontmatter `last_updated` to today (ISO date). Do NOT touch
    `last_generated`.
 4. Print appended bullet for confirmation. Do NOT trigger regen
@@ -530,7 +546,7 @@ positional args.
 |------|---------|--------------------------|
 | 0 | OK | all |
 | 1 | Plugin missing/invalid; or `list` finds zero parseable plugins | `new`, `list` |
-| 2 | Scope resolution failure (too few/many sources, invalid filter); or scope-includes-private without target privacy (S6-fail) | `new`, `regen`, `resolve` |
+| 2 | Scope resolution failure (too few/many sources, invalid filter); or scope-includes-private without target privacy (privacy fail-closed; `--allow-private` overrides) | `new`, `regen`, `resolve` |
 | 3 | Target page already exists (use `regen`) | `new` |
 | 4 | Hand-edit detected; pass `--force` or `--stage` | `regen` |
 | 5 | Marker integrity failure | `finalize`, `accept-stage` |
@@ -645,7 +661,7 @@ call `finalize_synthesis`. Same outcome as the CLI path.
 ## Lint Rules + Anti-Hallucination
 
 Nine synth-namespaced rules: **five hard-fail errors (S1-S4, S9), three
-warnings (S5, S6, S8), one info metric (S7)**. All emit
+warnings (S5, S6, S8), one tiered metric (S7: info ≤20, warning >20)**. All emit
 `LINT|<level>|<file>|S<n>: <msg>` per existing convention. Rule names use
 the `S` prefix to keep them distinguishable from existing master-spec lint
 output (which is name-keyed) and to reserve the `S` namespace for synth.
@@ -659,7 +675,7 @@ Implemented in `scripts/lint-synth.sh`, sourced by `lint.sh`.
 | S4 | Citation slug in scope | error | Every `[[slug]]` in the generated region resolves AND is in resolved scope. Catches agent citing out-of-scope pages. |
 | S5 | Scope drift | warning | Recompute `scope_hash`. If differs, "N new sources, M removed since last regen — consider `just synth-regen`". **Skipped for `query`-scoped pages** (qmd is non-deterministic). |
 | S6 | Hand-edit inside markers | warning | `last_updated > last_generated` AND working-tree diff (vs `git show HEAD:<path>`) intersects the generated region. Filesystem mtime is NOT used — `last_updated` is the durable signal. Diffs that touch only frontmatter (excluding `last_generated`/`sources`), lead paragraph, `## Notes`, or `## Feedback` do NOT trigger. |
-| S7 | Feedback count metric | info | `feedback_count=N` reported in synth-lint summary. |
+| S7 | Feedback count metric | info ≤20, warning >20 | `feedback_count=N` reported in synth-lint summary. If N > 20, level promotes to warning ("consider scope refactor or page split"). |
 | S8 | Out-of-scope feedback ref | warning | A `## Feedback` bullet contains a `[[slug]]` not in resolved scope → "feedback references out-of-scope page; widen scope or remove bullet". |
 | S9 | Aggregate evidence words | error | Sum of words across all `> "quote"` lines exceeds plugin manifest's `max_evidence_total_words` (default 500). Fail-closed defense against accidental near-reproduction of a single source via cumulative quoting (especially `study-guide` w/ `min_sources: 1`). |
 
@@ -898,6 +914,11 @@ max_evidence_total_words: 300       # tighter than default 500: study-guides
                                     # quote across many cards; aggregate cap
                                     # protects against near-reproduction of a
                                     # single copyrighted source.
+                                    # When studying a single copyrighted
+                                    # textbook chapter (min_sources: 1),
+                                    # consider overriding lower (e.g. 150)
+                                    # via per-page frontmatter to stay well
+                                    # inside fair-use bounds.
 required_sections:
   - "## Concept Checklist"
   - "## Short-Answer Questions"
@@ -1009,14 +1030,59 @@ CI per existing soft-dep convention.
 | Hallucinated evidence quotes | S3 substring check is hard-fail. No way to ship a synthesis page with an unverifiable quote past `finalize`. |
 | Out-of-scope citations | S4 hard-fail. Agent can't cite a page outside the resolved scope. |
 | Aggregate-quote near-reproduction of a copyrighted single source | S9 hard-fail caps total evidence words per page (default 500). Plugins ship with sane defaults; user can lower per-page via manifest override or per-source via `## Feedback`. |
-| Prompt injection via `## Feedback` content | Bullets are interpolated into the regen prompt inside a ` ```text ` fenced block, so marker-mimicry strings render as inert text. |
+| Prompt injection via `## Feedback` content | Bullets are interpolated into the regen prompt inside a ` ```text ` fenced block, so marker-mimicry strings render as inert text. `synth.sh refine` additionally escapes triple-backtick runs at append-time so a bullet cannot close the fence early. Hand-edited `## Feedback` bullets are user-trusted (curated; under user control) but the same escape is applied by the prompt builder before injection as defense-in-depth. |
 | Prompt injection via source content | Sources are interpolated into the prompt as data (page lead paragraphs, slugs). Plugin prompt instructs the agent to treat source content as quoted material, not commands. |
 | S3 fuzzy-match code-injection via crafted source | The Python helper is a separate file (`scripts/lint-synth-fuzzy.py`) invoked with file-path arguments — never `python3 -c` with interpolated content. Implementer-facing instruction in S3 detail forbids the `-c` form. |
 | Synthesis-of-private-content escalation | Scope resolution **fails closed** (exit 2) if any resolved source has `tags: [private]` and the target synthesis page is not under `content/private/`. User must either tag the synthesis page private (and place it under `content/private/`) or pass `--allow-private` to acknowledge intentional declassification (logged via `log-append.sh synth-declassify`). |
 | MCP `synthesize` arg injection | All three args validated by JSON Schema before any shell-out: `plugin` and `topic_slug` against `^[a-z][a-z0-9-]*$` / `^[a-z0-9][a-z0-9-]*$`, `scope_descriptor` against the inline schema. After regex validation, the resolved manifest path is `realpath`-checked to be a child of `synthesis-plugins/` (closes symlink-swap TOCTOU). All shell-outs use `execFileSync` with argv arrays and `--` flag terminators. |
 | Slug leading-hyphen flag-injection | Slug regex `^[a-z0-9][a-z0-9-]*$` excludes leading `-`. All `synth.sh` shell-outs and justfile recipes use `--` to terminate flag parsing before positional args. |
-| User-authored plugin runs untrusted code | Single-file plugins are prompt-only — no code execution. Directory-form plugins with `post.sh` ARE arbitrary code. **Default off**: `.awiki/config` ships with `ALLOW_PLUGIN_POST_HOOKS=0`; `synth.sh` refuses to invoke any `post.sh` until the user explicitly flips it (BOOTSTRAP can prompt; otherwise hand-edit). WIKI.md additionally warns: "Treat third-party `synthesis-plugins/<name>/post.sh` as untrusted shell code; review before flipping the flag." |
-| Anki export leaks data | `synth-export-anki.sh` writes locally to `.awiki/exports/` (gitignored); no network upload. User imports manually. |
+| User-authored plugin runs untrusted code | Single-file plugins are prompt-only — no code execution. Directory-form plugins with `post.sh` ARE arbitrary code. **Default off**: `.awiki/config` ships with `ALLOW_PLUGIN_POST_HOOKS=0`; `synth.sh` refuses to invoke any `post.sh` until the user explicitly flips it via hand-edit. (No BOOTSTRAP prompt in v1; future BOOTSTRAP revisions may add one.) WIKI.md additionally warns: "Treat third-party `synthesis-plugins/<name>/post.sh` as untrusted shell code; review before flipping the flag." |
+| Anki export leaks data | `synth-export-anki.sh` writes locally to `.awiki/exports/`; no network upload. User imports manually. The `.awiki/exports/` path inherits the master spec's `/.awiki/` gitignore entry (phase 1) — no per-export gitignore rule needed. |
+
+---
+
+## Production Readiness
+
+### Rate-limit / cost controls (LLM)
+
+`synth.sh` performs no LLM calls. Generation is agent-driven: the orchestrator
+emits a prompt; the agent's harness executes it. **Rate-limiting and cost
+caps are out of scope for awiki and delegated to the calling agent harness.**
+Idempotency is local-only: `synth.sh new` exits 3 if the target page already
+exists (caller must use `regen`); back-to-back `synthesize(plugin, topic)`
+MCP calls for the same `(plugin, topic)` pair within one second hit exit 3
+on the second call, so duplicate scaffolds are mechanically prevented but
+duplicate **generations** (agent calling `regen` in a loop) are not — that's
+the harness's responsibility.
+
+### Rollback
+
+The generated region is the only machine-managed zone. Rollback substrate is
+git: `git checkout HEAD -- content/synthesis/<slug>.md` reverts a bad
+non-staged regen. For staged regen (`regen --stage`), discarding is just
+`rm content/synthesis/.staged/<slug>.md` before `accept-stage`. No bespoke
+rollback command — git is the durable history.
+
+### Observability
+
+Success paths: `log-append.sh synth-scaffold`, `log-append.sh synth`,
+`log-append.sh synth-declassify` (already specified). **Failure paths:** on
+any non-zero exit from `synth.sh`, the orchestrator additionally appends
+`log-append.sh synth-error "<exit_code> <subcommand> <slug>"` before
+exiting. This gives an automated agent loop a parseable failure trail
+(exits 4/5/6 are common during iterative refinement). The error log entry
+is best-effort: if `log-append.sh` itself fails, the original exit code is
+still returned.
+
+### `scope_hash` collision tradeoff
+
+6-char prefix of SHA-256 over the sorted resolved-slug list. Collision
+probability per regen: ~2^-24 (~6 × 10^-8). Acceptable because the
+comparison is single-page-local (current vs prior hash on the same page),
+not a global namespace. Full SHA-256 is recomputed every check; only the
+prefix is stored. Collision risk: a regen with an actually-different scope
+that happens to hash to the same 6 hex chars as the prior one — would skip
+the S5 drift warning. Deemed acceptable for a single-user wiki tool.
 
 ---
 
@@ -1074,8 +1140,10 @@ which edit at which step):
   collision with future top-level numbering.*
 - `WIKI.md` Section 6 (Output Formats) — phase 13 documents
   `plugin: <name>` frontmatter on the existing `type: synthesis` entries.
-- `WIKI.md` Section 7 (Lint Checklist) — phase 13 adds S1-S2; phase 14
-  adds S3-S6 and S9; phase 15 adds S7-S8.
+- `WIKI.md` Section 7 (Lint Checklist) — phase 13 lands placeholder rows
+  for S1-S2 (marker integrity, required sections — implementable without
+  fuzzy match or aggregate-cap logic); phase 14 fleshes those out and adds
+  S3-S6 and S9; phase 15 adds S7-S8.
 - `README.md` smoke-test section — phase 13 adds the briefing smoke test;
   phase 14 expands to cover all four plugins.
 - `docs/just-help.txt` — phase 13 documents `synth`, `synth-finalize`,

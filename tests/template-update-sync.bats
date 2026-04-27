@@ -88,3 +88,75 @@ EOF
   grep -q 'filter=git-crypt' .gitattributes
   rm -rf "$TMP_NEW"
 }
+
+@test "sync apply-new-file overwrite: copies into user tree" {
+  cd "$TMP"
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-new-file \
+    --new-tree "$V1" --user-tree "$TMP" --rel scripts/new-helper.sh \
+    --decision overwrite
+  [ "$status" -eq 0 ]
+  [ -f scripts/new-helper.sh ]
+}
+
+@test "sync apply-new-file skip: does not copy" {
+  cd "$TMP"
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-new-file \
+    --new-tree "$V1" --user-tree "$TMP" --rel scripts/new-helper.sh \
+    --decision skip
+  [ "$status" -eq 0 ]
+  [ ! -f scripts/new-helper.sh ]
+}
+
+@test "sync apply-new-file mark-as-user-deleted: does not copy" {
+  cd "$TMP"
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-new-file \
+    --new-tree "$V1" --user-tree "$TMP" --rel scripts/new-helper.sh \
+    --decision mark-as-user-deleted
+  [ "$status" -eq 0 ]
+  [ ! -f scripts/new-helper.sh ]
+}
+
+@test "sync apply-deletion remove: deletes file" {
+  cd "$TMP"
+  mkdir -p scripts && echo x > scripts/old.sh
+  git add . && git -c user.email=a@b -c user.name=t commit -q -m add
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-deletion \
+    --user-tree "$TMP" --rel scripts/old.sh --decision remove
+  [ "$status" -eq 0 ]
+  [ ! -f scripts/old.sh ]
+}
+
+@test "sync apply-deletion preserve-local: keeps file" {
+  cd "$TMP"
+  mkdir -p scripts && echo x > scripts/keepme.sh
+  git add . && git -c user.email=a@b -c user.name=t commit -q -m add
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" apply-deletion \
+    --user-tree "$TMP" --rel scripts/keepme.sh --decision preserve-local
+  [ "$status" -eq 0 ]
+  [ -f scripts/keepme.sh ]
+}
+
+@test "sync has-conflict-markers: detects" {
+  cd "$TMP"
+  cat > WIKI.md <<EOF
+<<<<<<< current
+a
+=======
+b
+>>>>>>> new
+EOF
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" has-conflict-markers \
+    --tree "$TMP" --paths WIKI.md
+  [ "$status" -eq 1 ]
+}
+
+@test "sync has-conflict-markers: clean file -> no detection" {
+  cd "$TMP"
+  echo clean > WIKI.md
+  run python3 "$REPO_ROOT/scripts/_template_helpers/sync.py" has-conflict-markers \
+    --tree "$TMP" --paths WIKI.md
+  [ "$status" -eq 0 ]
+}

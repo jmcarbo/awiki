@@ -120,6 +120,54 @@ def cmd_apply_attributes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apply_new_file(args: argparse.Namespace) -> int:
+    src = args.new_tree / args.rel
+    dst = args.user_tree / args.rel
+    if args.decision == "skip":
+        return 0
+    if args.decision == "overwrite":
+        if not src.is_file():
+            print(f"source not found: {src}", file=sys.stderr)
+            return 1
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        dst.chmod(src.stat().st_mode)
+        return 0
+    if args.decision == "mark-as-user-deleted":
+        # Caller (orchestrator) records the deletion in template.json.deleted[]
+        # via state.py add-deleted-pending. Nothing to do on disk.
+        return 0
+    print(f"unknown decision: {args.decision}", file=sys.stderr)
+    return 2
+
+
+def cmd_apply_deletion(args: argparse.Namespace) -> int:
+    target = args.user_tree / args.rel
+    if args.decision == "preserve-local":
+        return 0
+    if args.decision == "remove":
+        if target.is_file():
+            target.unlink()
+        return 0
+    print(f"unknown decision: {args.decision}", file=sys.stderr)
+    return 2
+
+
+def cmd_has_conflict_markers(args: argparse.Namespace) -> int:
+    found = False
+    for p in args.paths:
+        full = args.tree / p
+        if not full.is_file():
+            continue
+        with full.open("rb") as f:
+            for line in f:
+                if line.startswith(b"<<<<<<<"):
+                    found = True
+                    print(p)
+                    break
+    return 1 if found else 0
+
+
 def _add_overwrite(sub):
     p = sub.add_parser("apply-overwrite")
     p.add_argument("--new-tree", required=True, type=Path)
@@ -144,6 +192,28 @@ def _add_attributes(sub):
     p.add_argument("--accept-attribute-changes", action="store_true")
 
 
+def _add_new_file(sub):
+    p = sub.add_parser("apply-new-file")
+    p.add_argument("--new-tree", required=True, type=Path)
+    p.add_argument("--user-tree", required=True, type=Path)
+    p.add_argument("--rel", required=True)
+    p.add_argument("--decision", required=True,
+                   choices=["overwrite", "skip", "mark-as-user-deleted"])
+
+
+def _add_deletion(sub):
+    p = sub.add_parser("apply-deletion")
+    p.add_argument("--user-tree", required=True, type=Path)
+    p.add_argument("--rel", required=True)
+    p.add_argument("--decision", required=True, choices=["remove", "preserve-local"])
+
+
+def _add_has_markers(sub):
+    p = sub.add_parser("has-conflict-markers")
+    p.add_argument("--tree", required=True, type=Path)
+    p.add_argument("--paths", required=True, nargs="+")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -151,12 +221,18 @@ def main() -> int:
     _add_overwrite(sub)
     _add_three_way(sub)
     _add_attributes(sub)
+    _add_new_file(sub)
+    _add_deletion(sub)
+    _add_has_markers(sub)
 
     args = parser.parse_args()
     dispatch = {
         "apply-overwrite": cmd_apply_overwrite,
         "apply-three-way": cmd_apply_three_way,
         "apply-attributes": cmd_apply_attributes,
+        "apply-new-file": cmd_apply_new_file,
+        "apply-deletion": cmd_apply_deletion,
+        "has-conflict-markers": cmd_has_conflict_markers,
     }
     return dispatch[args.cmd](args)
 

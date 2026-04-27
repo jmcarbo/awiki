@@ -154,7 +154,9 @@ type: project
 ---
 - [ ] thing @phone due:2026/4/27 ^ax01
 EOM
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  # --fix may exit non-zero (e.g., T8 warning about active-but-empty pages).
+  # Use `run` so the test only validates the file-content change.
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   run grep -F 'due:2026-04-27' "$WORK/content/projects/page.md"
   [ -n "$output" ]
 }
@@ -162,9 +164,9 @@ EOM
 @test "lint --fix is idempotent (second run is no-op)" {
   cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
   AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   cp -R "$WORK/content" "$WORK/content_run1"
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   diff -r "$WORK/content_run1" "$WORK/content"
 }
 
@@ -181,7 +183,119 @@ last_updated: 2026-04-27
 ---
 - [ ] no id yet @phone
 EOM
-  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
+  # --fix may exit non-zero (T8 warning until ^id is minted and scanner reruns).
+  run env AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/lint.sh" --only=task --fix
   run grep -E '\^[a-z0-9]{8}' "$WORK/content/projects/p.md"
   [ -n "$output" ]
+}
+
+# --- T8: no-next-action (warn) -------------------------------------------
+
+@test "T8 fires on active project with no open actions" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/idle.md" <<'EOF'
+---
+title: "Idle"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+(none)
+
+## Done
+
+- [x] something old @computer done:2025-12-01 ^old1
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T8:"* ]]
+  [[ "$output" == *"content/projects/idle.md"* ]]
+}
+
+@test "T8 silent on _loose.md (catch-all exemption)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/_loose.md" <<'EOF'
+---
+title: "Loose"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/_loose.md|T8' <<< "$output"
+}
+
+@test "T8 silent on _someday.md (catch-all exemption)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/_someday.md" <<'EOF'
+---
+title: "Someday"
+type: project
+status: someday
+draft: false
+---
+
+## Open Actions
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/_someday.md|T8' <<< "$output"
+}
+
+@test "T8 silent on status: someday and status: done projects" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/dormant.md" <<'EOF'
+---
+title: "Dormant"
+type: project
+status: someday
+draft: false
+---
+EOF
+  cat > "$WORK/content/projects/finished.md" <<'EOF'
+---
+title: "Finished"
+type: project
+status: done
+draft: false
+---
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/projects/(dormant|finished)\.md\|T8' <<< "$output"
+}
+
+@test "T8 in-progress [/] counts as an open action" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  cat > "$WORK/content/projects/working.md" <<'EOF'
+---
+title: "Working"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+- [/] in progress @computer ^w01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'content/projects/working.md|T8' <<< "$output"
+}
+
+@test "T8 silent on good fixture (every active project has open actions)" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T8:' <<< "$output"
 }

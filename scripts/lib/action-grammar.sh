@@ -360,6 +360,41 @@ awiki_recur_chain_has_ge() {
   return 1
 }
 
+# Read a frontmatter scalar value by key from a markdown page. Returns the
+# bare value with any wrapping single/double quotes stripped. Empty string if
+# the key is absent or not a scalar (lists/maps return empty).
+# Only inspects the leading `---` ... `---` frontmatter block.
+awiki_frontmatter_value() {
+  local page="$1" key="$2"
+  [[ -f "$page" ]] || { printf ''; return 0; }
+  awk -v key="$key" '
+    BEGIN { in_fm = 0; saw_open = 0 }
+    /^---[[:space:]]*$/ {
+      if (!saw_open) { saw_open = 1; in_fm = 1; next }
+      else           { exit }
+    }
+    !in_fm { next }
+    {
+      # Match `key: value` (allow spaces around colon).
+      if (match($0, /^[A-Za-z_][A-Za-z0-9_-]*:/)) {
+        k = substr($0, 1, RLENGTH - 1)
+        if (k == key) {
+          v = substr($0, RLENGTH + 1)
+          sub(/^[[:space:]]+/, "", v)
+          sub(/[[:space:]]+$/, "", v)
+          # Strip wrapping quotes.
+          if (v ~ /^".*"$/) { v = substr(v, 2, length(v) - 2) }
+          else if (v ~ /^'\''.*'\''$/) { v = substr(v, 2, length(v) - 2) }
+          # Empty list/map markers return empty.
+          if (v ~ /^\[/ || v ~ /^\{/) v = ""
+          print v
+          exit
+        }
+      }
+    }
+  ' "$page"
+}
+
 # awiki_date_add_months <YYYY-MM-DD> <N>  — month-add with last-day clamp.
 # 2026-01-31 + 1m -> 2026-02-28 (clamp). 2024-01-31 + 1m -> 2024-02-29 (leap).
 awiki_date_add_months() {

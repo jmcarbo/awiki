@@ -119,6 +119,7 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T5   "$actions_tsv"
   awiki_lint_task_rule_T6   "$actions_tsv" "$alias_map"
   awiki_lint_task_rule_T7
+  awiki_lint_task_rule_T8   "$actions_tsv"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
 }
@@ -317,6 +318,50 @@ awiki_lint_task_rule_T7() {
         }
       }
     ' "$f"
+  done < <(find "$content_dir" -type f -name '*.md' 2>/dev/null | sort)
+}
+
+# T8: type:project, status:active page with zero open [ ]/[/] action lines.
+# Emits LINT|WARN. Exempt: _loose.md, _someday.md (catch-all pages by spec
+# convention), and any project page whose status is `someday` or `done`.
+awiki_lint_task_rule_T8() {
+  local act="$1"
+  local content_dir="$AWIKI_REPO_ROOT/content"
+  [[ -d "$content_dir" ]] || return 0
+
+  # Build the set of project files (relative path) that have at least one
+  # open action ([ ] or [/]). Read from actions.tsv if present; otherwise
+  # the set is empty (every active project will be flagged).
+  declare -A has_open=()
+  if [[ -f "$act" ]]; then
+    local _id status _text file _rest
+    while IFS=$'\t' read -r _id status _text file _rest; do
+      [[ "$file" == "file" ]] && continue
+      case "$status" in
+        ' '|'/') has_open["$file"]=1 ;;
+      esac
+    done < <(tail -n +2 "$act")
+  fi
+
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local base; base="$(basename "$f")"
+    case "$base" in
+      _loose.md|_someday.md|_index.md) continue ;;
+    esac
+    local relpath="${f#"$AWIKI_REPO_ROOT/"}"
+    local fm_type fm_status
+    fm_type="$(awiki_frontmatter_value "$f" type)"
+    [[ "$fm_type" == "project" ]] || continue
+    fm_status="$(awiki_frontmatter_value "$f" status)"
+    # Only flag explicitly-active project pages. Pages without a status:
+    # frontmatter value (or status:someday|done) are exempt: they are not
+    # claiming to be in the active-work pool.
+    [[ "$fm_status" == "active" ]] || continue
+    if [[ -z "${has_open[$relpath]:-}" ]]; then
+      printf 'LINT|WARN|%s|T8: type:project, status:active page has zero open [ ]/[/] actions\n' \
+        "$relpath"
+    fi
   done < <(find "$content_dir" -type f -name '*.md' 2>/dev/null | sort)
 }
 

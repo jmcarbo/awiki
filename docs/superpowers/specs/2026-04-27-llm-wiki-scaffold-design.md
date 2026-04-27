@@ -316,16 +316,17 @@ YAML, serves both. See Page Conventions above.
 
 Hugo's bundled goldmark does NOT ship a wikilink extension. Authoring uses `[[page-slug]]` for Obsidian compatibility; Hugo rendering requires explicit handling.
 
-**Strategy (chosen approach — pending spike confirmation):**
+**Chosen strategy: preprocessing pipeline.**
 1. Author wikilinks `[[slug]]` and `[[slug|display]]` natively for Obsidian.
-2. `scripts/build.sh` (or `just build`) preprocesses `content/` into `.awiki/build-content/` rewriting `[[slug]]` → `[Display](/<section>/<slug>/)` using a slug→path map built by `lint.sh`. Hugo runs against the preprocessed copy.
-3. Live preview (`just serve`) wraps `hugo server` with a watcher that rewrites on change, OR uses a `_markup/render-link.html` render-hook plus a custom shortcode `{{< wl "slug" >}}` for the small set of cases where preprocessing is impractical.
+2. `scripts/build.sh` preprocesses `content/` into `.awiki/build-content/`, rewriting:
+   - `[[slug]]` → `[<title-from-frontmatter>](/<section>/<slug>/)`
+   - `[[slug|display]]` → `[display](/<section>/<slug>/)`
+   - `[[alias]]` → resolved via alias map built by `lint.sh` (one-pass scan of all frontmatter `aliases:` fields).
+   Slug→path map and alias map are emitted to `.awiki/maps/` (gitignored) for reuse by `lint.sh` and `serve.sh`.
+3. `scripts/serve.sh` wraps `hugo server` against `.awiki/build-content/` and uses `entr` (POSIX) or `fswatch` (macOS) to re-run preprocessing on `content/` changes. Falls back to a 1-second poll loop if neither installed.
+4. `hugo build` recipe runs `build.sh` then `hugo --source .awiki/build-content --destination ../public`.
 
-**Spike required before phase 3 implementation:** confirm preprocessing approach against `hugo-book` theme; alt path = pin a community module like `hugo-wikilinks`. Decision recorded in `docs/decisions/wikilink-rendering.md` after spike.
-
-**Day-one fallback:** if Hugo can't render wikilinks yet, pages still render with `[[slug]]` as inline literal text — Obsidian remains primary browser. Hugo rendering is non-blocking for v1.
-
-Theme default: `hugo-book` (configurable in BOOTSTRAP).
+Alias collisions surface as lint errors; ambiguous aliases must be disambiguated in frontmatter or wikilinks. Theme default: `hugo-book` (configurable in BOOTSTRAP).
 
 ### Obsidian vault config (committed)
 - `.obsidian/app.json` — `attachmentFolderPath: raw/assets/`.
@@ -462,8 +463,9 @@ Contradictions, stale claims, missing concept pages — handled in lint review w
 - **Maintenance:** written once by BOOTSTRAP. Agent does NOT auto-update on ingest. Manual edit only.
 
 ### Section indexes (`content/entities/_index.md`, etc.)
-- **Deferred to v2.** Not part of v1 scaffold. Hugo lists pages in a section via theme defaults; explicit section indexes optional.
-- If a user creates one manually, lint validates it like any other page (frontmatter, no broken wikilinks). No special workflow.
+- BOOTSTRAP creates one per section (entities, concepts, topics, sources, synthesis) with frontmatter `type: section-index`, a one-paragraph placeholder description, and a Hugo shortcode `{{< page-list >}}` that lists all pages of that section.
+- Agent updates the description on first ingest into that section, and only when the section's purpose materially changes thereafter.
+- Lint validates frontmatter and the shortcode is intact; orphan-check exempts section indexes.
 
 ---
 
@@ -475,10 +477,10 @@ Contradictions, stale claims, missing concept pages — handled in lint review w
 - `log_append_test.sh` — assert format, idempotence.
 - `schema_test.sh` — parse all `content/**/*.md` frontmatter, validate per-`type` required fields.
 
-Framework: plain bash + `assert.sh` helper. BOOTSTRAP detects `bats-core` if installed and uses it.
+Framework: `bats-core` (required for `just test`). BOOTSTRAP step 0 dependency check installs it if missing (brew on macOS, apt on Linux); installation failure halts BOOTSTRAP with manual install instructions.
 
 ### CI
-Out of scope for scaffold. `WIKI.md` documents a sample GitHub Actions workflow.
+Phase 9 ships `scheduled/github-action.yml.example` running `just test` and `just lint` on push and on a daily schedule. README documents the copy-and-rename install step. The example uses pinned tool versions matching the Dependencies & Compatibility table.
 
 ### Manual smoke test (in README)
 1. Drop sample source into `raw/inbox/interactive/sample.md`.
@@ -517,36 +519,33 @@ Consolidated risks and mitigations (cross-references the more detailed sections)
 | `qmd` (qntx-labs fork) | optional | n/a | non-blocking; install failure logs warning. |
 | `git-crypt` | optional | 0.7+ | required only if user picks git-crypt encryption. |
 | `age` | optional | 1.0+ | required only if user picks age encryption. |
-| `bats-core` | optional | 1.10+ | recommended for tests; fallback to plain bash + `assert.sh`. |
+| `bats-core` | yes | 1.10+ | required by `just test`; BOOTSTRAP installs via brew/apt. |
 
 OS support: macOS, Linux primary. Windows via WSL2 (native git symlinks unreliable; spec uses stub files instead).
 
 BOOTSTRAP step 0 (added): runs a dependency check, prints OS-specific install hints for missing required tools, halts on missing required deps.
 
-## Spike Requirements (before implementation phase 3+)
-
-1. **Hugo wikilink rendering** — confirm preprocessing approach against `hugo-book`. Output: `docs/decisions/wikilink-rendering.md` with chosen mechanism, version pins, and fallback. Blocker for phase 3 (Hugo render).
-2. **qmd build** — clone `qntx-labs/qmd`, follow upstream README on macOS + Linux, verify `qmd index` and `qmd search` work. Output: pinned toolchain in `install-qmd.sh`. Blocker for phase 4 (qmd integration).
-
 ## Implementation Phases
 
-Spec is sliced into independent plans. Phase 1 is safe to start immediately; later phases depend on the spike outcomes above.
+The full v1 scope is broken into 12 phases. Each phase produces working, testable software on its own and can be merged independently. Phases 1-2 are foundational; phases 3+ are mostly parallelizable. Each phase has its own task-by-task plan in `docs/superpowers/plans/`.
 
-1. **Skeleton** — repo layout, WIKI.md, BOOTSTRAP.md, stub CLAUDE.md/AGENTS.md, README.md, `.gitignore`, `.gitattributes`, justfile (recipe stubs only), empty content + raw dirs with `.gitkeep`.
-2. **Scripts core** — `log-append.sh`, `ingest.sh`, `lint.sh` (mechanical checks only, no `--hugo-check`), tests for each. `.awiki/config`, `.awiki/ingest-count`.
-3. **Hugo render** — pin theme, resolve wikilink approach (post-spike), `hugo.toml`, build/serve recipes. *Blocked on spike 1.*
-4. **qmd integration** — `install-qmd.sh`, `qmd-index.sh`, fallback to grep, MCP option. *Blocked on spike 2.*
-5. **Encryption** — `encrypt-init.sh` (git-crypt + age paths), `.gitattributes` patterns, atomic `.gitignore` flip.
-6. **Tests & lint polish** — `tests/` framework finalized, `lint.sh --fix`, `lint.sh --hugo-check` (post phase 3), pre-commit hook installer.
-7. **Polish** — Obsidian vault config commit, `docs/just-help.txt`, README smoke test, scheduled-lint docs.
+| # | Phase | Depends on | Deliverable |
+|---|-------|------------|-------------|
+| 1 | Skeleton | — | Repo layout, schema docs, gitignore, justfile stubs, dep-check script. |
+| 2 | Scripts core | 1 | `log-append.sh`, `ingest.sh`, `lint.sh` (mechanical), `.awiki/config`, `.awiki/ingest-count`, BATS tests. |
+| 3 | Hugo render | 1 | `build.sh` preprocessor, slug+alias maps, `serve.sh`, `hugo.toml`, theme submodule, smoke render. |
+| 4 | qmd integration | 1 | `install-qmd.sh`, `qmd-index.sh`, MCP option, `.awiki/qmd-status`, grep fallback. |
+| 5 | Encryption | 1, 2 | `encrypt-init.sh` (git-crypt + age), atomic `.gitignore` flip, `.gitattributes` patterns, lint privacy checks. |
+| 6 | Section indexes + catalog v2 | 1, 3 | Hugo `page-list` shortcode, BOOTSTRAP scaffolds section indexes, lint exempts them, catalog cross-link checks. |
+| 7 | Slug rename, deletion, alias resolution | 2, 3 | `rename.sh`, `delete-page.sh`, alias map consumed by preprocessor + lint, alias-collision lint rule. |
+| 8 | MCP wiki-ops server | 2, 4 | `mcp/awiki-server` (Node) exposing `ingest_source`, `query_wiki`, `lint`, `update_catalog`; BOOTSTRAP wiring option for Claude Code. |
+| 9 | Scheduled lint configs | 2 | `scheduled/launchd.plist.example`, `scheduled/systemd.timer.example`, `scheduled/github-action.yml.example`, README docs. |
+| 10 | Auto-deploy templates | 3 | `deploy/netlify.toml`, `deploy/cloudflare-pages.toml`, `deploy/github-pages.yml.example`, README per-target instructions. |
+| 11 | Multimodal ingest helpers | 2 | `scripts/ingest-pdf.sh` (`pdftotext` / `marker`), `scripts/ingest-audio.sh` (`whisper-cpp`), vision-workflow doc in WIKI.md. |
+| 12 | Polish & examples | all | `docs/just-help.txt` finalized, `examples/sample-wiki/` reference, full README smoke test, pre-commit hook installer, Obsidian vault config committed. |
 
-## Open Items / Future Work
+**Spike absorption.** The two unverified assumptions (Hugo wikilink rendering, qmd build) are absorbed into phases 3 and 4 respectively, each starting with a 1-day spike task that validates assumptions and pins toolchain choices before the rest of the phase proceeds. No separate "spike phases."
 
-- MCP server for native wiki ops (escalate when index + qmd insufficient).
-- Pre-built scheduled-lint config for common cron environments.
-- Auto-deploy templates (Netlify, Cloudflare Pages, GitHub Pages).
-- Vision-aware ingest for image-heavy sources (workflow documented; tooling deferred).
-- PDF/audio ingest helpers (currently agent uses ad-hoc tools; `scripts/ingest-pdf.sh` candidate).
-- Section indexes (deferred from v1).
-- Slug rename / page deletion workflow (currently manual; auto-fix candidate).
-- Alias resolution for wikilinks (`[[Bush]]` → `vannevar-bush.md`); requires lint-built alias map.
+**Definition of done per phase.** Phase is complete when: (a) all tasks in the phase plan check off, (b) all phase-level tests pass, (c) phase-level smoke test in README runs clean, (d) phase change is merged to `main` with green pre-commit lint.
+
+**No deferrals beyond v1.** Anything not covered by phases 1-12 is out of scope for this template entirely. Users extend per their domain.

@@ -1,7 +1,7 @@
 # Template Update Mechanism — Design
 
 **Date:** 2026-04-27
-**Status:** Round 2 — applied code-review findings (3 Critical, 12 Important, 14 Minor)
+**Status:** Round 2.5 — applied second-pass review findings (1 Critical, 10 Important, 10 Minor)
 **Type:** Feature on awiki template repository
 **Depends on:** [LLM Wiki Scaffold](2026-04-27-llm-wiki-scaffold-design.md)
 
@@ -68,6 +68,17 @@ The update mechanism executes code shipped from the template source. This sectio
   ```
 - `--accept-source-change` is a one-shot flag (does not persist). Optionally `--persist-source` updates `.awiki/template.json.repo` after success; otherwise pin stays.
 
+### Optional tag-signature verification
+
+Pinning by SHA records identity but does not verify authenticity beyond TLS to the git host. Optional defense: signed tags.
+
+- `--verify-signature` flag invokes `git verify-tag <ref>` (or `git verify-commit <commit>` if `--ref` is a SHA) before treating the fetched tree as trusted. Fails → halt.
+- Trust roots: user's `~/.gnupg/` or `git config gpg.ssh.allowedSignersFile`. Spec does not bundle keys.
+- Configurable via `.awiki/config.require_signature = true` for users who want it always on.
+- v1 ships the flag; defaults off. Document in `docs/template-update.md`. Authors who sign their releases get the audit trail; users opting in get one extra layer.
+
+This is **opt-in** because the canonical awiki upstream may not sign every release in v1; making it mandatory would block legitimate updates.
+
 ### Plan-time review surface
 
 Dry-run plan MUST emit, for each new mechanical migration:
@@ -102,9 +113,11 @@ Lint warns if `pending-prompts/*.md` shows agent-modified timestamps without a c
 |----------------------------------------------|-------------------------------------------------------------------------|
 | Malicious `--source` URL                     | Source-change confirmation; pinned `original_repo`                      |
 | Compromised upstream migrating against repo  | Plan surfaces script content + sha; `--print-migrations` for full body  |
-| Migration exfiltrates secrets                | Stripped env removes auth tokens; users review with `--print-migrations`|
-| LLM prompt rewrites secrets                  | Scope-glob enforced at runner; secrets/, .awiki/, themes/ blocklisted   |
+| Migration exfiltrates secrets                | Stripped env removes auth tokens; `touches:` header enforced post-run; users review with `--print-migrations`. **Asymmetry note:** mechanical migrations have no scope_glob equivalent — `touches:` enforcement (below) is the bound. |
+| Bash migration writes outside declared scope | `touches:` header parsed and enforced: post-run, `git status --porcelain` MUST report only paths matching the declared globs (plus `.awiki/` ban). Halt + revert otherwise. |
+| LLM prompt rewrites secrets                  | Scope-glob enforced at runner; secrets/, .awiki/, themes/, .git/ blocklisted |
 | Silent encryption-pattern flip               | `.gitattributes` uses `attributes_merge` strategy with explicit confirm |
+| Tag/commit forgery on git host               | Optional `--verify-signature` (or `require_signature = true`) checks `git verify-tag` / `git verify-commit` |
 
 The mechanism is **not** a security boundary against the template author. Users running templates they don't trust should not run this.
 
@@ -135,9 +148,11 @@ Layer boundaries: fetch is pure git ops (writes only to `.awiki/template-cache/_
   "version": "1.0.0",
   "commit": "abc123def456...",
   "applied_migrations": [
-    { "id": "0001", "status": "applied" },
-    { "id": "0002", "status": "applied" },
-    { "id": "0003", "status": "skipped", "reason": "user --skip-migration" }
+    { "id": "0001-add-frontmatter-field", "status": "applied" },
+    { "id": "0002-rename-folder", "status": "applied" },
+    { "id": "0003-cleanup", "status": "skipped", "reason": "user --skip-migration" },
+    { "id": "schema-1-to-2", "status": "applied" },
+    { "id": "0007-rewrite-sources-blocks", "status": "applied" }
   ],
   "deleted": [
     { "path": "scripts/ingest-audio.sh", "reason": "no audio sources" }
@@ -152,8 +167,9 @@ Layer boundaries: fetch is pure git ops (writes only to `.awiki/template-cache/_
 Tracked in git so update history is auditable. Rationale for new fields:
 
 - **`original_repo`** — tamper-evident pin set at bootstrap; never auto-modified. Lets audits flag later switches.
-- **`bootstrap_steps_done[].content_hash`** — sha256 of the step body (text between `<!-- bootstrap-step: ID -->` and the next step marker). On update, if the upstream content_hash changes, the step is treated as new (re-prompted) — see §Bootstrap step replay safety.
+- **`bootstrap_steps_done[].content_hash`** — sha256 of the step body (text between `<!-- bootstrap-step: ID -->` and the next step marker). On update, if the upstream content_hash changes, the step is treated as new (re-prompted) — see §Content-hash tracking and §Dangerous steps for the full replay rules.
 - **`bootstrap_steps_done[].status`** — `"applied"` | `"skipped"`. Replaces earlier `skipped: bool` for consistency with `applied_migrations[]`.
+- **`applied_migrations[].id`** — full slug from migration filename (e.g., `0007-rewrite-sources-blocks` for `migrations/0007-rewrite-sources-blocks.sh` or `.prompt.md`). Schema upgrades use `schema-N-to-M` (no zero-padding). Applies uniformly to mechanical, LLM, and schema-upgrade migrations.
 
 All `template.json` writes happen in **Commit D only** (single source of truth at end of cycle). Earlier phases stage data in the orchestrator state file (`.awiki/template-cache/_fetch/.update-state.json`); Commit D reads state and writes once.
 
@@ -198,14 +214,19 @@ ids = ["theme", "wire-qmd-mcp", "wire-awiki-mcp", "install-qmd"]
 | `preserve`         | User wins. Template version ignored.                                                                |
 | `three_way`        | `git merge-file --diff3` with cached ancestor. Conflicts emit `<<<<<<<` markers.                    |
 | `attributes_merge` | Like `three_way` but always blocks for explicit user confirm; runs `git check-attr` audit (below).  |
-| `template_only`    | Same as overwrite, but suppressed from main plan output (infra plumbing). Diff still emitted under `PLAN|template-only-changed|...` for transparency. |
+| `template_only`    | Same as overwrite, but emitted as `PLAN|template_only|...` (silent in human-readable summary, structured stdout still surfaces the diff for transparency). |
 
 ### Glob precedence
 
 Multiple strategies may declare overlapping globs (e.g., `content/**` preserves but `content/log.md` is three_way). Resolution rule:
 
-1. **Most-specific glob wins.** Specificity = (longer literal prefix before any `*`) > (more path segments) > (no double-star).
-2. **Strategy precedence on ties:** `template_only` > `attributes_merge` > `three_way` > `overwrite` > `preserve` > `new_file_default`.
+1. **Most-specific glob wins.** Specificity computed in this order, descending:
+   1. Longer literal prefix before any `*`.
+   2. More path segments (separators).
+   3. No `**` beats has-`**`.
+   4. Lexicographic order of the glob string (final tie-break, deterministic).
+2. **Strategy precedence on cross-strategy ties** (same specificity, different strategy): `template_only` > `attributes_merge` > `three_way` > `overwrite` > `preserve` > `new_file_default`.
+3. **Same-strategy ties** (same specificity, same strategy): later-declared in the manifest wins. Authors should avoid this — lint warns on identical globs in the same strategy list.
 
 Example resolutions:
 - `content/log.md` matches both `content/**` (preserve) and `content/log.md` (three_way) → `three_way` (longer literal prefix).
@@ -246,19 +267,22 @@ just template-update [
   --ref <sha-or-tag>
   --source <url-or-path>
   --apply
+  --dry-run
   --continue
   --abort
   --status
-  --skip-migration NNNN
+  --skip-migration <id>     # full slug, e.g., 0007-rewrite-sources-blocks
   --schema-upgrade
   --accept-source-change
   --accept-attribute-changes
+  --accept-manual-commits
   --persist-source
   --rerun-bootstrap-step <id>
   --print-migrations
   --re-pin <commit>
   --gc
   --non-interactive
+  --verify-signature
 ]
 ```
 
@@ -266,25 +290,33 @@ Default = dry-run plan. `--apply` mutates.
 
 ### Flag interactions
 
-- `--apply --dry-run` → `--dry-run` wins (no mutation). Documented behavior.
+- `--apply --dry-run` → `--dry-run` wins (no mutation). Documented behavior. Default (no flag) = dry-run.
 - `--continue` without prior failure / state file → halt: "No update in progress."
+- `--accept-manual-commits` → bypasses the "branch HEAD ≠ last_completed_commit" halt during `--continue`. Use after manually editing files / committing on the update branch.
 - `--non-interactive` → all prompts auto-resolve to safe defaults (see §Non-interactive defaults). Required for CI.
 - `--re-pin` is mutually exclusive with `--apply`, `--continue`. Operates on `.awiki/template.json` only; see §Recovery from a bad update.
 - `--gc` cleans orphaned cache dirs without running an update.
+- `--verify-signature` is independent of all phases; verification runs at fetch time, halts early on failure.
 
 ### Phase 0 — preflight
 
+Phase 0 splits into two sub-phases: **0a** runs before fetch (uses only local repo state); **0b** runs after fetch (needs new manifest).
+
+**Phase 0a — pre-fetch preflight (no network, no manifest needed):**
 - **Dirty working tree definition.** Halt if any of:
   - `git diff-index --quiet HEAD --` returns nonzero (staged or unstaged tracked changes).
-  - `git ls-files --others --exclude-standard` is non-empty (untracked files matching .gitignore allowlist still count).
+  - `git ls-files --others --exclude-standard` is non-empty (untracked files NOT ignored by `.gitignore`).
   - Submodule (`themes/*`) has uncommitted changes (`git submodule status` shows `+` or `-`).
-  - The `_fetch` directory is dirty (would be — but we own that path; not user's concern).
-- **Branch check.** Verify on main (or the branch named in `.awiki/config.default_branch`, defaulting to `main`). Halt if on `awiki-template-update/*`.
-- **Encryption preflight.** Run `git-crypt status -e 2>/dev/null || true`. If output non-empty AND any encrypted path matches a `three_way` or `attributes_merge` glob in the OLD manifest, run `git-crypt status` to verify lock state. If locked, halt: "Encrypted paths X, Y, Z would require merge. Run `git-crypt unlock` first."
-- **Pending prompts gate.** If `.awiki/pending-prompts/*.md` is non-empty AND not invoked with `--continue`, halt: "Pending LLM migrations from previous cycle: <list>. Run agent to complete or delete prompts before next update."
+- **Branch check.** Verify on main (or the branch named in `.awiki/config.default_branch`, defaulting to `main`). Halt if on `awiki-template-update/*` (use `--continue` instead).
+- **Encryption preflight.** Run `git-crypt status -e 2>/dev/null || true` (requires git-crypt ≥ 0.6; older versions fall back to `git-crypt status` parsing). If output non-empty AND any encrypted path matches a `three_way` or `attributes_merge` glob in the OLD manifest, run `git-crypt status` to verify lock state. If locked, halt: "Encrypted paths X, Y, Z would require merge. Run `git-crypt unlock` first."
+- **Pending prompts gate.** If `.awiki/pending-prompts/*.md` is non-empty AND not invoked with `--continue`, halt: "Pending LLM migrations from previous cycle: <list>. Run agent to complete or delete prompts before next update." (Note: `--continue` resuming a cycle that staged prompts itself is allowed — the gate applies only when starting a NEW cycle.)
 - **Read pin.** Load `.awiki/template.json` → `{repo, original_repo, commit_old, schema_version}`.
 - **Source-change check.** If `--source` differs from `repo`, halt unless `--accept-source-change`.
-- **Schema-version check.** If template's `schema_version` (read from `_fetch/template.manifest.toml` after Phase 1 — re-evaluate post-fetch) is newer than pin's, halt unless `--schema-upgrade`. See §Schema upgrades.
+
+**Phase 0b — post-fetch preflight (runs immediately after Phase 1):**
+- **Schema-version check.** Read `_fetch/template.manifest.toml.schema_version`. If newer than pin's, run §Schema upgrades flow before continuing. Halt unless `--schema-upgrade`.
+- **Encryption recheck.** Re-run encryption preflight against the NEW manifest's `three_way` and `attributes_merge` globs. New paths covering encrypted files must also be on an unlocked checkout.
+- **Signature verification (if `--verify-signature` or `require_signature = true`):** Run `git verify-tag <ref>` (tag) or `git verify-commit <commit>` (SHA). Halt on failure.
 
 ### Phase 1 — fetch
 
@@ -300,16 +332,40 @@ Default = dry-run plan. `--apply` mutates.
   {
     "phase": "fetch",
     "status": "completed",
-    "commit_old": "...",
-    "commit_new": "...",
-    "branch": "awiki-template-update/<short>",
-    "started_at": "ISO-8601",
+    "commit_old": "abc123...",
+    "commit_new": "def456...",
+    "branch": "awiki-template-update/def456",
+    "started_at": "2026-04-27T15:30:00Z",
     "last_completed_commit": null,
-    "applied_migrations_pending": [],
-    "bootstrap_steps_pending": [],
-    "deletions_user_decisions": {}
+    "applied_migrations_pending": [
+      { "id": "0007-rewrite-sources-blocks", "status": "applied" }
+    ],
+    "bootstrap_steps_pending": [
+      { "id": "domain", "status": "applied", "content_hash": "sha256:abc..." }
+    ],
+    "deletions_user_decisions": {
+      "scripts/old-helper.sh": "preserve-local"
+    }
   }
   ```
+
+  Field shapes:
+  - `applied_migrations_pending[]` items match `applied_migrations[]` in `template.json` (id, status, optional reason).
+  - `bootstrap_steps_pending[]` items match `bootstrap_steps_done[]` in `template.json` (id, status, optional reason, content_hash).
+  - `deletions_user_decisions` is `{path: "remove" | "preserve-local"}`.
+
+### Phase 1.5 — schema upgrade (conditional)
+
+Runs only if Phase 0b detected `schema_version` mismatch AND `--schema-upgrade` was passed.
+
+- **Branch creation happens here**, not later in Phase 3. Branch name `awiki-template-update/<short-commit_new>` (same as regular update). Schema upgrade lands as **Commit 0** on this branch.
+- Run `migrations/schema-NN-to-MM.sh` (read from `_fetch/migrations/`) with stripped env, `.awiki/` writes whitelisted only for the duration of this script.
+- Stage all changes (under `.awiki/` and elsewhere); commit `chore(template): schema upgrade <NN> → <MM>`.
+- Update state file `phase: schema-upgrade`, `status: committed`, `last_completed_commit: <sha>`.
+- After commit, re-evaluate Phase 0b checks (schema_version now matches).
+- If `--schema-upgrade` was the only action requested (no `--apply`), exit 0 here. The orchestrator normally transitions to Phase 2 plan after schema upgrade, but with no `--apply`, plan emits and exits as usual.
+
+The schema upgrade lives on the update branch like any other commit, preserving the "apply mutates only on `awiki-template-update/<sha>` branch" invariant. If the user `--abort`s, schema upgrade is also discarded.
 
 ### Phase 2 — plan (always; dry-run prints + exits)
 
@@ -321,7 +377,7 @@ Diff `commit_old..commit_new` paths against NEW manifest. Categorize per resolve
 - `preserves[]` — no-op, listed.
 - `three_way[]` — predict conflicts via test-merge in `_scratch-merge/`. Emit `PLAN|three_way|<path>|conflict-predicted|<count>` or `clean`.
 - `attributes_merge[]` — same prediction + attribute diff preview.
-- `template_only[]` — diff emitted under `PLAN|template-only-changed|<path>|<note>`.
+- `template_only[]` — diff emitted under `PLAN|template_only|<path>|<note>` (suppressed from human summary; present in structured stdout).
 - `new_files[]` — prompt strategy on apply.
 - `deletions_in_template[]` — would be removed unless locally modified.
 - `user_deleted[]` — confirm skip per `.awiki/template.json.deleted[]`.
@@ -340,37 +396,60 @@ LLM prompt migrations: full body printed in plan unconditionally.
 Bootstrap steps: emit step IDs not in `bootstrap_steps_done[]` OR whose upstream `content_hash` differs from recorded:
 
 ```
-PLAN|bootstrap-step|<id>|new
-PLAN|bootstrap-step|<id>|content-changed|<old-hash>|<new-hash>
-PLAN|bootstrap-step|<id>|dangerous-skipped|<reason>
+PLAN|bootstrap-step-new|<id>
+PLAN|bootstrap-step-content-changed|<id>|<old-hash>|<new-hash>
+PLAN|bootstrap-step-dangerous|<id>|<reason-enum>
 ```
 
-For dangerous steps (`bootstrap.dangerous.ids`), the plan emits `dangerous-skipped` and apply does NOT run them automatically. User runs `just template-update --rerun-bootstrap-step <id>` separately.
+For dangerous steps (`bootstrap.dangerous.ids`), the plan emits `bootstrap-step-dangerous` and apply does NOT run them automatically. User runs `just template-update --rerun-bootstrap-step <id>` separately.
 
 ### Plan output format (formal contract)
 
-Each plan line is pipe-separated with these fields. Pipes inside fields URL-encoded (`%7C`). Lines printed in this order; consumers can rely on it.
+All lines pipe-separated. The line-type field (column 2) determines arity. Each line type has fixed column count.
 
-| line                              | columns                                                              |
-|-----------------------------------|----------------------------------------------------------------------|
-| `PLAN|header|<schema-version>|<commit_old>|<commit_new>`                                                 |
-| `PLAN|overwrite|<path>|<note>`                                                                           |
-| `PLAN|preserve|<path>|<note>`                                                                            |
-| `PLAN|three_way|<path>|<status>|<conflict-count-or-empty>`                                               |
-| `PLAN|attributes_merge|<path>|<status>|<conflict-count>`                                                 |
-| `PLAN|attribute-change|<path>|<old-attrs>|<new-attrs>`                                                   |
-| `PLAN|template_only|<path>|<note>`                                                                       |
-| `PLAN|new_file|<path>|<default-strategy>`                                                                |
-| `PLAN|deletion-in-template|<path>|<locally-modified-bool>`                                               |
-| `PLAN|user-deleted|<path>|<recorded-reason>`                                                             |
-| `PLAN|migration|<NNNN>|<filename>|<diffstat>`                                                            |
-| `PLAN|migration-content|<NNNN>|sha256:<hash>|<lines>`                                                    |
-| `PLAN|migration-prompt|<NNNN>|<filename>|<scope-glob>|<resolved-file-count>`                             |
-| `PLAN|bootstrap-step|<id>|<event>|<extra-cols>`                                                          |
-| `PLAN|prompt|<phase>|<question-id>|<default-on-apply>`                                                   |
-| `PLAN|footer|errors=<n>|warnings=<n>|prompts=<n>|conflicts=<n>`                                          |
+**Escape rules:**
+- Pipe `|` inside any field → `%7C`.
+- Newline inside any field → `%0A`.
+- Percent `%` → `%25`.
+- All other bytes literal. UTF-8 throughout.
 
-Status values: `clean | conflict-predicted | conflict | error`. Reserved `<status>` enum.
+**Line printing order** (consumers can rely on it):
+1. `header` (exactly one).
+2. Sync category lines: `overwrite`, `preserve`, `three_way`, `attributes_merge`, `attribute-change`, `template_only`, `new_file`, `deletion-in-template`, `user-deleted` — interleaved alphabetically by `<path>`.
+3. Migration lines: `migration` + `migration-content` (paired) per `NNNN`, ascending. Then `migration-prompt` per `NNNN`, ascending. Optional `migration-body` blocks if `--print-migrations`.
+4. Bootstrap step lines: one per step ID (different shapes per event).
+5. Prompt lines (deferred prompts that apply will surface).
+6. `footer` (exactly one).
+
+**Per-event line shapes:**
+
+| line type                       | columns (`PLAN|<type>|...`)                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------|
+| `header`                        | `<schema-version>|<commit_old>|<commit_new>`                                      |
+| `overwrite`                     | `<path>|<note>`                                                                   |
+| `preserve`                      | `<path>|<note>`                                                                   |
+| `three_way`                     | `<path>|<status>|<conflict-count>` (count empty if status=clean)                  |
+| `attributes_merge`              | `<path>|<status>|<conflict-count>`                                                |
+| `attribute-change`              | `<path>|<old-attrs>|<new-attrs>`                                                  |
+| `template_only`                 | `<path>|<note>`                                                                   |
+| `new_file`                      | `<path>|<default-strategy>`                                                       |
+| `deletion-in-template`          | `<path>|<locally-modified-bool>`                                                  |
+| `user-deleted`                  | `<path>|<recorded-reason>`                                                        |
+| `migration`                     | `<NNNN>|<filename>|<diffstat>`                                                    |
+| `migration-content`             | `<NNNN>|sha256:<hash>|<lines>`                                                    |
+| `migration-prompt`              | `<NNNN>|<filename>|<scope-glob>|<resolved-file-count>|<risk>`                     |
+| `migration-body`                | `<NNNN>|begin` then raw body lines (escape rules apply) then `<NNNN>|end`         |
+| `bootstrap-step-new`            | `<id>`                                                                            |
+| `bootstrap-step-content-changed`| `<id>|<old-hash>|<new-hash>`                                                      |
+| `bootstrap-step-dangerous`      | `<id>|<reason-enum>` (enum: `marked-dangerous-new`, `marked-dangerous-changed`)   |
+| `prompt`                        | `<phase>|<question-id>|<default-on-apply>`                                        |
+| `footer`                        | `errors=<n>|warnings=<n>|prompts=<n>|conflicts=<n>` (kv form for footer only)     |
+
+`<status>` enum: `clean | conflict-predicted | conflict | error`.
+
+Three explicit rows for `bootstrap-step-*` replace the earlier `bootstrap-step|<event>|<extra-cols>` placeholder. Each row has fixed arity.
+
+Footer is the only line using `key=value`; it's a summary aggregation, not a record. Consumers can detect via the literal `footer` line type.
 
 ### Phase 3 — apply (only with `--apply`)
 
@@ -404,7 +483,8 @@ State file maintained in `.awiki/template-cache/_fetch/.update-state.json` throu
   - Append `applied_migrations[]` entries from state.
   - Append `bootstrap_steps_done[]` entries from state.
   - If `--persist-source`, update `repo` (never `original_repo`).
-- Move `.awiki/template-cache/_fetch` → `.awiki/template-cache/<commit_new>/`. Drop cache dirs by mtime descending, keep latest two (`<commit_new>` + previous).
+- Move `.awiki/template-cache/_fetch` → `.awiki/template-cache/<commit_new>/`.
+- **Cache retention:** keep exactly two `<sha>/` dirs — `<commit_new>` (just installed) and the previous pin. All older are deleted. Selection is by mtime descending (most recently installed kept). `_check-stamp` and `_fetch/` are not `<sha>/` dirs and are unaffected.
 - Delete state file.
 - Commit `chore(template): pin to <version>`.
 
@@ -425,6 +505,8 @@ Print: "Update branch ready. Review with `git diff main`. Merge: `git switch mai
 | `new_file_default` decision                  | `skip`                 |
 | Locally-modified file deleted in template    | `preserve-local`       |
 | Bootstrap step                               | `decline` (skipped)    |
+| Pending prompt with `risk: high`             | `decline` (skipped, recorded with `reason: "non-interactive high-risk"`) |
+| Manual commits on update branch              | halt (requires `--accept-manual-commits`) |
 | Source change                                | halt (requires explicit flag)  |
 | Attribute change                             | halt (requires explicit flag)  |
 | Schema upgrade                               | halt (requires explicit flag)  |
@@ -490,9 +572,11 @@ Two kinds. Numbered sequence shared. Numbering: four-digit zero-padded, monotoni
   # touches: content/synthesis/**/*.md WIKI.md
   # idempotent: yes
   ```
-  `touches` is informational; runner does not enforce it (would be circumventable; the `.awiki/` ban below is the actual constraint).
+  `touches` is **enforced** (see below).
 - **Runner injects stripped env:** `PATH`, `HOME`, `AWIKI_REPO_ROOT`, `AWIKI_TEMPLATE_OLD_VERSION`, `AWIKI_TEMPLATE_NEW_VERSION`, `LANG`, `LC_ALL`. All other env (incl. auth tokens) unset.
-- **Operates on user content.** MUST NOT touch `.awiki/`. Runner enforces by setting up an inotify-style audit (Linux) or post-run `git status .awiki/` check (portable). If migration wrote to `.awiki/`, runner fails and reverts the migration's working-tree changes. Schema-upgrade migrations bypass via `--schema-upgrade` flag.
+- **Operates on user content.** MUST NOT touch `.awiki/`. Schema-upgrade migrations bypass via `--schema-upgrade` flag.
+- **`touches:` enforcement.** Post-run, runner reads `git status --porcelain` and checks: every modified/added/deleted path matches at least one glob in the migration's `touches:` header. Any path outside declared scope = halt + revert (`git restore --source=HEAD -- <out-of-scope-paths>`) + leave migration unrecorded for retry. The `.awiki/` ban applies regardless of `touches:` (writes to `.awiki/` always fail unless `--schema-upgrade`).
+- **Read-only paths blocklist.** Even with `touches:`, migrations cannot modify `secrets/`, `themes/`, `.git/`. These are unconditional. Runner halts pre-run if `touches:` glob would match these paths.
 - Failure (nonzero exit) → halt update at Commit B. State file records last successful migration. User fixes upstream OR runs `--skip-migration NNNN` and `--continue`.
 - Skip via `--skip-migration NNNN`: recorded as `{id, status: "skipped", reason}` in pending state; runner advances. Never auto-retried.
 
@@ -505,7 +589,7 @@ Markdown with required frontmatter:
 id: 0007-rewrite-sources-blocks
 requires: [agent]
 scope_glob: "content/synthesis/**/*.md"
-risk: medium    # low|medium|high — surfaced in pending-prompts UX
+risk: medium    # low|medium|high — see semantics below
 ---
 ```
 
@@ -513,6 +597,10 @@ risk: medium    # low|medium|high — surfaced in pending-prompts UX
   - Non-empty.
   - MUST NOT match paths under `secrets/`, `.git/`, `.awiki/`, `themes/`, or any `.gitattributes`-encrypted path.
   - Resolved file list written into staged prompt; agent operates on the list, not re-evaluated glob.
+- `risk` semantics:
+  - `low` — staged silently. WIKI.md workflow surfaces to user before action.
+  - `medium` — same as low; UX shows a yellow warning indicator.
+  - `high` — auto-declined under `--non-interactive`. In interactive mode, prompts user with a stronger confirmation ("This migration is marked HIGH RISK. Type 'I have reviewed' to continue."). Used for prompts that touch many files or rewrite load-bearing structure.
 - Body = instructions for agent.
 - Runner stages copy into `.awiki/pending-prompts/<NNNN>-<slug>.md` with metadata block:
   ```
@@ -591,11 +679,14 @@ just template-update --rerun-bootstrap-step wire-awiki-mcp
 ```
 
 This invocation:
-1. Verifies clean tree.
-2. Creates branch `awiki-template-update/rerun-<id>-<timestamp>`.
-3. Runs the step.
-4. Updates `bootstrap_steps_done[].content_hash` to current upstream value.
-5. Commits `chore(template): re-run bootstrap step <id>`.
+1. Verifies clean tree (Phase 0a definition).
+2. Halts if any `awiki-template-update/*` branch exists (resolve or `--abort` first).
+3. Halts if `_fetch/.update-state.json` exists (in-progress update; resolve or `--abort` first).
+4. Halts if `pending-prompts/` non-empty (state inconsistent).
+5. Creates branch `awiki-template-update/rerun-<id>-<timestamp>`.
+6. Runs the step (with same env stripping + source-trust rules as a regular update).
+7. Updates `bootstrap_steps_done[].content_hash` to current upstream value (Commit D-equivalent: single `template.json` write at end).
+8. Commits `chore(template): re-run bootstrap step <id>`.
 
 ### New BOOTSTRAP step (last, before smoke-test)
 
@@ -676,23 +767,52 @@ template-gc:
 │       └── .update-state.json     # orchestrator state for --continue
 ├── pending-prompts/               # tracked once written; cleared by agent
 │   └── NNNN-<slug>.md
-└── config                         # plain k=v: default_branch, no_template_check, ingest threshold, etc.
+└── config                         # see §.awiki/config schema below
 ```
+
+### `.awiki/config` schema
+
+Plain `KEY=value` lines, shell-sourceable. Bare values (no quotes); values containing spaces use `"..."`. Comments start with `#`. Booleans: `true`/`false`.
+
+```
+# .awiki/config
+default_branch=main
+no_template_check=false
+require_signature=false
+ingest_lint_threshold=5
+```
+
+Recognized keys (v1):
+
+| key                    | type   | default | meaning                                                  |
+|------------------------|--------|---------|----------------------------------------------------------|
+| `default_branch`       | string | `main`  | Branch the orchestrator considers "main".                |
+| `no_template_check`    | bool   | `false` | Suppresses update-availability lint info.                |
+| `require_signature`    | bool   | `false` | Forces `--verify-signature` on every update.             |
+| `ingest_lint_threshold`| int    | `5`     | (Pre-existing — used by `scripts/ingest.sh`.)            |
+
+Unknown keys: lint warns. Parser: `awk -F= '!/^#/ && NF==2 {print $1, $2}'` or sourced via `set -a; . .awiki/config; set +a`.
 
 ### Lint additions (`scripts/lint.sh`)
 
 - All BOOTSTRAP step blocks must have `<!-- bootstrap-step: <id> -->`.
 - All IDs in `template.manifest.toml.bootstrap.ordered_steps` must exist in BOOTSTRAP and vice versa (bidirectional).
 - All migration files match `migrations/(NNNN-*\.(sh|prompt\.md)|schema-\d+-to-\d+\.sh)`.
-- LLM prompt frontmatter has required keys (`id`, `requires`, `scope_glob`).
+- LLM prompt frontmatter has required keys (`id`, `requires`, `scope_glob`, `risk`).
+- LLM prompt `risk` value in enum: `low | medium | high`.
 - LLM prompt `scope_glob` does not match secrets/, .awiki/, .git/, themes/.
-- Mechanical migration has required header block (`migration:`, `requires:`, `idempotent:`).
+- Mechanical migration has required header block (`migration:`, `requires:`, `touches:`, `idempotent:`).
+- Mechanical migration `touches:` does not include `secrets/`, `themes/`, `.awiki/`, `.git/` patterns.
 - Warn on `.awiki/pending-prompts/*.md` older than 14 days.
+- Warn on pending-prompt files whose mtime is newer than the most recent `applied_migrations[]` entry referencing the same id (signals undocumented agent run).
 - Warn if `.awiki/template.json.commit` doesn't resolve in current `template-cache/`.
 - Warn if `.awiki/template.json.repo != .awiki/template.json.original_repo`.
 - Warn if `template-cache/_check-stamp` older than 7 days (triggers update-availability check).
 - Warn if `_fetch/.update-state.json` exists outside an active `--continue` session (orphaned state).
+- Warn if `_fetch/_scratch-merge/` exists (orphaned plan-time scratch — safe to delete).
 - Fail if any pending-prompt body references paths outside its declared `scope_glob`.
+- Warn if a manifest strategy list contains identical glob entries (same-strategy tie risk).
+- Warn on unknown keys in `.awiki/config`.
 
 ### Tests
 
@@ -720,14 +840,26 @@ template-gc:
 - LLM prompt with body referencing `.git/` → lint fails.
 - `.gitattributes` change adds `filter=git-crypt` → halt without `--accept-attribute-changes`.
 - `.gitattributes` change removes encryption → audit emitted; halt.
+- Mechanical migration writes outside its declared `touches:` glob → runner reverts + halts.
+- Mechanical migration `touches:` includes `secrets/` → lint fails (pre-run).
+- LLM prompt with `risk: high` under `--non-interactive` → auto-declined and recorded.
+- Plan output with `--print-migrations` includes `migration-body` framing for each script.
+- `--verify-signature` on unsigned tag → halt.
+- `--verify-signature` on validly-signed tag → proceeds.
+- `require_signature=true` in `.awiki/config` → forces verification even without flag.
 
 **Recovery cases:**
 - Orchestrator killed mid-Commit-A → `--continue` re-runs Commit A from clean state.
 - Orchestrator killed mid-Commit-B (after migration 0007 succeeded) → `--continue` resumes at 0008.
 - User commits manually on update branch → `--continue` halts without `--accept-manual-commits`.
+- User commits manually on update branch + `--accept-manual-commits` → resumes successfully.
 - Pin commit not in cache (multi-machine) → auto-recover from `original_repo`.
 - `--re-pin <commit>` rolls back pin; cache rebuilt; tree untouched.
 - `--re-pin` with pending prompts → refuses.
+- `--re-pin` with `original_repo` unreachable (offline) → halt with retrofit instruction.
+- `--re-pin` while update in progress (state file present) → refuses.
+- `--rerun-bootstrap-step <id>` while in-progress update → refuses with halt message.
+- `--rerun-bootstrap-step` on dangerous step with content_hash unchanged → no-op (with confirmation prompt).
 
 **Edge cases:**
 - Encryption preflight: locked git-crypt + three_way path → halt.
@@ -737,7 +869,7 @@ template-gc:
 - Schema upgrade: pin schema=1, template schema=2 → halt; with `--schema-upgrade` runs schema migration first, then proceeds.
 - Bootstrap step content_hash changed → re-prompt.
 - Dangerous step (`theme`) changed → not auto-replayed; `--rerun-bootstrap-step` runs it.
-- `--gc` removes orphaned cache dirs older than current pin minus one.
+- `--gc` removes any `<sha>/` cache dir other than the current pin and its immediate previous (matches Commit D retention).
 
 CI workflow (`tests/template-update-e2e.sh`): bootstrap from previous tag → mutate template (add migration + bootstrap step + new file) → run `template-update --apply --non-interactive --print-migrations` → verify diff matches expected fixture.
 
@@ -759,6 +891,10 @@ CI workflow (`tests/template-update-e2e.sh`): bootstrap from previous tag → mu
 | Concurrent update branches        | Existing `awiki-template-update/<other-sha>` halts: "Resolve or `--abort` first."                                 |
 | Hugo theme version skew           | New shortcode requires newer theme. Build fails. Migration prompt staged: "Bump theme submodule, verify build."   |
 | Migration touches `.awiki/`       | Runner detects via post-run `git status .awiki/`; reverts changes; halts.                                         |
+| Migration writes outside `touches:`| Runner reads `git status --porcelain`, reverts out-of-scope paths via `git restore --source=HEAD`, halts.        |
+| Schema-upgrade flow (Phase 1.5)   | Branch created at schema-upgrade time, schema migration = Commit 0; rest of cycle continues on same branch.       |
+| `--continue` after schema upgrade | State file phase = `schema-upgrade`, status = `committed`. `--continue` resumes at Phase 2 plan or Phase 3 apply. |
+| Update available, user offline    | Lint info suppressed if `git ls-remote` fails (network error); `_check-stamp` not updated.                       |
 | Multi-machine wiki                | Ancestor cache missing on second machine → auto-rebuild from `original_repo` at pinned commit.                    |
 | Template repo renamed/moved       | `git fetch` fails. User edits `.awiki/template.json.repo` manually OR uses `--source <new-url> --persist-source`. |
 | User wants to fork off            | `.awiki/template.json.repo = "none"` (literal) disables update. `template-update` exits 0 with "updates disabled".|
@@ -811,39 +947,44 @@ After 5+ real migrations shipped, evaluate need for: parallel migration executio
 (Renamed from "Open questions" — items deliberately punted to implementation or future iteration.)
 
 1. **Plan output line ordering across implementations.** v1 fixes the ordering listed in §"Plan output format". If a future MCP consumer needs random-access, add an index footer.
-2. **`--gc` retention policy.** v1 = "keep latest two cache dirs by mtime + current pin's prev." May want age-based (>30 days) later.
+2. **`--gc` retention policy.** v1 = "keep current pin + immediate previous (exactly two `<sha>/` dirs)." May add age-based (>30 days) or per-machine policy later.
 3. **Bootstrap step content-hash normalization.** v1 = whitespace-normalize before sha256. May need to ignore comment-style edits later.
 4. **Schema-upgrade migration recording format.** v1 = string ID `schema-N-to-M` in `applied_migrations[]`. May want separate `applied_schema_upgrades[]` later for clarity.
 5. **Update-availability check cadence.** v1 = 7-day stale check via `_check-stamp`. May want exponential backoff if user keeps deferring.
 6. **Migration dependency declaration.** v1 = strictly linear, authors document inline. If 5+ migrations end up with explicit deps, formalize a `requires_migration:` header.
-7. **Phase E migration ergonomics.** Evaluation criteria to be set after 5 real migrations in the wild.
+7. **`touches:` glob granularity.** v1 = top-level glob list. May add per-action declarations (`touches.read`, `touches.write`) for stricter audits.
+8. **Signed-tag bundle.** v1 = optional flag, no bundled keys. Future: ship maintainer pubkey via `.awiki/template-trust.gpg` (committed in template, verified by user once).
+9. **Phase E migration ergonomics.** Evaluation criteria to be set after 5 real migrations in the wild.
 
 ---
 
 ## Implementation phasing summary
 
-1. Manifest schema + parser (incl. glob precedence).
-2. `template-init.sh` + `.awiki/template.json` writer + cache seeding + content_hash for bootstrap steps.
-3. `template-plan.sh` (pure read, formal `PLAN|...` format, scratch-merge for conflict prediction).
-4. `template-merge.sh` wrapper around `git merge-file` (covers `three_way` + `attributes_merge`).
-5. `template-attr-audit.sh` for attribute-change detection.
-6. `template-update.sh` orchestrator: phases 0–1 (preflight, encryption check, source-change check, fetch, ancestor auto-recovery).
-7. `template-update.sh` Phase 2 (plan emit + scratch test-merges).
-8. `template-update.sh` Phase 3 Commit A (sync, including `attributes_merge` flow).
-9. `template-update.sh` Phase 3 Commit B (mechanical migrations with stripped env + `.awiki/` audit + LLM staging with scope_glob enforcement).
-10. `template-update.sh` Phase 3 Commit C (bootstrap steps + content_hash + dangerous-step skip).
-11. `template-update.sh` Phase 3 Commit D (provenance, single template.json write) + state file lifecycle.
-12. `--continue` / `--abort` + state-file recovery.
-13. `--re-pin` + recovery flow.
-14. `--rerun-bootstrap-step` + `--gc` + `--non-interactive`.
-15. BOOTSTRAP.md step ID comments + `template-init` step.
-16. Schema-upgrade flow (`migrations/schema-NN-to-MM.sh`).
-17. Lint additions (incl. scope_glob validation, content_hash, original_repo drift, manifest/BOOTSTRAP parity).
-18. Update-availability check (`_check-stamp`).
-19. `template-retrofit.sh` for pre-v1 repos.
-20. BATS tests (happy + security + recovery + edge cases).
-21. CI E2E (`template-update-e2e.sh`).
-22. WIKI.md workflow update for pending-prompts handling (with user-confirm gate).
-23. Docs (`docs/template-update.md`, ADR, README mention, CHANGELOG entry, `migrations/README.md`).
+1. Manifest schema + parser (incl. glob precedence with full tie-break rules).
+2. `.awiki/config` parser + writer.
+3. `template-init.sh` + `.awiki/template.json` writer + cache seeding + content_hash for bootstrap steps + `original_repo` set-once.
+4. `template-plan.sh` (pure read, formal `PLAN|...` format with escape rules + per-event arity, scratch-merge for conflict prediction).
+5. `template-merge.sh` wrapper around `git merge-file` (covers `three_way` + `attributes_merge`).
+6. `template-attr-audit.sh` for attribute-change detection.
+7. `template-source-check.sh` for source-change confirmation.
+8. `template-update.sh` orchestrator: Phase 0a (pre-fetch preflight) + Phase 1 (fetch, ancestor auto-recovery, optional `--verify-signature`).
+9. `template-update.sh` Phase 0b (post-fetch preflight: schema check, encryption recheck, signature).
+10. `template-update.sh` Phase 1.5 (schema-upgrade flow with branch creation + Commit 0).
+11. `template-update.sh` Phase 2 (plan emit + scratch test-merges).
+12. `template-update.sh` Phase 3 Commit A (sync, including `attributes_merge` flow + `--accept-attribute-changes` gate).
+13. `template-update.sh` Phase 3 Commit B (mechanical migrations with stripped env + `touches:` enforcement + `.awiki/` audit + LLM staging with scope_glob enforcement + `risk` handling).
+14. `template-update.sh` Phase 3 Commit C (bootstrap steps + content_hash diff + dangerous-step skip).
+15. `template-update.sh` Phase 3 Commit D (provenance, single template.json write) + state file lifecycle.
+16. `--continue` (with `--accept-manual-commits`) / `--abort` + state-file recovery.
+17. `--re-pin` + recovery flow.
+18. `--rerun-bootstrap-step <id>` (with full preconditions) + `--gc` + `--non-interactive`.
+19. BOOTSTRAP.md step ID comments + `template-init` step.
+20. Lint additions (scope_glob, risk, content_hash, original_repo drift, manifest/BOOTSTRAP parity, `.awiki/config` keys, identical-glob warnings).
+21. Update-availability check (`_check-stamp`) + `git ls-remote` cached fetch.
+22. `template-retrofit.sh` for pre-v1 repos.
+23. BATS tests (happy + security + recovery + edge cases) — full matrix.
+24. CI E2E (`template-update-e2e.sh`).
+25. WIKI.md workflow update for pending-prompts handling (with user-confirm gate + risk handling).
+26. Docs (`docs/template-update.md`, ADR, README mention, CHANGELOG entry, `migrations/README.md` author guide).
 
 Detailed plan in companion `docs/superpowers/plans/` after spec approval.

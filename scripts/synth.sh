@@ -7,6 +7,20 @@ set -euo pipefail
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 
+# Observability: on any non-zero exit, append a synth-error log entry with
+# exit code, subcommand, and original argv. Set immediately after REPO_ROOT
+# resolves so log-append.sh is reachable; failures inside the trap are
+# swallowed so they never mask the underlying exit code.
+SYNTH_SUBCOMMAND="${1:-unknown}"
+SYNTH_ARGS_JOINED="$*"
+synth_log_error() {
+  local rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    bash "$REPO_ROOT/scripts/log-append.sh" synth-error -- "rc=$rc subcommand=$SYNTH_SUBCOMMAND args=$SYNTH_ARGS_JOINED" 2>/dev/null || true
+  fi
+}
+trap synth_log_error EXIT
+
 # Source repo config if present (defines ALLOW_PLUGIN_POST_HOOKS et al.).
 if [[ -f "$REPO_ROOT/.awiki/config" ]]; then
   # shellcheck disable=SC1091

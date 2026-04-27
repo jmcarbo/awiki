@@ -117,6 +117,23 @@ EOF2
   [ "$status" -ne 0 ]
 }
 
+@test "synth.sh logs synth-error on non-zero exit" {
+  # Trigger usage error: `new` with no args exits 1.
+  AWIKI_LOG_FILE="$WORK/content/log.md" run bash scripts/synth.sh new
+  [ "$status" -ne 0 ]
+  run grep 'synth-error' "$WORK/content/log.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rc="* ]]
+  [[ "$output" == *"subcommand=new"* ]]
+}
+
+@test "synth.sh does not log synth-error on success" {
+  AWIKI_LOG_FILE="$WORK/content/log.md" run bash scripts/synth.sh list
+  [ "$status" -eq 0 ]
+  run grep 'synth-error' "$WORK/content/log.md"
+  [ "$status" -ne 0 ]
+}
+
 @test "synth new exits 1 on bogus plugin" {
   run bash scripts/synth.sh new bogus topic --tag=memex
   [ "$status" -eq 1 ]

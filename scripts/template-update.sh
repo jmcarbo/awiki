@@ -127,6 +127,63 @@ export -f phase_index should_skip_phase
 
 # === Subcommand dispatch (recovery flows) ===
 
+# --continue: resume an in-progress update from the state file.
+if [[ $CONTINUE -eq 1 ]]; then
+  FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"
+  STATE="$FETCH_DIR/.update-state.json"
+  if [[ ! -f "$STATE" ]]; then
+    echo "halt: No update in progress (no state file at $STATE)." >&2
+    exit 1
+  fi
+  PHASE=$(python3 "$HELPERS/state.py" get "$STATE" phase)
+  STATUS_FROM_STATE=$(python3 "$HELPERS/state.py" get "$STATE" status)
+  LAST_SHA=$(python3 "$HELPERS/state.py" get "$STATE" last_completed_commit 2>/dev/null || echo "")
+  BRANCH=$(python3 "$HELPERS/state.py" get "$STATE" branch)
+
+  # Switch to update branch if needed.
+  CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ "$CUR_BRANCH" != "$BRANCH" ]]; then
+    git checkout -q "$BRANCH" 2>/dev/null || { echo "halt: cannot switch to $BRANCH" >&2; exit 1; }
+  fi
+
+  HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [[ -n "$LAST_SHA" && "$LAST_SHA" != "None" && "$LAST_SHA" != "null" \
+        && "$LAST_SHA" != "$HEAD_SHA" && $ACCEPT_MANUAL_COMMITS -eq 0 ]]; then
+    echo "halt: Manual commits detected on update branch (HEAD=$HEAD_SHA, expected=$LAST_SHA). Re-run with --accept-manual-commits." >&2
+    exit 1
+  fi
+
+  echo "info: --continue resuming after phase=$PHASE status=$STATUS_FROM_STATE"
+
+  # If the in-progress phase is "started", roll back to last_completed_commit so the
+  # phase re-runs from a clean slate.
+  if [[ "$STATUS_FROM_STATE" == "started" && -n "$LAST_SHA" \
+        && "$LAST_SHA" != "None" && "$LAST_SHA" != "null" ]]; then
+    git reset --hard "$LAST_SHA" >/dev/null
+  fi
+
+  export CONTINUE_FROM_PHASE="$PHASE"
+  export CONTINUE_FROM_STATUS="$STATUS_FROM_STATE"
+  RESUMED=1
+
+  # Re-derive variables that the linear flow expects.
+  COMMIT_OLD=$(python3 "$HELPERS/state.py" get "$STATE" commit_old)
+  COMMIT_NEW=$(python3 "$HELPERS/state.py" get "$STATE" commit_new)
+  ANCESTOR_DIR="$REPO_ROOT/.awiki/template-cache/$COMMIT_OLD"
+  NEW_MANIFEST="$FETCH_DIR/template.manifest.toml"
+  RESOLVED_SOURCE=$(bash "$SCRIPT_DIR/template-provenance.sh" get "$PJ" repo)
+  SHORT_NEW=$(echo "$COMMIT_NEW" | head -c 12)
+  BRANCH_NAME="$BRANCH"
+  # Force --apply on resume (otherwise we'd just print the plan again).
+  APPLY=1
+  # Re-derive schema for Phase 1.5 gate.
+  if [[ -f "$NEW_MANIFEST" ]]; then
+    NEW_SCHEMA=$(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST" | awk -F= '$1=="schema_version"{print $2}')
+    PIN_SCHEMA=$(python3 -c "import json; print(json.load(open('$PJ'))['schema_version'])")
+  fi
+  # Fall through to linear flow; phase blocks gated by should_skip_phase will skip already-committed work.
+fi
+
 # --abort: clean up _fetch + delete update branch + restore default branch.
 if [[ $ABORT -eq 1 ]]; then
   FETCH_DIR="$REPO_ROOT/.awiki/template-cache/_fetch"

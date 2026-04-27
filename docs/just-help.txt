@@ -111,3 +111,19 @@ SYNTHESIS-EXTRAS
                                 .awiki/exports/<slug>.apkg. Skips gracefully
                                 (exit 0) if the optional `genanki` Python
                                 package is not installed.
+
+TASK LAYER (phase 16)
+  just task-init                Enable the task layer in this wiki.
+                                Idempotent — safe to re-run. Creates inbox,
+                                projects/, contexts/, agenda/ system pages
+                                and patches WIKI.md with the schema block.
+  just capture "<text>"         Append a sanitized capture line to
+                                content/inbox.md. Quote multi-word text.
+                                Sanitization (full): rejects newlines /
+                                control chars / leading-checkbox; truncates
+                                > 2000 chars; neutralizes [[wikilinks]],
+                                <!-- HTML comments -->, ^block-id-shaped
+                                tokens.
+                                Example: just capture "call dentist"
+                                Reports applied rules to stderr as
+                                SANITIZATION-APPLIED|<rule1>,<rule2>,...

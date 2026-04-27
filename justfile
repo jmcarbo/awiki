@@ -91,3 +91,23 @@ test:
 # === help ===
 help:
     @cat docs/just-help.txt
+
+# === task layer (phase 16) ===
+task-init:
+    bash scripts/task-init.sh
+
+capture *text:
+    bash scripts/capture.sh -- {{text}}
+
+# Stubs land in later phases:
+# scan:                                  # phase 17
+#     bash scripts/action-scan.sh
+# agenda:                                # phase 17
+#     bash scripts/action-scan.sh
+#     bash scripts/agenda.sh
+# triage:                                # phase 18
+#     bash scripts/triage.sh --interactive
+# review:                                # phase 19
+#     bash scripts/agenda.sh
+#     bash scripts/lint.sh
+#     bash scripts/review-status.sh

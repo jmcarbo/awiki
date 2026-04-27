@@ -46,6 +46,7 @@ check git "2.30" "brew install git" "apt install git"
 check just "1.13" "brew install just" "cargo install just"
 check hugo "0.120" "brew install hugo" "see https://gohugo.io/installation/"
 check bats "1.10" "brew install bats-core" "apt install bats"
+check flock "n/a" "brew install util-linux  # then add the flock binary to PATH (see brew info util-linux)" "apt install util-linux  # provides /usr/bin/flock"
 check python3 "3.8" "brew install python" "apt install python3"
 
 # Optional tools — warn but do not fail.

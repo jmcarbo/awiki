@@ -105,8 +105,8 @@ last_updated: $today
 draft: false
 ---
 
-<!-- BEGIN managed-region -->
-<!-- END managed-region -->
+<!-- BEGIN agenda:$view -->
+<!-- END agenda:$view -->
 AGENDA
       note "created $f"
     else

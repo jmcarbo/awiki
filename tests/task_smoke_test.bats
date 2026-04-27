@@ -33,7 +33,7 @@ teardown() {
   [ -f .awiki/last-review ]
 
   [ -f content/agenda/next-actions.md ]
-  run grep '^<!-- BEGIN managed-region -->$' content/agenda/next-actions.md
+  run grep '^<!-- BEGIN agenda:next-actions -->$' content/agenda/next-actions.md
   [ "$status" -eq 0 ]
 
   run grep '^<!-- BEGIN task-layer -->$' WIKI.md

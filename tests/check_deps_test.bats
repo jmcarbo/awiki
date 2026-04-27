@@ -12,3 +12,15 @@
   [ "$status" -ne 0 ]
   [[ "$output" == *"git"* ]]
 }
+
+@test "check-deps reports flock when AWIKI_FAKE_MISSING=flock" {
+  run env AWIKI_FAKE_MISSING=flock bash scripts/check-deps.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"flock"* ]]
+}
+
+@test "check-deps prints macOS install hint for flock" {
+  run env AWIKI_FAKE_MISSING=flock bash scripts/check-deps.sh
+  # Hint mentions util-linux on Linux OR flock shim/util-linux on macOS.
+  [[ "$output" == *"util-linux"* || "$output" == *"flock"* ]]
+}

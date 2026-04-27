@@ -164,3 +164,43 @@ teardown() {
   run grep -F 'MY CUSTOM TEXT' WIKI.md
   [ "$status" -eq 0 ]
 }
+
+@test "task-init skips encryption step when no .gitattributes" {
+  run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skip encryption"* ]] || [[ "$output" == *"no git-crypt"* ]]
+}
+
+@test "task-init appends git-crypt patterns when ASSUME_YES" {
+  cat > .gitattributes <<EOF2
+content/private/** filter=git-crypt diff=git-crypt
+EOF2
+  AWIKI_TASK_INIT_ASSUME_YES=1 run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  run grep -F 'content/inbox.md filter=git-crypt diff=git-crypt' .gitattributes
+  [ "$status" -eq 0 ]
+  run grep -F 'content/agenda/** filter=git-crypt diff=git-crypt' .gitattributes
+  [ "$status" -eq 0 ]
+}
+
+@test "task-init does NOT append patterns when ASSUME_NO" {
+  cat > .gitattributes <<EOF2
+content/private/** filter=git-crypt diff=git-crypt
+EOF2
+  AWIKI_TASK_INIT_ASSUME_NO=1 run bash scripts/task-init.sh
+  [ "$status" -eq 0 ]
+  script_output="$output"
+  run grep -F 'content/inbox.md filter=git-crypt' .gitattributes
+  [ "$status" -ne 0 ]
+  [[ "$script_output" == *"WARN"* ]] || [[ "$script_output" == *"declined"* ]]
+}
+
+@test "task-init does not double-append patterns on rerun" {
+  cat > .gitattributes <<EOF2
+content/private/** filter=git-crypt diff=git-crypt
+EOF2
+  AWIKI_TASK_INIT_ASSUME_YES=1 bash scripts/task-init.sh
+  AWIKI_TASK_INIT_ASSUME_YES=1 bash scripts/task-init.sh
+  run grep -c -F 'content/inbox.md filter=git-crypt diff=git-crypt' .gitattributes
+  [[ "$output" == "1" ]]
+}

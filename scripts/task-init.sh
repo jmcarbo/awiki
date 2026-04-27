@@ -191,10 +191,54 @@ step_wiki_md() {
   note "appended task-layer block to WIKI.md"
 }
 
+step_encryption() {
+  local ga=".gitattributes"
+  if [[ ! -f "$ga" ]]; then
+    note "skip encryption (no .gitattributes — encrypt-init has not run)"
+    return 0
+  fi
+  if ! grep -q 'filter=git-crypt diff=git-crypt' "$ga"; then
+    note "skip encryption (no git-crypt section in .gitattributes)"
+    return 0
+  fi
+
+  local need_inbox=0 need_agenda=0
+  grep -q -F 'content/inbox.md filter=git-crypt diff=git-crypt' "$ga" || need_inbox=1
+  grep -q -F 'content/agenda/** filter=git-crypt diff=git-crypt' "$ga" || need_agenda=1
+
+  if [[ $need_inbox -eq 0 && $need_agenda -eq 0 ]]; then
+    note "skip encryption (patterns already present)"
+    return 0
+  fi
+
+  local answer=""
+  if [[ "${AWIKI_TASK_INIT_ASSUME_YES:-0}" == "1" ]]; then
+    answer="y"
+  elif [[ "${AWIKI_TASK_INIT_ASSUME_NO:-0}" == "1" ]]; then
+    answer="n"
+  else
+    echo "Add 'content/inbox.md' and 'content/agenda/**' to git-crypt patterns? (Y/n) "
+    read -r answer || answer="y"
+    answer="${answer:-y}"
+  fi
+
+  case "$answer" in
+    y|Y|yes|YES)
+      [[ $need_inbox -eq 1  ]] && printf -- '\ncontent/inbox.md filter=git-crypt diff=git-crypt\n' >> "$ga"
+      [[ $need_agenda -eq 1 ]] && printf -- 'content/agenda/** filter=git-crypt diff=git-crypt\n' >> "$ga"
+      note "added git-crypt patterns for inbox + agenda"
+      ;;
+    *)
+      warn "encryption patterns declined; agenda pages will exclude private actions (placeholder count only)"
+      ;;
+  esac
+}
+
 main() {
   note "start"
   step_pages
   step_wiki_md
+  step_encryption
   step_config
   step_state_files
   note "done"

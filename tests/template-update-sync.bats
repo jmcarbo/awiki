@@ -160,3 +160,26 @@ EOF
     --tree "$TMP" --paths WIKI.md
   [ "$status" -eq 0 ]
 }
+
+@test "template-update --apply: Commit A creates branch and applies sync" {
+  cd "$TMP"
+  # Pin to v0 (current HEAD); update will move to v1.
+  bash "$REPO_ROOT/scripts/template-init.sh" \
+    --repo "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --ref main --version 0.1.0 --commit "$(git rev-parse HEAD)" >/dev/null
+  git add .awiki
+  git -c user.email=a@b -c user.name=t commit -q -m bootstrap
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V1" --accept-source-change --apply --non-interactive
+  [ "$status" -eq 0 ] || {
+    echo "STATUS=$status"
+    echo "$output"
+    false
+  }
+  CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  [[ "$CUR_BRANCH" =~ ^awiki-template-update/ ]]
+  [ -f scripts/new-helper.sh ]
+  grep -q "Added in v1" WIKI.md
+  git log --format=%s -1 | grep -q "sync to"
+}

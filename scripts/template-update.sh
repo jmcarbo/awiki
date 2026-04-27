@@ -374,5 +374,128 @@ if [[ $APPLY -eq 0 ]]; then
 fi
 fi  # end Phase 2 (skipped on resume)
 
-echo "info: phase 3 not yet implemented (Commit A lands in Phase 05)"
+# === Phase 3 — Commit A: sync ===
+if should_skip_phase commit-a; then
+  echo "info: resume — skipping Commit A"
+else
+SHORT_NEW=$(echo "$COMMIT_NEW" | head -c 12)
+BRANCH_NAME="awiki-template-update/$SHORT_NEW"
+
+# Branch may already exist if Phase 1.5 created it.
+CUR=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CUR" != "$BRANCH_NAME" ]]; then
+  if git rev-parse --verify --quiet "refs/heads/$BRANCH_NAME" >/dev/null; then
+    echo "halt: branch $BRANCH_NAME already exists. Resolve or --abort first." >&2
+    exit 1
+  fi
+  git checkout -q -b "$BRANCH_NAME"
+fi
+
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-a --status started
+
+# Walk plan output line-by-line.
+THREE_PATHS_FOR_MARKER_CHECK=()
+
+while IFS= read -r line; do
+  [[ "$line" =~ ^PLAN\| ]] || continue
+  IFS='|' read -ra parts <<< "$line"
+  TYPE="${parts[1]}"
+  case "$TYPE" in
+    overwrite)
+      python3 "$HELPERS/sync.py" apply-overwrite \
+        --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "${parts[2]}"
+      ;;
+    three_way)
+      REL="${parts[2]}"
+      python3 "$HELPERS/sync.py" apply-three-way \
+        --old-tree "$ANCESTOR_DIR" --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "$REL" || true
+      THREE_PATHS_FOR_MARKER_CHECK+=("$REL")
+      ;;
+    attributes_merge)
+      REL="${parts[2]}"
+      ATTR_ARGS=(--old-tree "$ANCESTOR_DIR" --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "$REL")
+      [[ $ACCEPT_ATTRIBUTE_CHANGES -eq 1 ]] && ATTR_ARGS+=(--accept-attribute-changes)
+      if ! python3 "$HELPERS/sync.py" apply-attributes "${ATTR_ARGS[@]}"; then
+        echo "halt: attributes_merge gate. Re-run with --accept-attribute-changes." >&2
+        exit 1
+      fi
+      THREE_PATHS_FOR_MARKER_CHECK+=("$REL")
+      ;;
+    new_file)
+      REL="${parts[2]}"
+      DECISION="skip"
+      if [[ $NON_INTERACTIVE -eq 0 ]]; then
+        echo "New file from template: $REL"
+        echo "  [o]verwrite  [s]kip  [m]ark-as-user-deleted (default: skip)"
+        read -r -p "> " ans
+        case "$ans" in
+          o|overwrite) DECISION="overwrite" ;;
+          m|mark-as-user-deleted) DECISION="mark-as-user-deleted" ;;
+          *) DECISION="skip" ;;
+        esac
+      fi
+      python3 "$HELPERS/sync.py" apply-new-file \
+        --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "$REL" --decision "$DECISION"
+      # Record mark-as-user-deleted in state so Commit D writes template.json.deleted[].
+      if [[ "$DECISION" == "mark-as-user-deleted" ]]; then
+        python3 "$HELPERS/state.py" add-deleted-pending "$FETCH_DIR/.update-state.json" \
+          --rel "$REL" --reason "user marked at new_file prompt"
+      fi
+      ;;
+    deletion-in-template)
+      REL="${parts[2]}"; LOCAL_MOD="${parts[3]:-false}"
+      DECISION="remove"
+      if [[ "$LOCAL_MOD" == "true" ]]; then
+        if [[ $NON_INTERACTIVE -eq 1 ]]; then
+          DECISION="preserve-local"
+        else
+          echo "Locally-modified file removed in template: $REL"
+          echo "  [r]emove  [p]reserve-local (default: preserve-local)"
+          read -r -p "> " ans
+          if [[ "$ans" =~ ^r ]]; then
+            DECISION="remove"
+          else
+            DECISION="preserve-local"
+          fi
+        fi
+      fi
+      python3 "$HELPERS/sync.py" apply-deletion \
+        --user-tree "$REPO_ROOT" --rel "$REL" --decision "$DECISION"
+      python3 "$HELPERS/state.py" add-deletion-decision "$FETCH_DIR/.update-state.json" \
+        --rel "$REL" --decision "$DECISION"
+      ;;
+    template_only)
+      # Spec: same as overwrite but suppressed from human summary.
+      python3 "$HELPERS/sync.py" apply-overwrite \
+        --new-tree "$FETCH_DIR" --user-tree "$REPO_ROOT" --rel "${parts[2]}"
+      ;;
+    preserve)
+      ;;  # no-op (user wins)
+    *)
+      ;;
+  esac
+done <<< "$PLAN_OUT"
+
+# Halt if conflict markers in any merged path.
+if [[ ${#THREE_PATHS_FOR_MARKER_CHECK[@]} -gt 0 ]]; then
+  if ! python3 "$HELPERS/sync.py" has-conflict-markers --tree "$REPO_ROOT" \
+       --paths "${THREE_PATHS_FOR_MARKER_CHECK[@]}"; then
+    echo "halt: conflict markers present in merged file(s). Resolve and re-run with --continue." >&2
+    exit 1
+  fi
+fi
+
+# Stage and commit.
+git add -A
+NEW_VERSION=$(awk -F= '$1=="template_version"{print $2}' <(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST"))
+git commit -q -m "chore(template): sync to $NEW_VERSION ($SHORT_NEW)"
+SYNC_SHA=$(git rev-parse HEAD)
+
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-a --status committed
+python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$SYNC_SHA"
+
+echo "info: Commit A complete ($SYNC_SHA)"
+fi  # end Commit A (skipped on resume past)
+
+echo "info: Commits B/C/D not yet implemented"
 exit 0

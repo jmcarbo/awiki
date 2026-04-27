@@ -141,6 +141,16 @@ const TOOLS = [
     description: "Run scripts/action-scan.sh + scripts/agenda.sh under flock -x. Returns {rebuilt:[<file>], duration_ms}.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
+  {
+    name: "review_status",
+    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "mark_review_done",
+    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const server = new Server({ name: "awiki", version: "0.1.0" }, { capabilities: { tools: {} } });
@@ -351,6 +361,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         out = JSON.stringify(rows, null, 2);
         break;
       }
+      case "review_status":
+        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+        break;
+      case "mark_review_done":
+        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+        break;
       case "rebuild_agenda": {
         const t0 = Date.now();
         try {

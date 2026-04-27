@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-@test "awiki MCP server lists 4 tools" {
+@test "awiki MCP server lists 7 tools (incl. synthesis tools)" {
   if [[ ! -d mcp/awiki-server/node_modules ]]; then
     skip "run 'cd mcp/awiki-server && npm install' first"
   fi
@@ -10,6 +10,9 @@
   [[ "$output" == *"lint"* ]]
   [[ "$output" == *"query_wiki"* ]]
   [[ "$output" == *"update_catalog"* ]]
+  [[ "$output" == *"list_synth_plugins"* ]]
+  [[ "$output" == *"\"name\":\"synthesize\""* ]]
+  [[ "$output" == *"finalize_synthesis"* ]]
 }
 
 @test "awiki MCP server rejects unknown tool" {

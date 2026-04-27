@@ -1,0 +1,48 @@
+awiki — recipe reference
+
+INGEST
+  just ingest <path>            Process source from inbox.
+                                Path must be under raw/inbox/{interactive,batch,checkpoint}/.
+                                Example: just ingest raw/inbox/interactive/article.md
+  just ingest-batch-list        List files queued in raw/inbox/batch/ for agent iteration.
+
+MAINTENANCE
+  just lint                     Validate wiki integrity. Output: LINT|<level>|<file>|<msg>.
+  just lint-fix                 Auto-apply mechanical fixes only (frontmatter, whitespace).
+  just reindex                  Refresh qmd index over content/.
+  just search "<query>"         Hybrid BM25+vector search via qmd. Quote multi-word.
+  just log <action> <message>   Append timestamped entry to content/log.md.
+                                Example: just log manual "reviewed catalog"
+  just rename <old> <new>       Rename a slug, updating all wikilinks.
+                                Example: just rename foo-bar foobar
+  just delete <slug>            Remove a page, marking broken wikilinks for review.
+
+HUGO
+  just serve                    Watch + preprocess + hugo server. http://localhost:1313.
+  just build                    Preprocess + hugo build → public/.
+
+SETUP
+  just init                     Reminds you to open an agent and say "init wiki".
+  just install-qmd              Install qmd from qntx-labs fork (idempotent).
+  just encrypt-init             Set up git-crypt or age for sensitive content.
+  just check-deps               Verify required tools installed.
+
+GIT
+  just status                   Short git status.
+  just commit "<message>"       Stage all + commit. Quote multi-word messages.
+                                Example: just commit "feat: add memex page"
+
+TESTS
+  just test                     Run BATS test suite under tests/.
+
+HELP
+  just help                     This text.
+
+QUEUE SEMANTICS
+  raw/inbox/interactive/        Default; agent supervises one-at-a-time.
+  raw/inbox/batch/              Unattended bulk; agent writes batch synthesis at end.
+  raw/inbox/checkpoint/         Staged; agent writes proposal to .staged/, user approves.
+
+ARGUMENT QUOTING
+  Multi-word args MUST be quoted: `just commit "fix: foo"`, `just search "memex history"`.
+  Variadic recipes (log, rename) accept space-separated remaining args; quote if any contain spaces.

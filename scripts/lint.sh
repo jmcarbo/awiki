@@ -13,13 +13,20 @@ done
 apply_fixes() {
   local page="$1"
   if ! grep -q '^last_updated:' "$page"; then
+    local today
     today="$(date '+%Y-%m-%d')"
     # Portable insertion: use awk (handles BSD/GNU sed differences in \n).
     awk -v today="$today" '
       /^date: / { print; print "last_updated: " today; next }
       { print }
-    ' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
-    echo "FIX|$page|added last_updated: $today"
+    ' "$page" > "$page.tmp"
+    if cmp -s "$page.tmp" "$page"; then
+      # awk pass was a no-op (no `date:` line to anchor on); leave file untouched.
+      rm -f "$page.tmp"
+    else
+      mv "$page.tmp" "$page"
+      echo "FIX|$page|added last_updated: $today"
+    fi
   fi
 }
 

@@ -35,7 +35,7 @@ if [[ ! -f "$SRC" ]]; then
 fi
 
 # Strip leading raw/inbox/<mode>/ to get relative subtree
-REL="${SRC#raw/inbox/$MODE/}"
+REL="${SRC#raw/inbox/"$MODE"/}"
 DEST="raw/processed/$MODE/$REL"
 DEST_DIR="$(dirname "$DEST")"
 

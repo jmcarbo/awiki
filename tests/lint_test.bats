@@ -70,3 +70,29 @@ EOF2
   run grep '^last_updated:' "$TMP/entities/needs-fix.md"
   [ "$status" -eq 0 ]
 }
+
+@test "lint --fix is a no-op for files lacking date: field" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  PAGE="$TMP/entities/no-date.md"
+  cat > "$PAGE" <<EOF2
+---
+title: "No Date"
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Body referencing [[no-date]] for self-connectivity, sufficient length.
+EOF2
+  # Force mtime into the past so we can detect any modification.
+  touch -t 200001010000 "$PAGE"
+  MTIME_BEFORE="$(stat -f %m "$PAGE" 2>/dev/null || stat -c %Y "$PAGE")"
+  run bash scripts/lint.sh --fix "$TMP"
+  # No FIX line should be emitted for this file.
+  [[ "$output" != *"FIX|"*"no-date.md"* ]]
+  MTIME_AFTER="$(stat -f %m "$PAGE" 2>/dev/null || stat -c %Y "$PAGE")"
+  [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]
+}

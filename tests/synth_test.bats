@@ -34,3 +34,70 @@ teardown() {
   [[ "$output" == *"briefing"* ]]
   [[ "$output" == *"synthesis"* ]]
 }
+
+@test "resolve --tag=memex returns 8 sorted slugs" {
+  cat > content/synthesis/memex-briefing.md <<EOF2
+---
+title: "Memex"
+type: synthesis
+plugin: briefing
+scope:
+  tag: memex
+sources: []
+draft: false
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=000000 -->
+<!-- END GENERATED -->
+EOF2
+  run bash scripts/synth.sh resolve memex-briefing
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"s-hyphens"* ]]
+  [[ "$output" == *"s1"* ]]
+  # No private leak — s-private should NOT be included unless target is private.
+  [[ "$output" != *"s-private"* ]]
+}
+
+@test "resolve with explicit --slugs subset" {
+  cat > content/synthesis/manual-briefing.md <<EOF2
+---
+title: "Manual"
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [s1, s2]
+sources: []
+draft: false
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=000000 -->
+<!-- END GENERATED -->
+EOF2
+  run bash scripts/synth.sh resolve manual-briefing
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"s1"* ]]
+  [[ "$output" == *"s2"* ]]
+  [[ "$output" != *"s3"* ]]
+}
+
+@test "resolve query exits 2 when qmd not installed" {
+  cat > content/synthesis/q-briefing.md <<EOF2
+---
+title: "Q"
+type: synthesis
+plugin: briefing
+scope:
+  query: "memex history"
+sources: []
+draft: false
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=000000 -->
+<!-- END GENERATED -->
+EOF2
+  # Restrict PATH to system bin dirs (excludes brew/cargo paths where qmd lives)
+  # so command -v qmd fails inside synth.sh; awk/sort/find/grep remain available.
+  PATH="/usr/bin:/bin" run bash scripts/synth.sh resolve q-briefing
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"qmd"* ]]
+}

@@ -1,0 +1,9 @@
+[build]
+  command = "scripts/deploy-build.sh"
+  publish = "public"
+
+[build.environment]
+  HUGO_VERSION = "0.120.4"
+
+[[plugins]]
+  package = "netlify-plugin-cache"

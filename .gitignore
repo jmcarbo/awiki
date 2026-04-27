@@ -36,3 +36,9 @@ secrets/**
 # === phase 13: synthesis ===
 content/synthesis/.staged/*
 !content/synthesis/.staged/.gitkeep
+
+# === phase 16: task layer ===
+.awiki/lock
+.awiki/last-review
+.awiki/task-count
+.awiki/maps/

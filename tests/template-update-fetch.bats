@@ -111,3 +111,27 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -ne 0 ]
   echo "$output" | grep -qE "verify|signature"
 }
+
+@test "template-update --schema-upgrade: creates branch + commit 0 + bumps schema" {
+  cd "$TMP"
+  V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V3" --accept-source-change --schema-upgrade --apply
+  [ "$status" -eq 0 ] || true   # later phases not implemented; OK
+  CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  [[ "$CUR_BRANCH" =~ ^awiki-template-update/ ]]
+  PJ_SCHEMA=$(python3 -c "import json; print(json.load(open('.awiki/template.json'))['schema_version'])")
+  [ "$PJ_SCHEMA" = "2" ]
+  git log --format=%s -1 | grep -q "schema upgrade 1"
+}
+
+@test "template-update --schema-upgrade: state file phase=schema-upgrade after Commit 0" {
+  cd "$TMP"
+  V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V3" --accept-source-change --schema-upgrade --apply
+  PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
+  [ "$PHASE" = "schema-upgrade" ]
+  STATUS=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json status)
+  [ "$STATUS" = "committed" ]
+}

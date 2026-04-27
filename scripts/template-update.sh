@@ -261,8 +261,6 @@ if [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]]; then
     echo "halt: template schema_version=$NEW_SCHEMA, pin schema_version=$PIN_SCHEMA. Re-run with --schema-upgrade." >&2
     exit 1
   fi
-  # Phase 1.5 schema-upgrade itself happens in Phase 04 plan; for now leave a marker.
-  echo "info: schema_version mismatch — schema-upgrade flow lands in Phase 04"
 fi
 
 # Encryption recheck against NEW manifest.
@@ -283,6 +281,48 @@ fi
 
 echo "info: phase 0b ok"
 fi  # end Phase 0b
+
+# === Phase 1.5: schema upgrade (Commit 0) ===
+if should_skip_phase schema-upgrade; then
+  echo "info: resume — skipping Phase 1.5 (schema-upgrade already committed)"
+elif [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]] && [[ $SCHEMA_UPGRADE -eq 1 ]]; then
+  if [[ $APPLY -eq 0 ]]; then
+    echo "info: schema-upgrade required; would run migrations/schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}.sh on --apply"
+  else
+    SU_SCRIPT="$FETCH_DIR/migrations/schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}.sh"
+    [[ -x "$SU_SCRIPT" ]] || { echo "halt: schema-upgrade script missing: $SU_SCRIPT" >&2; exit 1; }
+
+    SHORT_NEW=$(echo "$COMMIT_NEW" | head -c 12)
+    BRANCH_NAME="awiki-template-update/$SHORT_NEW"
+    if git rev-parse --verify --quiet "refs/heads/$BRANCH_NAME" >/dev/null; then
+      echo "halt: branch $BRANCH_NAME already exists. Resolve or --abort first." >&2
+      exit 1
+    fi
+    git checkout -q -b "$BRANCH_NAME"
+
+    python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase schema-upgrade --status started
+
+    # Run with stripped env. .awiki/ writes whitelisted (no post-run audit).
+    env -i \
+      PATH="$PATH" HOME="$HOME" LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" \
+      AWIKI_REPO_ROOT="$REPO_ROOT" \
+      AWIKI_TEMPLATE_OLD_VERSION="$(python3 -c "import json; print(json.load(open('$PJ'))['version'])")" \
+      AWIKI_TEMPLATE_NEW_VERSION="$(awk -F= '$1=="template_version"{print $2}' <(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST"))" \
+      bash "$SU_SCRIPT"
+
+    git add -A
+    git commit -q -m "chore(template): schema upgrade ${PIN_SCHEMA} → ${NEW_SCHEMA}"
+    SU_SHA=$(git rev-parse HEAD)
+
+    python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase schema-upgrade --status committed
+    python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$SU_SHA"
+
+    # Record schema upgrade in state.applied_migrations_pending — Commit D writes template.json.
+    python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+      --id "schema-${PIN_SCHEMA}-to-${NEW_SCHEMA}" --status applied
+    echo "info: phase 1.5 schema upgrade committed ($SU_SHA)"
+  fi
+fi
 
 echo "info: subsequent phases not yet implemented"
 exit 0

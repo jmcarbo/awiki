@@ -310,3 +310,18 @@ Semantic (agent-driven, post-lint review):
 - Catalog updated on every ingest.
 - Section indexes updated only when section's purpose changes.
 - All structural changes go through scripts; no direct file moves by agent for sources.
+
+## 14. Pending Template Migrations (LLM-assisted)
+
+When a template update stages LLM migrations, prompt files appear under `.awiki/pending-prompts/`. On startup, follow this workflow:
+
+1. List `.awiki/pending-prompts/*.md`. Show each (with `risk:` from frontmatter) to the user.
+2. For each prompt:
+   - Read its body and the `## Resolved scope` file list.
+   - **Surface the full prompt body to the user.** Confirm intent before bulk edits.
+   - If `risk: high`: require explicit "I have reviewed" confirmation.
+   - If user accepts: perform edits across resolved files; run `just lint` after; commit `chore(template): apply LLM migration <id>`; delete the prompt file; append `{id, status: "applied"}` to `.awiki/template.json.applied_migrations[]`.
+   - If user declines: append `{id, status: "skipped", reason: "user declined"}` to `applied_migrations[]`; delete the prompt file.
+3. Lint will warn on prompts older than 14 days. Resolve or document why deferred.
+
+Failure to surface prompts to the user before acting violates the Trust Model. Always wait for explicit user confirmation.

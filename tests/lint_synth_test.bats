@@ -164,6 +164,12 @@ PY
   [[ "$output" == *"LINT-SUMMARY"* ]]
 }
 
+@test "S9: aggregate evidence words exceeds manifest cap → error" {
+  run run_synth_lint_file "$FIXTURES/content/synthesis/s9-over-cap.md"
+  [[ "$output" == *"LINT|ERROR"*"S9"* ]]
+  [[ "$output" == *"max_evidence_total_words"* || "$output" == *"500"* ]]
+}
+
 @test "lint.sh --only=synth --fix normalizes inside markers but not outside" {
   cp "$FIXTURES/content/synthesis/fix-input.md" "$BATS_TMPDIR/fix.md"
   bash scripts/lint.sh --only=synth --fix --file="$BATS_TMPDIR/fix.md" "$FIXTURES/content" || true

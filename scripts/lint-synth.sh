@@ -419,6 +419,46 @@ synth_check_s6() {
   fi
 }
 
+# --- S9: aggregate evidence-quote word cap ----------------------------------
+synth_get_plugin_max_evidence_total_words() {
+  local plugin="$1"
+  local manifest="synthesis-plugins/$plugin.md"
+  [[ -f "$manifest" ]] || { echo 500; return; }
+  local v
+  v=$(awk -F': *' '/^---$/{c++} c==1 && /^max_evidence_total_words:/{print $2; exit}' "$manifest" | tr -d '"')
+  [[ -n "$v" ]] || v=500
+  echo "$v"
+}
+
+synth_check_s9() {
+  local page="$1"
+  local plugin
+  plugin=$(awk '/^plugin: /{print $2; exit}' "$page")
+  [[ -n "$plugin" ]] || return 0
+  local cap
+  cap=$(synth_get_plugin_max_evidence_total_words "$plugin")
+
+  local total
+  total=$(awk '
+    /^<!-- BEGIN GENERATED .* -->$/ { in_region=1; next }
+    /^<!-- END GENERATED -->$/      { in_region=0 }
+    in_region && /^>[[:space:]]+".+"[[:space:]]+—[[:space:]]+\[\[[a-z0-9-]+\]\]/ {
+      # Extract the quote body between the first and last " in the line.
+      line = $0
+      sub(/^>[[:space:]]+"/, "", line)
+      sub(/"[[:space:]]+—.*$/, "", line)
+      n = split(line, w, /[[:space:]]+/)
+      sum += n
+    }
+    END { print (sum+0) }
+  ' "$page")
+
+  if [[ "$total" -gt "$cap" ]]; then
+    echo "LINT|ERROR|$page|S9: aggregate evidence words=$total exceeds plugin cap max_evidence_total_words=$cap"
+    ERRORS=$((ERRORS + 1))
+  fi
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -440,7 +480,7 @@ synth_lint_file() {
   synth_check_s4 "$page" "$content_dir"
   synth_check_s5 "$page" "$content_dir"
   synth_check_s6 "$page"
-  # synth_check_s9 added in task 14.11.
+  synth_check_s9 "$page"
 }
 
 synth_lint_dir() {

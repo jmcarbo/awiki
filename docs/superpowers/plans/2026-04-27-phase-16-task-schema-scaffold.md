@@ -494,7 +494,7 @@ AWIKI_RECUR_SEP="${AWIKI_RECUR_SEP:-~}"
 # The leading ^ is part of the literal token in the source line.
 # Regex is rebuilt from the separator so a spike-driven flip to `__` only
 # requires editing this one line.
-_awiki_quote_re() { printf '%s' "$1" | sed 's/[][\\.^$*+?()|{}]/\\&/g'; }
+_awiki_quote_re() { printf '%s' "$1" | sed 's/[][\\.^$*+?()|{}-]/\\&/g'; }
 AWIKI_BLOCK_ID_RE='^\^[a-z0-9]{3,16}('"$(_awiki_quote_re "$AWIKI_RECUR_SEP")"'[0-9]+)?$'
 
 # Internal: per-key value shape regexes.
@@ -692,6 +692,12 @@ cat >> tests/action_grammar_test.bats <<'EOF'
   [ "$output" = "2027-01-06" ]
 }
 
+@test "awiki_date_add_days handles negative delta" {
+  run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-04-27 -7'
+  [ "$status" -eq 0 ]
+  [ "$output" = "2026-04-20" ]
+}
+
 @test "awiki_date_add_days rejects bad date" {
   run bash -c 'source scripts/lib/action-grammar.sh && awiki_date_add_days 2026-02-30 1'
   [ "$status" -ne 0 ]
@@ -736,7 +742,8 @@ Expected: 8 new failures (functions not yet defined).
 cat >> scripts/lib/action-grammar.sh <<'EOF'
 
 # awiki_date_add_days <YYYY-MM-DD> <N>  — emit YYYY-MM-DD plus N days.
-# Portable: prefers GNU `date -d`, falls back to BSD `date -j -v`.
+# Negative N is allowed (subtracts). Portable: prefers GNU `date -d`,
+# falls back to BSD `date -j -v`.
 awiki_date_add_days() {
   local in="$1" n="$2"
   _awiki_is_calendar_date "$in" || { echo "awiki_date_add_days: bad date $in" >&2; return 1; }
@@ -744,9 +751,9 @@ awiki_date_add_days() {
   if date -d "$in +$n days" "+%Y-%m-%d" >/dev/null 2>&1; then
     date -d "$in +$n days" "+%Y-%m-%d"
   else
-    # BSD/macOS form
+    # BSD/macOS form. -v takes a signed magnitude: "+3d" or "-3d".
     local sign="+"
-    if [[ "$n" =~ ^- ]]; then sign=""; fi
+    if [[ "$n" =~ ^- ]]; then sign="-"; fi
     date -j -v"${sign}${n#-}d" -f "%Y-%m-%d" "$in" "+%Y-%m-%d"
   fi
 }

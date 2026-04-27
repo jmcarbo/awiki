@@ -1874,11 +1874,19 @@ awiki_mint_id() {
 # Ensures content/projects/<slug>.md exists; lazily creates _loose / _someday
 # with the right status. For non-underscore slugs, creates a minimal stub if
 # absent. Returns absolute path of the page on stdout.
+# Sets the global AWIKI_LAST_PAGE_CREATED=1 if a fresh page was just minted,
+# 0 if the page already existed. Caller reads this to decide which TRIAGE_*
+# array (created vs updated) to push to.
 awiki_ensure_project_page() {
   local slug="$1"
   awiki_check_project_slug "$slug"
   local path="${AWIKI_REPO_ROOT:-.}/content/projects/${slug}.md"
-  if [[ -f "$path" ]]; then printf '%s' "$path"; return 0; fi
+  if [[ -f "$path" ]]; then
+    AWIKI_LAST_PAGE_CREATED=0
+    printf '%s' "$path"
+    return 0
+  fi
+  AWIKI_LAST_PAGE_CREATED=1
   local status_default="active"
   local title="$slug"
   case "$slug" in
@@ -1970,13 +1978,27 @@ awiki_strikethrough_inbox_line() {
 
 # === Outcome handlers ===
 
+# Helper: every handler that touches a project page should call this AFTER
+# awiki_ensure_project_page so the trailer lists creates vs updates correctly.
+_triage_record_project_page() {
+  local proj_path="$1"
+  if [[ "${AWIKI_LAST_PAGE_CREATED:-0}" == "1" ]]; then
+    TRIAGE_CREATED_PAGES+=("$proj_path")
+  else
+    TRIAGE_UPDATED_PAGES+=("$proj_path")
+  fi
+}
+
 triage_outcome_trash() {
   local kind="$1"; local path="$2"; local lineno="$3"; local _text="$4"
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_strikethrough_inbox_line "$path" "$lineno"
+    TRIAGE_ACTIONS_TAKEN+=("strikethrough inbox line $lineno")
+    TRIAGE_UPDATED_PAGES+=("$path")
   elif [[ "$kind" == "raw-file" ]]; then
     mkdir -p "${AWIKI_REPO_ROOT:-.}/raw/inbox/.trash"
     mv "$path" "${AWIKI_REPO_ROOT:-.}/raw/inbox/.trash/"
+    TRIAGE_ACTIONS_TAKEN+=("moved raw capture to .trash: $(basename "$path")")
   fi
 }
 
@@ -1986,12 +2008,15 @@ triage_outcome_do_now() {
   awiki_check_project_slug "${p[project_slug]}"
   awiki_check_slug context_slug "${p[context_slug]}"
   local proj; proj="$(awiki_ensure_project_page "${p[project_slug]}")"
+  _triage_record_project_page "$proj"
   local id; id="$(awiki_mint_id)"
   local today; today="$(date -u +%Y-%m-%d)"
   awiki_append_under_done "$proj" \
     "- [x] ${text} @${p[context_slug]} done:${today} ^${id}"
+  TRIAGE_ACTIONS_TAKEN+=("do-now @${p[context_slug]} -> ${p[project_slug]} (^${id})")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 
@@ -2003,13 +2028,16 @@ triage_outcome_act() {
     awiki_check_slug context_slug "${p[context_slug]}"
   fi
   local proj; proj="$(awiki_ensure_project_page "${p[project_slug]:-_loose}")"
+  _triage_record_project_page "$proj"
   local id; id="$(awiki_mint_id)"
   local ctx_token=""
   [[ -n "${p[context_slug]:-}" ]] && ctx_token=" @${p[context_slug]}"
   awiki_append_under_open_actions "$proj" \
     "- [ ] ${text}${ctx_token} ^${id}"
+  TRIAGE_ACTIONS_TAKEN+=("act${ctx_token} -> ${p[project_slug]:-_loose} (^${id})")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 
@@ -2019,6 +2047,7 @@ triage_outcome_defer_scheduled() {
   awiki_check_project_slug "${p[project_slug]:-_loose}"
   [[ -n "${p[context_slug]:-}" ]] && awiki_check_slug context_slug "${p[context_slug]}"
   local proj; proj="$(awiki_ensure_project_page "${p[project_slug]:-_loose}")"
+  _triage_record_project_page "$proj"
   local id; id="$(awiki_mint_id)"
   local ctx_token="" date_token=""
   [[ -n "${p[context_slug]:-}" ]] && ctx_token=" @${p[context_slug]}"
@@ -2031,8 +2060,10 @@ triage_outcome_defer_scheduled() {
   fi
   awiki_append_under_open_actions "$proj" \
     "- [ ] ${text}${ctx_token}${date_token} ^${id}"
+  TRIAGE_ACTIONS_TAKEN+=("defer-scheduled${date_token} -> ${p[project_slug]:-_loose} (^${id})")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 
@@ -2043,12 +2074,15 @@ triage_outcome_waiting() {
   [[ -n "${p[wait_for]:-}" ]] || { echo "triage: waiting requires wait_for=" >&2; exit 4; }
   awiki_check_slug wait_for "${p[wait_for]}"
   local proj; proj="$(awiki_ensure_project_page "${p[project_slug]:-_loose}")"
+  _triage_record_project_page "$proj"
   local id; id="$(awiki_mint_id)"
   local today; today="$(date -u +%Y-%m-%d)"
   awiki_append_under_open_actions "$proj" \
     "- [?] ${text} wait:[[${p[wait_for]}]] since:${today} ^${id}"
+  TRIAGE_ACTIONS_TAKEN+=("waiting on [[${p[wait_for]}]] -> ${p[project_slug]:-_loose} (^${id})")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 
@@ -2083,8 +2117,11 @@ draft: false
 
 (captured ${today})
 EOF
+  TRIAGE_ACTIONS_TAKEN+=("reference -> ${p[page_type]}/${p[ref_slug]}")
+  TRIAGE_CREATED_PAGES+=("$target")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 
@@ -2093,11 +2130,14 @@ triage_outcome_someday() {
   local -n p="$5"
   awiki_check_project_slug "${p[project_slug]:-_someday}"
   local proj; proj="$(awiki_ensure_project_page "${p[project_slug]:-_someday}")"
+  _triage_record_project_page "$proj"
   local id; id="$(awiki_mint_id)"
   awiki_append_under_open_actions "$proj" \
     "- [>] ${text} ^${id}"
+  TRIAGE_ACTIONS_TAKEN+=("someday -> ${p[project_slug]:-_someday} (^${id})")
   if [[ "$kind" == "inbox-line" ]]; then
     awiki_remove_inbox_line "$path" "$lineno"
+    TRIAGE_UPDATED_PAGES+=("$path")
   fi
 }
 ```
@@ -2180,11 +2220,12 @@ _triage_json_array() {
   printf ']'
 }
 
-# Each outcome handler appends:
-#   TRIAGE_ACTIONS_TAKEN+=("strikethrough inbox line 7")
-#   TRIAGE_UPDATED_PAGES+=("content/inbox.md")
-#   TRIAGE_CREATED_PAGES+=("content/projects/_loose.md")  # only if newly created
-# (Edit each of the seven outcome handlers in step 4 above to push into these.)
+# Each outcome handler in step 4 above pushes into these arrays directly.
+# `_triage_record_project_page <path>` is the helper that picks created vs
+# updated based on the AWIKI_LAST_PAGE_CREATED flag set by
+# `awiki_ensure_project_page`. The reference outcome pushes to
+# TRIAGE_CREATED_PAGES directly (it always creates a fresh page).
+# The trash + inbox-line removal paths push to TRIAGE_UPDATED_PAGES.
 
 # At dispatcher end, just before `exit 0`:
 emit_trailer() {

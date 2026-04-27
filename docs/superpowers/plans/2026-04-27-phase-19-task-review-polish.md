@@ -1304,35 +1304,52 @@ bats tests/task_init_pre_commit_test.sh
 
 Expected: 4 failures (the current task-init has no `step_precommit` function and `main()` does not install any hook; the hook file is absent after `task-init` runs).
 
-- [ ] **Step 2: Implement step 6 of `scripts/task-init.sh`**
+- [ ] **Step 2: Add `step_precommit` function and wire it into `main()`**
 
-Locate the existing step-6 stub. Replace it with:
+Phase 16 ships `task-init.sh` with five steps and no pre-commit stub. This
+step defines a new `step_precommit` function inside `task-init.sh` and
+inserts a call to it inside `main()` between `step_state_files` and the
+final smoke-instructions print.
+
+Add the function definition (place it alongside the other `step_*`
+functions, e.g. just after `step_state_files()`):
 
 ```bash
-# Step 6: pre-commit hook installer.
-HOOK=".git/hooks/pre-commit"
-HOOK_DIR="$(dirname "$HOOK")"
-mkdir -p "$HOOK_DIR"
+# Step 6: pre-commit hook installer (idempotent via marker line).
+step_precommit() {
+  local HOOK=".git/hooks/pre-commit"
+  local HOOK_DIR
+  HOOK_DIR="$(dirname "$HOOK")"
+  mkdir -p "$HOOK_DIR"
 
-# Marker line that signals "task-layer hook present".
-MARKER="# task-layer"
+  # Marker line that signals "task-layer hook present".
+  local MARKER="# task-layer"
 
-needs_install=1
-if [[ -f "$HOOK" ]] && grep -q "^${MARKER}\$" "$HOOK"; then
-  needs_install=0
-fi
+  local needs_install=1
+  if [[ -f "$HOOK" ]] && grep -q "^${MARKER}\$" "$HOOK"; then
+    needs_install=0
+  fi
 
-if [[ $needs_install -eq 1 ]]; then
+  if [[ $needs_install -eq 0 ]]; then
+    echo "task-init: pre-commit hook already carries # task-layer marker; skipping"
+    return 0
+  fi
+
+  local ans
   if [[ "${TASK_INIT_AUTO:-}" != "1" ]]; then
     read -r -p "Install task-aware pre-commit hook (runs action-scan + alias-build lint)? (y/N) " ans
     ans="${ans:-N}"
   else
     ans="y"
   fi
-  if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-    if [[ ! -f "$HOOK" ]]; then
-      # Fresh hook.
-      cat > "$HOOK" <<'HOOKEOF'
+  if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
+    echo "task-init: skipped pre-commit hook install"
+    return 0
+  fi
+
+  if [[ ! -f "$HOOK" ]]; then
+    # Fresh hook.
+    cat > "$HOOK" <<'HOOKEOF'
 #!/usr/bin/env bash
 set -e
 
@@ -1341,26 +1358,49 @@ set -e
 bash scripts/lint.sh --alias-build-only
 bash scripts/action-scan.sh
 HOOKEOF
-    else
-      # Append to existing hook. Ensure the file ends with a newline first.
-      tail -c1 "$HOOK" | read -r _ || printf '\n' >> "$HOOK"
-      cat >> "$HOOK" <<'HOOKEOF'
+  else
+    # Append to existing hook. Ensure the file ends with a newline first.
+    # Logic: if the last byte is NOT \n, append one. Avoid `read -r _`
+    # under `set -e` (its exit-1 on EOF kills the script).
+    if [[ "$(tail -c1 "$HOOK")" != $'\n' ]]; then
+      printf '\n' >> "$HOOK"
+    fi
+    cat >> "$HOOK" <<'HOOKEOF'
 
 # task-layer
 # (Inserted by scripts/task-init.sh — do not remove the marker line above.)
 bash scripts/lint.sh --alias-build-only
 bash scripts/action-scan.sh
 HOOKEOF
-    fi
-    chmod +x "$HOOK"
-    echo "task-init: installed task-layer pre-commit hook at $HOOK"
-  else
-    echo "task-init: skipped pre-commit hook install"
   fi
-else
-  echo "task-init: pre-commit hook already carries # task-layer marker; skipping"
-fi
+  chmod +x "$HOOK"
+  echo "task-init: installed task-layer pre-commit hook at $HOOK"
+}
 ```
+
+Then update `main()` to call it. Find the existing call sequence (which
+ends after `step_state_files`) and insert `step_precommit` immediately
+before the final smoke-instructions print:
+
+```bash
+# main() insertion — locate the existing block:
+#   step_pages
+#   step_wiki_md
+#   step_encryption
+#   step_config
+#   step_state_files
+# ... and add the new step_precommit call after step_state_files:
+sed -i.bak '/^[[:space:]]*step_state_files[[:space:]]*$/a\
+  step_precommit
+' scripts/task-init.sh
+rm -f scripts/task-init.sh.bak
+
+# Confirm the insertion:
+grep -nE 'step_state_files|step_precommit' scripts/task-init.sh
+```
+
+Expected: two adjacent lines — `step_state_files` followed by
+`step_precommit`.
 
 If `scripts/lint.sh` from v1 does not yet support `--alias-build-only`, add the flag handler in `lint.sh`:
 

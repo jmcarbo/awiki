@@ -246,5 +246,43 @@ python3 "$HELPERS/state.py" init "$FETCH_DIR/.update-state.json" \
 echo "info: phase 1 fetch ok (commit_new=$COMMIT_NEW)"
 fi  # end Phase 1 (skipped on resume)
 
+# === Phase 0b: post-fetch preflight ===
+if [[ "${RESUMED:-0}" -eq 1 ]]; then
+  echo "info: resume — skipping Phase 0b"
+else
+NEW_MANIFEST="$FETCH_DIR/template.manifest.toml"
+[[ -f "$NEW_MANIFEST" ]] || { echo "halt: fetched template missing template.manifest.toml" >&2; exit 1; }
+
+NEW_SCHEMA=$(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST" | awk -F= '$1=="schema_version"{print $2}')
+PIN_SCHEMA=$(python3 -c "import json; print(json.load(open('$PJ'))['schema_version'])")
+
+if [[ "$NEW_SCHEMA" != "$PIN_SCHEMA" ]]; then
+  if [[ $SCHEMA_UPGRADE -eq 0 ]]; then
+    echo "halt: template schema_version=$NEW_SCHEMA, pin schema_version=$PIN_SCHEMA. Re-run with --schema-upgrade." >&2
+    exit 1
+  fi
+  # Phase 1.5 schema-upgrade itself happens in Phase 04 plan; for now leave a marker.
+  echo "info: schema_version mismatch — schema-upgrade flow lands in Phase 04"
+fi
+
+# Encryption recheck against NEW manifest.
+python3 "$HELPERS/preflight.py" check-encryption --manifest "$NEW_MANIFEST"
+
+# Optional signature verification.
+REQUIRE_SIG=$(bash "$SCRIPT_DIR/template-config.sh" get "$REPO_ROOT/.awiki/config" require_signature false)
+if [[ $VERIFY_SIGNATURE -eq 1 ]] || [[ "$REQUIRE_SIG" == "true" ]]; then
+  TARGET="${REF:-$COMMIT_NEW}"
+  # Try verify-tag first; fall back to verify-commit.
+  if ! git -C "$FETCH_DIR" verify-tag "$TARGET" 2>/dev/null \
+       && ! git -C "$FETCH_DIR" verify-commit "$TARGET" 2>/dev/null; then
+    echo "halt: signature verification failed for $TARGET" >&2
+    exit 1
+  fi
+  echo "info: signature verified for $TARGET"
+fi
+
+echo "info: phase 0b ok"
+fi  # end Phase 0b
+
 echo "info: subsequent phases not yet implemented"
 exit 0

@@ -89,3 +89,25 @@ teardown() { rm -rf "$TMP"; }
   [ -d ".awiki/template-cache/$COMMIT_OLD" ]
   echo "$output" | grep -q "Re-built ancestor cache from pin"
 }
+
+@test "template-update: schema-version mismatch halts without --schema-upgrade" {
+  cd "$TMP"
+  # v3 fixture is committed in the source tree (created by the dedicated task above).
+  V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
+  [ -d "$V3" ] || skip "v3-schema-bump fixture missing — run the v3 fixture creation task first"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V3" --accept-source-change
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "schema_version"
+  echo "$output" | grep -q -- "--schema-upgrade"
+}
+
+@test "template-update: --verify-signature halts on unsigned tag" {
+  cd "$TMP"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$REPO_ROOT/tests/fixtures/template-update/v1" \
+    --accept-source-change \
+    --verify-signature
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qE "verify|signature"
+}

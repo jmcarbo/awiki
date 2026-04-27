@@ -61,6 +61,60 @@ synth_check_s1() {
   return 0
 }
 
+# --- S2: required sections present ------------------------------------------
+# Reads plugin manifest's required_sections list (YAML array, single-file form
+# only — directory form not supported in v1) and asserts each heading appears
+# between BEGIN and END markers.
+synth_get_plugin_required_sections() {
+  local plugin="$1"
+  local manifest="synthesis-plugins/$plugin.md"
+  [[ -f "$manifest" ]] || return 1
+
+  # Extract YAML frontmatter, look for required_sections: list.
+  awk '
+    /^---$/ { c++; next }
+    c==1 && /^required_sections:/ { in_list=1; next }
+    c==1 && in_list && /^[a-z_]+:/ { in_list=0 }
+    c==1 && in_list && /^[[:space:]]*-[[:space:]]/ {
+      sub(/^[[:space:]]*-[[:space:]]*/, "")
+      gsub(/^"|"$/, "")
+      print
+    }
+    c>=2 { exit }
+  ' "$manifest"
+}
+
+synth_check_s2() {
+  local page="$1"
+  local plugin
+  plugin=$(awk '/^plugin: /{print $2; exit}' "$page")
+  [[ -n "$plugin" ]] || return 0
+
+  local required
+  required=$(synth_get_plugin_required_sections "$plugin") || {
+    echo "LINT|ERROR|$page|S2: cannot read manifest for plugin $plugin"
+    ERRORS=$((ERRORS + 1))
+    return 1
+  }
+  [[ -n "$required" ]] || return 0
+
+  # Slice between markers.
+  local region
+  region=$(awk '
+    /^<!-- BEGIN GENERATED .* -->$/ { in_region=1; next }
+    /^<!-- END GENERATED -->$/      { in_region=0 }
+    in_region { print }
+  ' "$page")
+
+  while IFS= read -r heading; do
+    [[ -z "$heading" ]] && continue
+    if ! grep -qxF "$heading" <<<"$region"; then
+      echo "LINT|ERROR|$page|S2: required section missing: $heading"
+      ERRORS=$((ERRORS + 1))
+    fi
+  done <<<"$required"
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -77,7 +131,8 @@ synth_lint_file() {
   fi
 
   synth_check_s1 "$page" || return 0  # bail on broken markers — downstream rules need them
-  # synth_check_s2..S9 added in subsequent tasks.
+  synth_check_s2 "$page"
+  # synth_check_s3..S9 added in subsequent tasks.
 }
 
 synth_lint_dir() {

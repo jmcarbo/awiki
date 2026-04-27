@@ -26,3 +26,8 @@ run_synth_lint_file() {
   [[ "$output" == *"LINT|ERROR"*"S1"*"BEGIN"* ]]
   [[ "$output" == *"LINT-SUMMARY-RC=1"* || "$output" == *"LINT-SUMMARY-RC=2"* ]]
 }
+
+@test "S2: missing ## Evidence in briefing → error" {
+  run run_synth_lint_file "$FIXTURES/synthesis/s2-missing-evidence.md"
+  [[ "$output" == *"LINT|ERROR"*"S2"*"Evidence"* ]]
+}

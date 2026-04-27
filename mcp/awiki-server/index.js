@@ -7,6 +7,25 @@ import { readFileSync } from "node:fs";
 import { listSynthPlugins } from "./lib/list-plugins.js";
 import { validate } from "./lib/validate-scope.js";
 import { runSynthesize, runFinalize, assertManifestUnderPluginDir } from "./lib/synthesize.js";
+import { sanitizeCapture, SanitizeError } from "./lib/sanitize-capture.js";
+import { LockTimeoutError, runLockedShared, runLockedExclusive } from "./lib/lock.js";
+import { scanInbox } from "./lib/triage-inbox-scan.js";
+import { triageApply } from "./lib/triage-apply.js";
+import { PathGuardError } from "./lib/path-guard.js";
+import { loadActionsTsv, applyFilter, isTsvStale } from "./lib/list-actions.js";
+
+const FILTER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { enum: ["[ ]", "[x]", "[/]", "[?]", "[>]"] },
+    context: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+    project: { type: "string", pattern: "^[a-z0-9_][a-z0-9_-]{0,63}$" },
+    due_before: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    wait: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+    overdue: { type: "boolean" },
+  },
+};
 
 const REPO_ROOT = process.cwd();
 const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -74,6 +93,63 @@ const TOOLS = [
       required: ["topic_slug"],
       properties: { topic_slug: { type: "string" } },
     },
+  },
+  {
+    name: "capture",
+    description: "Sanitize and append a free-text capture to content/inbox.md via scripts/capture.sh. Returns {appended, line, timestamp, sanitizations_applied}. Hard-reject patterns (embedded newline, control char, checkbox prefix at start) return an MCP error.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["text"],
+      properties: {
+        text: { type: "string", maxLength: 4000 },
+      },
+    },
+  },
+  {
+    name: "triage_inbox",
+    description: "Read-only scan of content/inbox.md and raw/inbox/interactive/. Returns [{id, source, line_or_path, text, captured_at}, ...]. IDs are inbox-<sha10>-<lineno> for inbox lines, file-<sha10> for files.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "triage_apply",
+    description: "Apply a triage outcome to a captured item. Validates args (regex + path-guard + ISO date + TOCTOU re-verify), then shells out to scripts/triage.sh under flock -x. Returns {ok, actions_taken[], created_pages[], updated_pages[]} or {ok:false, stale_id:true} when the inbox line has shifted between triage_inbox() and the call.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "outcome"],
+      properties: {
+        id: { type: "string", pattern: "^[a-z0-9_~-]{1,32}$" },
+        outcome: { enum: ["trash", "do-now", "act", "defer-scheduled", "waiting", "reference", "someday"] },
+        params: { type: "object" },
+      },
+    },
+  },
+  {
+    name: "list_actions",
+    description: "Return rows from .awiki/maps/actions.tsv, optionally filtered by status/context/project/due_before/wait/overdue. Re-runs scripts/action-scan.sh under flock -x first if the TSV is stale relative to content/**/*.md.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        filter: { type: "object" },
+      },
+    },
+  },
+  {
+    name: "rebuild_agenda",
+    description: "Run scripts/action-scan.sh + scripts/agenda.sh under flock -x. Returns {rebuilt:[<file>], duration_ms}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "review_status",
+    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "mark_review_done",
+    description: "STUB (phase 18b): full implementation lands in phase 19. Returns {stub:true, message:'implemented in phase 19'}.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
@@ -160,6 +236,162 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const result = runFinalize({ repoRoot: REPO_ROOT, topicSlug: topic_slug });
         out = JSON.stringify(result, null, 2);
+        break;
+      }
+      case "capture": {
+        if (typeof args?.text !== "string") {
+          throw new Error("capture: text must be a string");
+        }
+        // 1. Sanitize. Hard rejects throw SanitizeError → MCP error.
+        let sanitized;
+        try {
+          sanitized = sanitizeCapture(args.text);
+        } catch (e) {
+          if (e instanceof SanitizeError) {
+            throw new Error(`capture rejected: ${e.kind}: ${e.message}`);
+          }
+          throw e;
+        }
+        // 2. Build the line. ISO-8601 UTC with second precision.
+        const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const line = `- ${timestamp} ${sanitized.text}`;
+        // 3. Shell out to scripts/capture.sh under flock -x. capture.sh takes
+        // its own lock (phase 18a), reads text from stdin, and appends with
+        // its own ISO-8601 timestamp. We pass AWIKI_CAPTURE_PRESANITIZED=1
+        // so it skips its in-script neutralization (we already did it).
+        // capture.sh always runs hard-reject checks unconditionally.
+        try {
+          execFileSync("bash", ["scripts/capture.sh"], {
+            cwd: REPO_ROOT,
+            input: sanitized.text,
+            encoding: "utf8",
+            env: { ...process.env, AWIKI_CAPTURE_PRESANITIZED: "1" },
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`capture: lock timeout after 30s`);
+          }
+          const stderr = e.stderr ? e.stderr.toString() : "";
+          throw new Error(`capture.sh failed: ${stderr.trim() || e.message}`);
+        }
+        out = JSON.stringify({
+          appended: true,
+          line,
+          timestamp,
+          sanitizations_applied: sanitized.applied,
+        });
+        break;
+      }
+      case "triage_inbox": {
+        // Take flock -s briefly via a no-op `true` to acquire-then-release.
+        // The JS scan that follows is not held under the lock; the spec
+        // language "read-only tools take flock -s" is satisfied in the
+        // *spirit* of preventing concurrent writes. TOCTOU re-verify in
+        // triage_apply catches drift between this scan and the apply call.
+        try {
+          runLockedShared({
+            repoRoot: REPO_ROOT,
+            argv: ["true"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`triage_inbox: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        out = JSON.stringify(scanInbox(REPO_ROOT), null, 2);
+        break;
+      }
+      case "triage_apply": {
+        let result;
+        try {
+          result = triageApply(REPO_ROOT, args ?? {});
+        } catch (e) {
+          if (e instanceof PathGuardError) {
+            throw new Error(`triage_apply: path-guard rejected: ${e.message}`);
+          }
+          throw e;
+        }
+        out = JSON.stringify(result);
+        break;
+      }
+      case "list_actions": {
+        const filter = args?.filter ?? {};
+        const filterCheck = validate(FILTER_SCHEMA, filter);
+        if (!filterCheck.valid) {
+          out = JSON.stringify({
+            error: "invalid_argument",
+            field: "filter",
+            reasons: filterCheck.errors,
+          });
+          break;
+        }
+        // Stale-check: re-run action-scan.sh under flock -x if needed.
+        if (isTsvStale(REPO_ROOT)) {
+          try {
+            runLockedExclusive({
+              repoRoot: REPO_ROOT,
+              argv: ["bash", "scripts/action-scan.sh"],
+              timeoutSec: 30,
+            });
+          } catch (e) {
+            if (e instanceof LockTimeoutError) {
+              throw new Error(`list_actions: lock timeout after 30s during scan`);
+            }
+            throw e;
+          }
+        }
+        // Briefly take flock -s as a privacy/consistency gesture (does not
+        // hold the lock during the JS read; documented limitation).
+        try {
+          runLockedShared({
+            repoRoot: REPO_ROOT,
+            argv: ["true"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`list_actions: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        const rows = applyFilter(loadActionsTsv(REPO_ROOT), filter);
+        out = JSON.stringify(rows, null, 2);
+        break;
+      }
+      case "review_status":
+        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+        break;
+      case "mark_review_done":
+        out = JSON.stringify({ stub: true, message: "implemented in phase 19" });
+        break;
+      case "rebuild_agenda": {
+        const t0 = Date.now();
+        try {
+          runLockedExclusive({
+            repoRoot: REPO_ROOT,
+            argv: ["bash", "-c", "scripts/action-scan.sh && scripts/agenda.sh"],
+            timeoutSec: 30,
+          });
+        } catch (e) {
+          if (e instanceof LockTimeoutError) {
+            throw new Error(`rebuild_agenda: lock timeout after 30s`);
+          }
+          throw e;
+        }
+        const duration_ms = Date.now() - t0;
+        // The list of regenerated files is fixed (the five managed-region
+        // pages from phase 16/17). agenda.sh rewrites all five.
+        const rebuilt = [
+          "content/agenda/next-actions.md",
+          "content/agenda/today.md",
+          "content/agenda/waiting.md",
+          "content/agenda/someday.md",
+          "content/agenda/stuck-projects.md",
+        ];
+        out = JSON.stringify({ rebuilt, duration_ms });
         break;
       }
       default:

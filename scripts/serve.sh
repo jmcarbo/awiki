@@ -20,6 +20,6 @@ else
   ( while true; do bash "$SCRIPT_DIR/build.sh"; sleep 1; done ) &
 fi
 WATCHER_PID=$!
-trap "kill $WATCHER_PID 2>/dev/null || true" EXIT
+trap 'kill $WATCHER_PID 2>/dev/null || true' EXIT
 
 hugo server --bind 0.0.0.0 --port 1313 -D

@@ -57,3 +57,80 @@ teardown() {
   run cat .awiki/build-content/entities/bar.md
   [[ "$output" == *"[alias-display](/entities/foo/)"* ]]
 }
+
+@test "alias list with quoted comma is not split" {
+  cat > "$WORK/content/entities/qux.md" <<E
+---
+title: "Qux"
+aliases: ["A", "B, with comma"]
+draft: false
+---
+
+body
+E
+  bash "$BATS_TEST_DIRNAME/../scripts/build.sh" --maps-only
+  run cat .awiki/maps/alias-to-slug.tsv
+  [[ "$output" == *"A	qux"* ]]
+  [[ "$output" == *"B, with comma	qux"* ]]
+  # Must not produce a bogus 'with comma' or '"B' fragment.
+  [[ "$output" != *"with comma	qux"* || "$output" == *"B, with comma	qux"* ]]
+  # Three lines of qux would mean we mis-split: count 'qux' lines.
+  qux_count=$(grep -c '	qux$' .awiki/maps/alias-to-slug.tsv || true)
+  [[ "$qux_count" -eq 2 ]]
+}
+
+@test "single-quoted title is stripped" {
+  cat > "$WORK/content/entities/sq.md" <<E
+---
+title: 'Single Quoted'
+aliases: []
+draft: false
+---
+
+body
+E
+  bash "$BATS_TEST_DIRNAME/../scripts/build.sh" --maps-only
+  run cat .awiki/maps/slug-to-title.tsv
+  [[ "$output" == *"sq	Single Quoted"* ]]
+  [[ "$output" != *"'Single Quoted'"* ]]
+}
+
+@test "code block contents preserved (wikilinks not rewritten inside fenced code)" {
+  cat > "$WORK/content/entities/code.md" <<'E'
+---
+title: "Code"
+aliases: []
+draft: false
+---
+
+Outside [[bar]] gets rewritten.
+
+```
+Inside fenced [[bar]] stays literal.
+```
+
+Inline `[[bar]]` also stays literal.
+E
+  bash "$BATS_TEST_DIRNAME/../scripts/build.sh"
+  run cat .awiki/build-content/entities/code.md
+  [[ "$output" == *"Outside [Bar](/entities/bar/) gets rewritten."* ]]
+  [[ "$output" == *"Inside fenced [[bar]] stays literal."* ]]
+  [[ "$output" == *'Inline `[[bar]]` also stays literal.'* ]]
+}
+
+@test "_index.md is skipped from slug map" {
+  mkdir -p "$WORK/content/section"
+  cat > "$WORK/content/section/_index.md" <<E
+---
+title: "Section"
+draft: false
+---
+
+intro
+E
+  bash "$BATS_TEST_DIRNAME/../scripts/build.sh" --maps-only
+  run cat .awiki/maps/slug-to-path.tsv
+  [[ "$output" != *"_index"* ]]
+  run cat .awiki/maps/slug-to-title.tsv
+  [[ "$output" != *"_index	"* ]]
+}

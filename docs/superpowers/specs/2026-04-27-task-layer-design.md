@@ -491,6 +491,21 @@ walks the inbox one item at a time on the terminal (prints item,
 prompts for outcome + params, calls the same library entry-points
 as the MCP tool); used by `just triage` when no agent is available.
 
+**Interactive mode contract:**
+- Per-item atomic: each item is fully applied (page write + log +
+  counter increment) before the next prompt. Ctrl-C / EOF aborts the
+  current item without applying it; items already applied stay
+  applied.
+- Param prompts: free-text with the same regex validation as the
+  MCP boundary (rejects + re-prompts on invalid). Slug prompts show
+  existing slugs as autocomplete hints (read from
+  `content/projects/`, `content/contexts/`).
+- Side effects identical to the MCP path: log entry,
+  `.awiki/task-count` increment, deferred-enqueue of `agenda.sh`
+  at threshold.
+- Test coverage: `triage_test.sh` runs interactive mode under
+  `expect`/`script`-driven input alongside the per-outcome MCP path.
+
 ---
 
 ## Scanner + Agenda Generation
@@ -521,7 +536,15 @@ id  status  text  file  line  context  due  defer  wait  since  every  done  pri
     is a private page (per the same path / tag rules above).
   The wikilink-target rule prevents a public action from leaking the
   existence of a private entity via slug name on `next-actions.md`.
-  Resolution uses the alias map built by `lint.sh` (single pass).
+  Resolution uses the alias map at `.awiki/maps/alias-to-slug.tsv`
+  built by `lint.sh`. **Alias-map staleness is a known limit**:
+  `action-scan.sh` does NOT rebuild the alias map itself (would
+  duplicate lint logic). If a private page is added without lint
+  having run since, the privacy filter may miss the action for one
+  cycle. Mitigation: the optional pre-commit hook (installed by
+  `task-init` step 6) is updated to run `lint.sh` (alias-build step
+  only, not full lint) before `action-scan.sh`, eliminating the
+  staleness window for committed changes. Documented in WIKI.md.
   Used by `agenda.sh` for the privacy filter (see below).
 - Lines without a valid `[STATUS]` checkbox marker are skipped from
   `actions.tsv` and instead emitted to `actions-rejected.tsv` with
@@ -545,9 +568,12 @@ id  status  text  file  line  context  due  defer  wait  since  every  done  pri
   timestamp at different sub-second moments). Stable as long as the
   line content + position don't change. If the user edits the inbox
   file between `triage_inbox()` and `triage_apply(...)`, the ID may
-  no longer resolve — `triage_apply` returns
-  `{ok:false, stale_id:true}` and asks the agent to re-call
-  `triage_inbox()`.
+  no longer resolve — `triage_apply` re-reads the inbox line at the
+  supplied `<lineno>`, recomputes `sha1(line)[:10]`, and **rejects
+  with `{ok:false, stale_id:true}` unless the freshly-computed hash
+  matches the hash embedded in the id**. This catches the case where
+  a line was deleted above the target and another line slid into the
+  expected position. The agent re-calls `triage_inbox()` to refresh.
 - For files in `raw/inbox/interactive/`: `id = file-<sha1(relpath)[:10]>`.
   Path-based, stable across re-scans.
 - For action lines on content pages: `id = <^id>` (the block-ID).
@@ -807,7 +833,7 @@ these rules.
 
 | Tool | Args | Returns | Side effects |
 |------|------|---------|--------------|
-| `capture` | `{text}` | `{appended:true, line, timestamp, sanitizations_applied:[]}` | Appends to `content/inbox.md`. The `sanitizations_applied` array names every neutralization rule that fired (e.g., `wikilink-neutralized`, `comment-neutralized`, `length-truncated`, `block-id-escaped`) so the agent can surface to the user: "I escaped your `[[link]]` — re-add the wikilink on the destination page after triage." `capture.sh` prints the same diff to stderr. |
+| `capture` | `{text}` | `{appended:true, line, timestamp, sanitizations_applied:[]}` | Appends to `content/inbox.md`. The `sanitizations_applied` array names every neutralization rule that fired. **Closed enum** for successful captures: `wikilink-neutralized`, `comment-neutralized`, `length-truncated`, `block-id-escaped`. Hard-rejection rules (control-char, embedded-newline, checkbox-prefix-at-start) return an MCP error instead of a successful response — they never appear in this list. Agent surfaces the array to the user: "I escaped your `[[link]]` — re-add the wikilink on the destination page after triage." `capture.sh` prints the same diff to stderr. |
 | `triage_inbox` | `{}` | `[{id, source, text, captured_at, ...}]` | Read-only scan of `inbox.md` lines + `raw/inbox/interactive/` files. |
 | `triage_apply` | `{id, outcome, params}` | `{ok, actions_taken[], created_pages[], updated_pages[], stale_id?}` | Mutates origin + destination files; logs; increments `task-count`. Returns `{ok:false, stale_id:true}` if the `id` no longer resolves (caller should re-run `triage_inbox()`). |
 | `list_actions` | `{filter?: {status?, context?, project?, due_before?, wait?, overdue?}}` | `[action]` | Read-only; calls `action-scan.sh` if scan map stale. |

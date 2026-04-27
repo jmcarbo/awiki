@@ -124,8 +124,10 @@ recur:
 recur-dry:
     bash scripts/action-recur.sh --dry-run --all
 
-# Stubs land in later phases:
-# review:                                # phase 19
-#     bash scripts/agenda.sh
-#     bash scripts/lint.sh
-#     bash scripts/review-status.sh
+# === task layer (phase 19) ===
+# Run the weekly-review chain: rebuild agenda regions, lint the wiki,
+# and emit the structured REVIEW|... report on stdout.
+review:
+    bash scripts/agenda.sh
+    bash scripts/lint.sh
+    bash scripts/review-status.sh

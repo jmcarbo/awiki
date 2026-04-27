@@ -165,3 +165,18 @@ just recur
 just recur-dry
   Dry-run variant: prints the unified diff of would-be changes and
   exits without writing.
+
+TASK LAYER (phase 19)
+  just review                   Run the weekly-review chain:
+                                  1. scripts/agenda.sh   — rebuild the five
+                                     managed-region pages under content/agenda/.
+                                  2. scripts/lint.sh     — mechanical lint over
+                                     content/.
+                                  3. scripts/review-status.sh — structured
+                                     report. Emits REVIEW|<key>|... lines for
+                                     inbox-unprocessed, raw-inbox-files,
+                                     projects-no-next-action, waiting-stale-14d,
+                                     overdue, completed-since-last-review,
+                                     stuck-projects, someday-count; closes with
+                                     REVIEW-SUMMARY|last-review=<date>|attention=N.
+                                Override "today" via AWIKI_TODAY=YYYY-MM-DD.

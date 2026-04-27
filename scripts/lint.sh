@@ -76,6 +76,24 @@ while IFS= read -r -d '' page; do
     WARNS=$((WARNS + 1))
   fi
 
+  # Parse the tags: line as a YAML list, check for an exact 'private' token.
+  has_private_tag=0
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^tags:[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
+      raw="${BASH_REMATCH[1]}"
+      IFS=',' read -ra parts <<< "$raw"
+      for p in "${parts[@]}"; do
+        token="$(echo "$p" | sed -E 's/^[ "'\'']+|[ "'\'']+$//g')"
+        if [[ "$token" == "private" ]]; then has_private_tag=1; fi
+      done
+    fi
+  done < "$page"
+
+  if [[ "$has_private_tag" -eq 1 && "$page" != *"/private/"* ]]; then
+    echo "LINT|WARN|$page|private tag outside private path"
+    WARNS=$((WARNS + 1))
+  fi
+
   while read -r link; do
     target="${link%%|*}"
     if [[ -z "${SLUG_TO_PATH[$target]:-}" && -z "${ALIAS_TO_SLUG[$target]:-}" ]]; then

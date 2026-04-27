@@ -71,6 +71,27 @@ EOF2
   [ "$status" -eq 0 ]
 }
 
+@test "lint warns on tags: [private] outside private/ path" {
+  TMP="$(mktemp -d)/content"
+  mkdir -p "$TMP/entities"
+  cat > "$TMP/entities/leaky.md" <<E
+---
+title: "Leaky"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: [private]
+aliases: []
+sources: []
+draft: false
+---
+
+Body content sufficient length for non-empty check.
+E
+  run bash scripts/lint.sh "$TMP"
+  [[ "$output" == *"LINT|WARN"*"leaky.md"*"private tag outside private path"* ]]
+}
+
 @test "lint --fix is a no-op for files lacking date: field" {
   TMP="$(mktemp -d)/content"
   mkdir -p "$TMP/entities"

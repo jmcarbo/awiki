@@ -22,8 +22,22 @@ elif command -v fswatch >/dev/null 2>&1; then
   echo "WATCH|tool=fswatch"
   ( fswatch -o content | while read -r _; do bash "$SCRIPT_DIR/build.sh"; done ) &
 else
-  echo "WATCH|tool=poll-1s"
-  ( while true; do bash "$SCRIPT_DIR/build.sh"; sleep 1; done ) &
+  # mtime-aware polling: only rebuild when content/ has changed since
+  # last build. Avoids unnecessary rebuilds (and the brief atomic-swap
+  # window) every second.
+  echo "WATCH|tool=poll-mtime"
+  echo "  (install fswatch or entr for inotify-style change detection)"
+  ( prev=""
+    while true; do
+      cur=$(find content -type f -name '*.md' -exec stat -f '%m %N' {} + 2>/dev/null \
+            | sort | shasum | awk '{print $1}')
+      if [[ "$cur" != "$prev" ]]; then
+        bash "$SCRIPT_DIR/build.sh"
+        prev="$cur"
+      fi
+      sleep 1
+    done
+  ) &
 fi
 WATCHER_PID=$!
 trap 'kill $WATCHER_PID 2>/dev/null || true' EXIT

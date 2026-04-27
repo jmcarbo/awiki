@@ -228,12 +228,17 @@ if [[ "$MAPS_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+# Atomic rebuild: write to a sibling temp dir then swap into place. This
+# avoids races where `hugo server`'s file watcher trips over a transient
+# missing `_index.md` while the rebuild is mid-flight (poll-1s mode is
+# the worst offender; entr/fswatch are also vulnerable on big builds).
+BUILD_TMP="$BUILD_DIR.tmp"
+rm -rf "$BUILD_TMP"
+mkdir -p "$BUILD_TMP"
 
 while IFS= read -r -d '' page; do
   rel="${page#"$CONTENT_DIR"/}"
-  out="$BUILD_DIR/$rel"
+  out="$BUILD_TMP/$rel"
   mkdir -p "$(dirname "$out")"
 
   python3 - "$page" "$out" "$SLUG_MAP" "$ALIAS_MAP" "$TITLE_MAP" <<'PY'
@@ -355,6 +360,17 @@ with open(out, 'w', encoding='utf-8') as f:
     f.write(text)
 PY
 done < <(find "$CONTENT_DIR" -name '*.md' -type f -print0)
+
+# Atomic swap: replace BUILD_DIR with BUILD_TMP in two cheap rename ops.
+# rename(2) is atomic per directory entry; the brief window where
+# BUILD_DIR doesn't exist is sub-millisecond and shorter than any
+# watcher's poll interval.
+BUILD_OLD="$BUILD_DIR.old.$$"
+if [[ -d "$BUILD_DIR" ]]; then
+  mv "$BUILD_DIR" "$BUILD_OLD"
+fi
+mv "$BUILD_TMP" "$BUILD_DIR"
+rm -rf "$BUILD_OLD" 2>/dev/null || true
 
 echo "BUILD-OK|content=$CONTENT_DIR|build=$BUILD_DIR"
 

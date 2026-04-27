@@ -332,6 +332,94 @@ EOF
   [ -f content/projects/_loose.md ]
 }
 
+@test "triage threshold lookup: env > config > default" {
+  # Default = 5 with no env, no config.
+  rm -f .awiki/config
+  unset AWIKI_AGENDA_AFTER_N || true
+
+  local id; id="$(inbox_id_for_lineno 7)"
+  cat > content/projects/dentist.md <<'EOF'
+---
+title: "Dentist"
+type: project
+status: active
+draft: false
+---
+
+## Open Actions
+
+## Done
+EOF
+  echo "0" > .awiki/task-count
+
+  # Apply 4 outcomes; agenda.sh should NOT run yet.
+  for i in 1 2 3 4; do
+    bash scripts/triage.sh "$id" trash lineno=7 || true
+    # Re-seed line 7 because trash strikes it through.
+    sed -i.bak '7s/.*/- 2026-04-27 14:32 call dentist about crown/' content/inbox.md
+    rm -f content/inbox.md.bak
+    id="$(inbox_id_for_lineno 7)"
+  done
+  ! grep -q 'agenda | rebuild' .awiki/log
+
+  # 5th outcome triggers rebuild.
+  bash scripts/triage.sh "$id" trash lineno=7
+  grep -q 'agenda | rebuild' .awiki/log
+  # Counter resets after rebuild.
+  count=$(cat .awiki/task-count)
+  [ "$count" -eq 0 ]
+}
+
+@test "triage threshold from .awiki/config overrides default" {
+  printf 'AWIKI_AGENDA_AFTER_N=2\n' > .awiki/config
+  unset AWIKI_AGENDA_AFTER_N || true
+  echo "0" > .awiki/task-count
+
+  local id; id="$(inbox_id_for_lineno 7)"
+  bash scripts/triage.sh "$id" trash lineno=7
+  ! grep -q 'agenda | rebuild' .awiki/log
+
+  sed -i.bak '7s/.*/- 2026-04-27 14:32 call dentist about crown/' content/inbox.md
+  rm -f content/inbox.md.bak
+  id="$(inbox_id_for_lineno 7)"
+  bash scripts/triage.sh "$id" trash lineno=7
+  grep -q 'agenda | rebuild' .awiki/log
+}
+
+@test "triage threshold from env overrides .awiki/config" {
+  printf 'AWIKI_AGENDA_AFTER_N=99\n' > .awiki/config
+  export AWIKI_AGENDA_AFTER_N=1
+  echo "0" > .awiki/task-count
+  local id; id="$(inbox_id_for_lineno 7)"
+  bash scripts/triage.sh "$id" trash lineno=7
+  grep -q 'agenda | rebuild' .awiki/log
+}
+
+@test "triage threshold rebuild advances agenda last_updated" {
+  printf 'AWIKI_AGENDA_AFTER_N=1\n' > .awiki/config
+  unset AWIKI_AGENDA_AFTER_N || true
+  echo "0" > .awiki/task-count
+  # Seed an agenda page with a stale last_updated.
+  mkdir -p content/agenda
+  cat > content/agenda/next-actions.md <<'EOF'
+---
+title: "Next actions"
+type: agenda
+last_updated: 2025-01-01
+draft: false
+---
+<!-- BEGIN agenda:next-actions -->
+<!-- END agenda:next-actions -->
+EOF
+  printf 'id\tstatus\ttext\tfile\tline\tcontext\tdue\tdefer\twait\tsince\tevery\tdone\tpriority\test\tproject\tsource_kind\n' \
+    > .awiki/maps/actions.tsv
+  local id; id="$(inbox_id_for_lineno 7)"
+  run bash scripts/triage.sh "$id" trash lineno=7
+  [ "$status" -eq 0 ]
+  today="$(date -u +%Y-%m-%d)"
+  grep -q "^last_updated: ${today}$" content/agenda/next-actions.md
+}
+
 @test "triage --interactive ctrl-c aborts current item but keeps prior items applied" {
   command -v expect >/dev/null 2>&1 || skip "expect not installed"
   cat > /tmp/triage_drive3.exp <<EOF

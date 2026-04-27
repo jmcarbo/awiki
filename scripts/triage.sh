@@ -592,8 +592,54 @@ awiki_verify_inbox_line_id() {
   fi
 }
 
-# Stubs filled in by task 18a.11.
-triage_increment_and_maybe_rebuild() { :; }
+# === Threshold-resolved auto-rebuild enqueue (Task 18a.11) ===
+awiki_resolve_agenda_threshold() {
+  if [[ -n "${AWIKI_AGENDA_AFTER_N:-}" ]]; then
+    printf '%s' "$AWIKI_AGENDA_AFTER_N"; return 0
+  fi
+  if [[ -f "${AWIKI_REPO_ROOT:-.}/.awiki/config" ]]; then
+    local v
+    v="$(awk -F= '/^AWIKI_AGENDA_AFTER_N=/ {print $2}' "${AWIKI_REPO_ROOT:-.}/.awiki/config" | tail -1)"
+    if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+  fi
+  printf '5'
+}
+
+triage_increment_and_maybe_rebuild() {
+  local count_file="${AWIKI_REPO_ROOT:-.}/.awiki/task-count"
+  [[ -f "$count_file" ]] || echo "0" > "$count_file"
+  local n; n="$(cat "$count_file")"
+  n=$((n + 1))
+  echo "$n" > "$count_file"
+
+  local threshold; threshold="$(awiki_resolve_agenda_threshold)"
+  if [[ "$n" -ge "$threshold" ]]; then
+    # Deferred-enqueue: the user lock has already been released by the time we
+    # got here. agenda.sh acquires its own lock with timeout
+    # AWIKI_LOCK_TIMEOUT_USER, so set that env var to the deferred profile
+    # (180s) for this invocation only — wrap the call in a subshell so the
+    # outer caller's user-timeout (if any) is unaffected.
+    (
+      AWIKI_LOCK_TIMEOUT_USER="${AWIKI_LOCK_TIMEOUT_DEFERRED:-180}"
+      export AWIKI_LOCK_TIMEOUT_USER
+      triage_run_agenda
+    )
+    echo "0" > "$count_file"
+  fi
+}
+
+triage_run_agenda() {
+  # Log the rebuild attempt unconditionally; agenda.sh's own exit code (e.g.
+  # 2 when actions.tsv is absent) does not suppress the log entry — the
+  # threshold-trigger event itself is what we record.
+  local agenda_rc=0
+  bash "$(dirname "$0")/agenda.sh" >/dev/null 2>&1 || agenda_rc=$?
+  if [[ "$agenda_rc" -eq 0 ]]; then
+    bash "$(dirname "$0")/log-append.sh" agenda "rebuild"
+  else
+    bash "$(dirname "$0")/log-append.sh" agenda "rebuild | rc=${agenda_rc}"
+  fi
+}
 
 # === Interactive walker (Task 18a.10) ===
 triage_interactive() {

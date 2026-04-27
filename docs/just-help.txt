@@ -180,3 +180,118 @@ TASK LAYER (phase 19)
                                      stuck-projects, someday-count; closes with
                                      REVIEW-SUMMARY|last-review=<date>|attention=N.
                                 Override "today" via AWIKI_TODAY=YYYY-MM-DD.
+
+# =============================================================================
+# TASK LAYER REFERENCE — structured Usage / Output / When for each recipe.
+# =============================================================================
+
+## task-init
+
+Usage:   just task-init
+Output:  TASK-INIT|start
+         TASK-INIT|created content/inbox.md
+         TASK-INIT|created content/projects/_index.md
+         ... (per-step lines; "skip <path> (exists)" on re-run)
+         TASK-INIT|appended task-layer block to WIKI.md
+         TASK-INIT|appended AWIKI_TASK_LAYER=on
+         TASK-INIT|installed task-layer pre-commit hook at .git/hooks/pre-commit
+         TASK-INIT|done
+         (per-step idempotent — re-runs print "skip <step>" for steps already done)
+When:    Once per wiki, to enable the task layer. Safe to re-run after a
+         partial failure or to bless a new step (e.g. install the
+         pre-commit hook later, or add task-layer git-crypt patterns
+         after running encrypt-init).
+
+## capture
+
+Usage:   just capture "<text>"
+Output:  capture: appended to content/inbox.md (line N)
+         (with SANITIZATION-APPLIED|<rule1>,<rule2>,... on stderr if any rule fired)
+When:    Quick-capture an open loop without leaving the terminal. Quote
+         multi-word text. Sanitization (full): rejects newlines / control
+         chars / leading-checkbox; truncates > 2000 chars; neutralizes
+         [[wikilinks]], <!-- HTML comments -->, ^block-id-shaped tokens.
+         Example: just capture "call dentist"
+
+## triage
+
+Usage:   just triage
+Output:  Walks every inbox.md line and raw/inbox/interactive/* file
+         interactively. For each item:
+           "<text>"  outcome (trash/do-now/act/defer-scheduled/waiting/reference/someday)?
+         then prompts for project_slug / context_slug / wait_for / etc.
+         depending on outcome.
+When:    Bash fallback when the MCP-connected agent is unavailable.
+         Per-item atomic: Ctrl-C aborts the current item; previous items
+         stay applied. Side effects identical to triage_apply MCP tool.
+
+## triage-apply
+
+Usage:   just triage-apply <id> <outcome> [k=v ...]
+Output:  TRIAGE-APPLY|<id>|<outcome>|<path>
+         (plus any sanitization or move side-effect lines)
+When:    Non-interactive single-item application. <id> is the synthesized
+         inbox-<sha>-<lineno>, file-<sha>, or block-id form. <outcome> is
+         one of: trash, do-now, act, defer-scheduled, waiting, reference,
+         someday. k=v params per outcome; see `bash scripts/triage.sh --help`.
+
+## scan
+
+Usage:   just scan
+Output:  scanned N files, M actions, R rejected, O open, D done
+When:    Rebuild .awiki/maps/actions.tsv without regenerating agenda
+         pages. Useful before lint runs or to debug parse errors
+         (rejected lines land in .awiki/maps/actions-rejected.tsv).
+
+## agenda
+
+Usage:   just agenda
+Output:  scanned N files, M actions, R rejected, O open, D done
+         agenda: rebuilt content/agenda/next-actions.md
+         agenda: rebuilt content/agenda/today.md
+         agenda: rebuilt content/agenda/waiting.md
+         agenda: rebuilt content/agenda/someday.md
+         agenda: rebuilt content/agenda/stuck-projects.md
+When:    Run after triage or after manually editing project/context
+         pages. Auto-runs on every Nth triage_apply (default 5,
+         configurable via AWIKI_AGENDA_AFTER_N).
+
+## recur
+
+Usage:   just recur
+Output:  RECUR|<page>|<base-id>|<next-due>   (per re-emission)
+         RECUR-DONE|pages=N|emitted=M
+When:    Re-emit open copies for completed [x] every:... lines that have
+         no open instance for the next due date. Idempotent — safe to run
+         on a cron or manually after batch-completing recurring tasks.
+
+## recur-dry
+
+Usage:   just recur-dry
+Output:  --- a/<page>
+         +++ b/<page>
+         (unified diff of would-be changes; no writes)
+When:    Inspect what `just recur` would emit before running it. Useful
+         for cron sanity-checks or when reviewing a long backlog of
+         completions.
+
+## review
+
+Usage:   just review
+Output:  (agenda output)
+         (lint output, ideally clean)
+         REVIEW|inbox-unprocessed|count=3
+         REVIEW|raw-inbox-files|count=1
+         REVIEW|projects-no-next-action|count=2|slugs=q3-launch,renovate-kitchen
+         REVIEW|waiting-stale-14d|count=1|ids=a03
+         REVIEW|overdue|count=2|ids=a01,a07
+         REVIEW|completed-since-last-review|count=8
+         REVIEW|stuck-projects|count=1|slugs=onboarding-revamp
+         REVIEW|someday-count|count=12
+         REVIEW-SUMMARY|last-review=2026-04-20|attention=4
+When:    Weekly cadence (Friday afternoon works well). The structured
+         lines are greppable; the agent reads them via the `review_status()`
+         MCP tool which returns the same data as JSON. Stamp with
+         `mark_review_done()` once you've walked the eight steps in
+         WIKI.md "Weekly Review". Override "today" via
+         AWIKI_TODAY=YYYY-MM-DD.

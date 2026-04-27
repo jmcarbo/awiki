@@ -167,12 +167,19 @@ and produce duplicate `^id`s.
 
 - `.awiki/lock` is a single global advisory lock. Every mutating script
   sources `scripts/lib/lock.sh`, which wraps the body in `flock -x` on
-  this file (timeout 30s, exit 7 on contention).
+  this file. Timeout: 30s for user-facing mutations (exit 7 on
+  contention; 30s is generous for a single-user wiki and accommodates
+  scanner runs across ~5000-page wikis). 180s for the deferred
+  `agenda.sh` rebuild path (no user latency — it runs after the
+  triage handler returns), with exit-7 logged and retried on the
+  next rebuild trigger.
 - The MCP server acquires the same lock around any mutating tool
   invocation (`capture`, `triage_apply`, `rebuild_agenda`,
   `mark_review_done`). Read-only tools (`triage_inbox`, `list_actions`,
   `review_status`) take a shared `flock -s` so they see consistent
-  state but don't block each other.
+  state but don't block each other. (Single-user contention is rare;
+  the shared lock is cheap and future-proofs against multi-process
+  agent setups.)
 - The lock is per-repo (path-scoped). Two checkouts of the same wiki
   can run independently.
 - The pre-commit hook runs `action-scan.sh` only (read-only against
@@ -456,7 +463,7 @@ triage_inbox()
 triage_apply(id, outcome, params)
   outcome ∈ {trash, do-now, act, defer-scheduled, waiting,
              reference, someday}
-  params: { project_slug?,                  // ^[a-z0-9][a-z0-9_-]{0,63}$ (underscore allowed for _loose, _someday)
+  params: { project_slug?,                  // ^[a-z0-9_][a-z0-9_-]{0,63}$ (underscore-prefix allowed for _loose, _someday)
             context_slug?,                  // ^[a-z0-9][a-z0-9-]{0,63}$
             wait_for?,                      // ^[a-z0-9][a-z0-9-]{0,63}$ (entity slug, no [[ ]])
             page_type?,                     // ∈ {entity, concept, topic, source} (reference outcome only)
@@ -478,8 +485,11 @@ is loosened in the future.
 dates (parsed via `Date.UTC`); rejects `2026-02-30`, `2026-13-01`, etc.
 
 `triage_apply` is the single mutation entry-point. Bash fallback:
-`scripts/triage.sh <id> <outcome> [k=v ...]` invokes the same logic for
-cold-start / no-MCP situations.
+`scripts/triage.sh <id> <outcome> [k=v ...]` invokes the same logic
+for cold-start / no-MCP situations. `scripts/triage.sh --interactive`
+walks the inbox one item at a time on the terminal (prints item,
+prompts for outcome + params, calls the same library entry-points
+as the MCP tool); used by `just triage` when no agent is available.
 
 ---
 
@@ -502,11 +512,17 @@ id  status  text  file  line  context  due  defer  wait  since  every  done  pri
   frontmatter `type:` — if `project`, that slug; else `""`.
 - `context` resolved from inline `@<slug>` token, normalized via
   context alias map. Empty if no context.
-- `source_kind` ∈ `{public, private}`. `private` if the file path
-  matches any pattern from `.gitattributes` git-crypt section
-  (typically `content/private/**`, `raw/processed/private/**`) OR if
-  the file's frontmatter contains `tags: [private]`. Used by
-  `agenda.sh` for the privacy filter (see below).
+- `source_kind` ∈ `{public, private}`. `private` if **any** of the
+  following hold:
+  - the file path matches any pattern from `.gitattributes` git-crypt
+    section (typically `content/private/**`, `raw/processed/private/**`),
+  - the file's frontmatter contains `tags: [private]`,
+  - the action line contains a wikilink `[[X]]` whose resolved target
+    is a private page (per the same path / tag rules above).
+  The wikilink-target rule prevents a public action from leaking the
+  existence of a private entity via slug name on `next-actions.md`.
+  Resolution uses the alias map built by `lint.sh` (single pass).
+  Used by `agenda.sh` for the privacy filter (see below).
 - Lines without a valid `[STATUS]` checkbox marker are skipped from
   `actions.tsv` and instead emitted to `actions-rejected.tsv` with
   reason codes (bad-status, bad-key, bad-date, etc.) for lint to
@@ -520,12 +536,20 @@ id  status  text  file  line  context  due  defer  wait  since  every  done  pri
 
 **Inbox-line ID synthesis** (used by `triage_inbox` / `triage_apply`):
 
-- For inbox lines: `id = inbox-<sha1(line-text)[:10]>`. Stable as long
-  as the line text doesn't change. If the user edits the inbox file
-  between `triage_inbox()` and `triage_apply(...)`, the ID may no
-  longer resolve — `triage_apply` returns error `stale-id` and asks
-  the agent to re-call `triage_inbox()`.
+- For inbox lines: `id = inbox-<sha1(full-raw-line)[:10]>-<lineno>`,
+  where `full-raw-line` is the verbatim line including its leading
+  `- <ISO-datetime> ` prefix and the user's text, and `<lineno>` is
+  the 1-indexed line number in `inbox.md` at scan time. The
+  line-number suffix guarantees disambiguation if two captures
+  produce identical bytes (rare but possible: same text, same
+  timestamp at different sub-second moments). Stable as long as the
+  line content + position don't change. If the user edits the inbox
+  file between `triage_inbox()` and `triage_apply(...)`, the ID may
+  no longer resolve — `triage_apply` returns
+  `{ok:false, stale_id:true}` and asks the agent to re-call
+  `triage_inbox()`.
 - For files in `raw/inbox/interactive/`: `id = file-<sha1(relpath)[:10]>`.
+  Path-based, stable across re-scans.
 - For action lines on content pages: `id = <^id>` (the block-ID).
 
 Idempotent. Stdout = scan summary
@@ -752,11 +776,11 @@ these rules.
 | warn | `T8-no-next-action` | `type: project, status: active` page has zero open `[ ]`/`[/]` actions. **Exempt:** `_loose.md`, `_someday.md`, and any project page with `status: someday` or `status: done`. |
 | warn | `T9-waiting-stale` | `[?]` line where `since:` > 14 days ago. |
 | warn | `T10-overdue` | `[ ]`/`[/]` line where `due:` < today. |
-| warn | `T11-stale-someday` | `[>]` line whose enclosing page hasn't been touched in 90+ days. |
+| warn | `T11-stale-someday` | `[>]` line whose enclosing page hasn't been touched in 90+ days. (For the `_someday.md` catch-all, "page touched" reflects last edit to the file as a whole; adding one new someday item resets the clock for all entries on that page. Acceptable approximation for v1; per-line review-timestamps deferred.) |
 | warn | `T12-recur-chain-cap` | Recur chain at ≥150 (warn at 150, error at 200). Independent of `action-recur.sh`'s refuse-to-emit at 200. |
 | info | `T13-context-unused` | `type: context` page with zero referencing actions. |
-| error | `T14-bad-id-shape` | Block-ID does not match `^[a-z0-9]{3,16}$`, OR contains `~` outside the recurrence-chain shape `^<base>~<digits>`. |
-| warn | `T15-action-continuation` | Indented non-blank line follows a checkbox line on a page that contains other actions (multi-line wrapped action — not supported). |
+| error | `T14-bad-id-shape` | Block-ID does not match `^[a-z0-9]{3,16}$`, OR contains `~` outside the recurrence-chain shape `^<base>~<digits>`. (Range is wider than the mint's fixed 8-char output to accept hand-typed legacy IDs from migrating wikis.) |
+| warn | `T15-action-continuation` | Indented non-blank line follows a checkbox line on a page that contains other actions (multi-line wrapped action — not supported). `lint --fix` does NOT touch T15 violations to avoid silent data loss; user resolves manually. |
 
 `lint.sh --fix` mechanical fixes (task-aware):
 - Normalize date format (`2026/4/27` → `2026-04-27`).
@@ -783,7 +807,7 @@ these rules.
 
 | Tool | Args | Returns | Side effects |
 |------|------|---------|--------------|
-| `capture` | `{text}` | `{appended:true, line, timestamp}` | Appends to `content/inbox.md`. |
+| `capture` | `{text}` | `{appended:true, line, timestamp, sanitizations_applied:[]}` | Appends to `content/inbox.md`. The `sanitizations_applied` array names every neutralization rule that fired (e.g., `wikilink-neutralized`, `comment-neutralized`, `length-truncated`, `block-id-escaped`) so the agent can surface to the user: "I escaped your `[[link]]` — re-add the wikilink on the destination page after triage." `capture.sh` prints the same diff to stderr. |
 | `triage_inbox` | `{}` | `[{id, source, text, captured_at, ...}]` | Read-only scan of `inbox.md` lines + `raw/inbox/interactive/` files. |
 | `triage_apply` | `{id, outcome, params}` | `{ok, actions_taken[], created_pages[], updated_pages[], stale_id?}` | Mutates origin + destination files; logs; increments `task-count`. Returns `{ok:false, stale_id:true}` if the `id` no longer resolves (caller should re-run `triage_inbox()`). |
 | `list_actions` | `{filter?: {status?, context?, project?, due_before?, wait?, overdue?}}` | `[action]` | Read-only; calls `action-scan.sh` if scan map stale. |
@@ -800,8 +824,8 @@ these rules.
   - `id`: `^[a-z0-9~-]{1,32}$` (allows `inbox-...`, `file-...`, plain
     block-ID, recurrence-chain IDs).
   - `outcome` ∈ exact enum (no superset, no case variants).
-  - `project_slug`: `^[a-z0-9_][a-z0-9_-]{0,63}$` (underscore-prefix
-    allowed for `_loose`, `_someday`).
+  - `project_slug`: `^[a-z0-9_][a-z0-9_-]{0,63}$` (underscore allowed
+    as first char for `_loose`, `_someday`).
   - `context_slug`, `wait_for`, `ref_slug`: `^[a-z0-9][a-z0-9-]{0,63}$`.
   - `page_type` ∈ `{entity, concept, topic, source}`.
   - `due`, `defer`: valid `YYYY-MM-DD` calendar date (parsed via
@@ -905,7 +929,7 @@ capture *text:
     bash scripts/capture.sh {{text}}
 
 triage:
-    @echo "Open agent. Say: 'triage inbox'. Agent calls triage_inbox MCP tool."
+    bash scripts/triage.sh --interactive
 
 agenda:
     bash scripts/action-scan.sh
@@ -942,7 +966,7 @@ BATS tests under `tests/` (matches existing pattern):
 | `agenda_test.sh` | Given fixture `actions.tsv`, `agenda.sh` produces expected `next-actions.md` / `today.md` / `waiting.md` / `someday.md` / `stuck-projects.md`. Managed-region content swappable; outside-region content preserved across rebuilds. |
 | `triage_test.sh` | All seven outcomes: input inbox line + apply outcome → assert origin removed, destination written, log appended, `task-count` incremented. |
 | `recur_test.sh` | `[x] every:1w done:2026-04-27` → emits `[ ] every:1w due:2026-05-04 ^<base>~2`. Idempotent: re-run does not double-emit. `every:1m` last-day clamp covered (e.g. 2026-01-31 → 2026-02-28). Cap at 200 (refuse-to-emit). Concurrent flips race-tested via `flock` contention. |
-| `lint_task_test.sh` | Each T1-T13 rule fires on a hand-crafted bad fixture and stays silent on a good fixture. `--fix` corrections work and are idempotent. |
+| `lint_task_test.sh` | Each T1-T15 rule fires on a hand-crafted bad fixture and stays silent on a good fixture. `--fix` corrections work and are idempotent. T2 chain coverage: `^a05~2` and `^a05~3` on different pages → ok; two `^a05~2` instances on different pages → error. T15 violations are NOT auto-fixed. T6 fires on action lines and is silent on prose `@mentions` and code-block content. |
 | `task_init_test.sh` | Empty repo + `task-init.sh` → expected pages exist, `WIKI.md` patched between markers, `.awiki/config` updated. Re-run = no-op. |
 | `mcp_task_test.sh` | Spins up `awiki-server` over stdio, exercises `capture`, `triage_inbox`, `triage_apply` (one outcome), `list_actions`, `rebuild_agenda`, `review_status`, `mark_review_done`. Verifies arg validation rejects malformed inputs. |
 
@@ -1009,15 +1033,24 @@ dependency-check is extended in phase 16 to verify it).
 check off, (b) phase tests pass, (c) phase smoke runs clean,
 (d) merged to `main` with green pre-commit lint.
 
-**Spike absorption:** one unverified assumption — Obsidian Tasks
-plugin Dataview-mode interop. Phase 17 starts with a 1-day spike:
-install Obsidian + Tasks plugin against a fixture vault, enable the
-plugin's "Dataview format" option, confirm status markers + key:value
-tail metadata render and toggle as expected, AND confirm the default
-emoji format does NOT silently mis-parse our key:value tokens. Pin
-plugin version in `.obsidian/community-plugins.json`. If interop is
-not viable, downgrade Goals: "renders correctly in vanilla Obsidian"
-without plugin-compat claim.
+**Spike absorption:** two unverified assumptions, absorbed into the
+phase 17 1-day spike:
+
+1. **Obsidian Tasks plugin Dataview-mode interop.** Install Obsidian +
+   Tasks plugin against a fixture vault, enable the plugin's
+   "Dataview format" option, confirm status markers + key:value tail
+   metadata render and toggle as expected, AND confirm the default
+   emoji format does NOT silently mis-parse our key:value tokens.
+   Pin plugin version in `.obsidian/community-plugins.json`. If
+   interop is not viable, downgrade Goals: "renders correctly in
+   vanilla Obsidian" without plugin-compat claim.
+2. **`~`-separator block-ID round-trip.** Confirm Obsidian renders a
+   block ID `^a05~2` correctly in source and preview, that the block
+   is reference-able via `[[page#^a05~2]]`, and that Hugo (with the
+   awiki preprocessing pipeline) emits HTML anchors that survive the
+   `~`. If `~` breaks any of those, fall back to `^<base>__<n>`
+   (double-underscore separator); update T14 accordingly. Pure
+   downstream change; no other section affected.
 
 **Migration:** none — opt-in feature on top of v1, not modifying
 existing phases. Existing wikis adopt by running `just task-init`.

@@ -370,6 +370,55 @@ synth_check_s5() {
   fi
 }
 
+# --- S6: hand-edit inside markers -------------------------------------------
+# Fires when frontmatter `last_updated` advanced past `last_generated` AND the
+# working-tree diff vs HEAD intersects the BEGIN..END line range. Frontmatter-
+# driven (not mtime); git-aware. Pages without a HEAD or untracked are skipped.
+synth_check_s6() {
+  local page="$1"
+  local last_updated last_generated
+  last_updated=$(awk -F': *' '/^---$/{c++} c==1 && /^last_updated:/{print $2; exit}' "$page" | tr -d '"')
+  last_generated=$(awk -F': *' '/^---$/{c++} c==1 && /^last_generated:/{print $2; exit}' "$page" | tr -d '"')
+  [[ -n "$last_updated" && -n "$last_generated" ]] || return 0
+  # Compare lexicographically (ISO dates / timestamps are sort-safe).
+  local lu_date lg_date
+  lu_date="${last_updated:0:10}"
+  lg_date="${last_generated:0:10}"
+  [[ "$lu_date" > "$lg_date" ]] || return 0
+
+  # Check git status: is page tracked? does HEAD have it?
+  git ls-files --error-unmatch "$page" >/dev/null 2>&1 || return 0
+  git show "HEAD:$page" >/dev/null 2>&1 || return 0
+
+  # Compute begin/end line numbers in working tree.
+  local begin_line end_line
+  begin_line=$(grep -nE '^<!-- BEGIN GENERATED .* -->$' "$page" | head -1 | cut -d: -f1)
+  end_line=$(grep -nE '^<!-- END GENERATED -->$' "$page" | head -1 | cut -d: -f1)
+  [[ -n "$begin_line" && -n "$end_line" ]] || return 0
+
+  # Diff hunks vs HEAD; check if any hunk's working-tree line range intersects
+  # [begin_line+1, end_line-1]. Use unified diff with -U0.
+  local diff_intersects=0
+  local hunk start len hunk_end region_start region_end
+  while IFS= read -r hunk; do
+    [[ "$hunk" =~ ^@@\ -[0-9,]+\ \+([0-9]+)(,([0-9]+))?\ @@ ]] || continue
+    start="${BASH_REMATCH[1]}"
+    len="${BASH_REMATCH[3]:-1}"
+    hunk_end=$((start + len - 1))
+    region_start=$((begin_line + 1))
+    region_end=$((end_line - 1))
+    if [[ "$start" -le "$region_end" && "$hunk_end" -ge "$region_start" ]]; then
+      diff_intersects=1
+      break
+    fi
+  done < <(git diff -U0 -- "$page" 2>/dev/null | grep '^@@')
+
+  if [[ "$diff_intersects" -eq 1 ]]; then
+    echo "LINT|WARN|$page|S6: hand-edit inside generated region (last_updated=$last_updated > last_generated=$last_generated)"
+    WARNS=$((WARNS + 1))
+  fi
+}
+
 # --- entry points ------------------------------------------------------------
 # synth_lint_file: lint a single synthesis page. Caller passes the page path
 # and the wiki content directory (used by S3/S4 for slug resolution).
@@ -390,7 +439,8 @@ synth_lint_file() {
   synth_check_s3 "$page" "$content_dir"
   synth_check_s4 "$page" "$content_dir"
   synth_check_s5 "$page" "$content_dir"
-  # synth_check_s6..S9 added in subsequent tasks.
+  synth_check_s6 "$page"
+  # synth_check_s9 added in task 14.11.
 }
 
 synth_lint_dir() {

@@ -83,3 +83,120 @@ run_synth_lint_file() {
   [[ "$output" != *"LINT|WARN"*"S5"* ]]
   [[ "$output" != *"LINT|ERROR"*"S5"* ]]
 }
+
+s6_setup_repo() {
+  WORK="$(mktemp -d)/repo"
+  mkdir -p "$WORK/content/synthesis" "$WORK/synthesis-plugins" "$WORK/scripts"
+  cp scripts/lint-synth*.sh scripts/lint-synth*.py "$WORK/scripts/"
+  cp synthesis-plugins/briefing.md "$WORK/synthesis-plugins/"
+  REPO_TOP="$(pwd)"
+  pushd "$WORK" >/dev/null
+  git init -q
+  git config user.email t@t
+  git config user.name t
+}
+
+s6_teardown_repo() {
+  popd >/dev/null
+  rm -rf "$WORK"
+}
+
+@test "S6: marker edit + last_updated bump → warning" {
+  s6_setup_repo
+  cat > content/synthesis/s6-page.md <<'P'
+---
+title: "S6"
+date: 2026-04-01
+last_updated: 2026-04-01
+last_generated: 2026-04-15T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [foo]
+sources: ["[[foo]]"]
+draft: false
+---
+
+Lead.
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- foo claim [[foo]]
+
+## Key Findings
+- foo finding [[foo]]
+
+## Open Questions
+- q?
+
+## Evidence
+> "x" — [[foo]]
+
+<!-- END GENERATED -->
+P
+  git add . && git commit -qm init
+
+  # Edit inside markers AND bump last_updated.
+  python3 - <<'PY'
+import pathlib
+p = pathlib.Path("content/synthesis/s6-page.md")
+t = p.read_text()
+t = t.replace("foo claim", "foo CLAIM-EDITED")
+t = t.replace("last_updated: 2026-04-01", "last_updated: 2026-05-01")
+p.write_text(t)
+PY
+
+  run bash -c "source scripts/lint-synth.sh; ERRORS=0;WARNS=0;INFOS=0; synth_check_s6 content/synthesis/s6-page.md"
+  s6_teardown_repo
+  [[ "$output" == *"LINT|WARN"*"S6"* ]]
+}
+
+@test "S6: feedback-only edit + last_updated bump → no warning" {
+  s6_setup_repo
+  cat > content/synthesis/s6-page.md <<'P'
+---
+title: "S6"
+date: 2026-04-01
+last_updated: 2026-04-01
+last_generated: 2026-04-15T00:00:00Z
+type: synthesis
+plugin: briefing
+scope:
+  slugs: [foo]
+sources: ["[[foo]]"]
+draft: false
+---
+
+Lead.
+
+## Feedback
+
+- earlier note
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=a3f9c2 -->
+
+## TL;DR
+- foo claim [[foo]]
+
+## Evidence
+> "x" — [[foo]]
+
+<!-- END GENERATED -->
+P
+  git add . && git commit -qm init
+
+  # Edit ONLY the Feedback section AND bump last_updated.
+  python3 - <<'PY'
+import pathlib
+p = pathlib.Path("content/synthesis/s6-page.md")
+t = p.read_text()
+t = t.replace("- earlier note", "- earlier note\n- a new feedback bullet")
+t = t.replace("last_updated: 2026-04-01", "last_updated: 2026-05-01")
+p.write_text(t)
+PY
+
+  run bash -c "source scripts/lint-synth.sh; ERRORS=0;WARNS=0;INFOS=0; synth_check_s6 content/synthesis/s6-page.md"
+  s6_teardown_repo
+  [[ "$output" != *"LINT|WARN"*"S6"* ]]
+}

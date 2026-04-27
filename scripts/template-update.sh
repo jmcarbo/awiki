@@ -497,5 +497,90 @@ python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "
 echo "info: Commit A complete ($SYNC_SHA)"
 fi  # end Commit A (skipped on resume past)
 
-echo "info: Commits B/C/D not yet implemented"
+# === Phase 3 — Commit B: migrations ===
+if should_skip_phase commit-b; then
+  echo "info: resume — skipping Commit B"
+else
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-b --status started
+
+OLD_VERSION=$(python3 -c "import json; print(json.load(open('$PJ'))['version'])")
+NEW_VERSION=$(awk -F= '$1=="template_version"{print $2}' <(bash "$SCRIPT_DIR/template-manifest.sh" load "$NEW_MANIFEST"))
+
+# Already-applied IDs.
+APPLIED_IDS=$(python3 -c "
+import json
+d=json.load(open('$PJ'))
+for m in d.get('applied_migrations', []):
+    print(m.get('id', ''))
+")
+
+# Iterate migrations in numeric order (by filename).
+MIG_LIST=$(ls "$FETCH_DIR/migrations/"*.sh "$FETCH_DIR/migrations/"*.prompt.md 2>/dev/null | sort || true)
+for MIG in $MIG_LIST; do
+  [[ -e "$MIG" ]] || continue
+  FNAME=$(basename "$MIG")
+  [[ "$FNAME" == "README.md" || "$FNAME" == ".gitkeep" ]] && continue
+  [[ "$FNAME" == schema-*.sh ]] && continue   # handled in Phase 1.5
+
+  if [[ "$FNAME" == *.sh ]]; then
+    MID="${FNAME%.sh}"
+  else
+    MID="${FNAME%.prompt.md}"
+  fi
+
+  # Skip if already applied.
+  if echo "$APPLIED_IDS" | grep -qx "$MID"; then continue; fi
+  if [[ -n "$SKIP_MIGRATION" && "$SKIP_MIGRATION" == "$MID" ]]; then
+    python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+      --id "$MID" --status skipped --reason "user --skip-migration"
+    continue
+  fi
+
+  if [[ "$FNAME" == *.sh ]]; then
+    if ! python3 "$HELPERS/migration.py" run "$MIG" \
+         --repo-root "$REPO_ROOT" --old-version "$OLD_VERSION" --new-version "$NEW_VERSION"; then
+      echo "halt: migration $MID failed. Fix or run with --skip-migration $MID then --continue." >&2
+      exit 1
+    fi
+    python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+      --id "$MID" --status applied
+  else
+    # LLM prompt: stage.
+    PEND_DIR="$REPO_ROOT/.awiki/pending-prompts"
+    STAGE_ARGS=(--user-tree "$REPO_ROOT" --pending-dir "$PEND_DIR")
+    [[ -f "$REPO_ROOT/.gitattributes" ]] && STAGE_ARGS+=(--gitattributes "$REPO_ROOT/.gitattributes")
+    if ! python3 "$HELPERS/migration.py" stage-prompt "$MIG" "${STAGE_ARGS[@]}"; then
+      echo "halt: prompt staging failed for $MID" >&2
+      exit 1
+    fi
+    # If risk: high under --non-interactive → record skipped instead of staged.
+    RISK=$(awk -F: '/^risk:/{gsub(/[ "'\'']/, "", $2); print $2; exit}' "$MIG" || echo medium)
+    if [[ "$RISK" == "high" && $NON_INTERACTIVE -eq 1 ]]; then
+      rm -f "$PEND_DIR/$(basename "$MIG")"
+      python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+        --id "$MID" --status skipped --reason "non-interactive high-risk"
+      continue
+    fi
+    # Note: applied_migrations[] entry for LLM prompts is appended LATER by the agent;
+    # state.applied_migrations_pending only tracks staged prompts so Commit D can list them.
+    python3 "$HELPERS/state.py" add-migration-pending "$FETCH_DIR/.update-state.json" \
+      --id "$MID" --status applied --reason "staged-as-prompt"
+  fi
+done
+
+# Stage and commit (only if there were changes).
+git add -A
+if git diff --cached --quiet; then
+  echo "info: no migration changes to commit"
+else
+  git commit -q -m "chore(template): run migrations"
+  COMMIT_B_SHA=$(git rev-parse HEAD)
+  python3 "$HELPERS/state.py" set-last-completed "$FETCH_DIR/.update-state.json" "$COMMIT_B_SHA"
+fi
+python3 "$HELPERS/state.py" set-phase "$FETCH_DIR/.update-state.json" --phase commit-b --status committed
+
+echo "info: Commit B complete"
+fi  # end Commit B (skipped on resume)
+
+echo "info: Commits C/D not yet implemented"
 exit 0

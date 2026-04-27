@@ -181,5 +181,89 @@ EOF
   [[ "$CUR_BRANCH" =~ ^awiki-template-update/ ]]
   [ -f scripts/new-helper.sh ]
   grep -q "Added in v1" WIKI.md
-  git log --format=%s -1 | grep -q "sync to"
+  git log --format=%s -3 | grep -q "sync to"
+}
+
+@test "template-update --apply: Commit B runs mechanical migration + records pending" {
+  cd "$TMP"
+  bash "$REPO_ROOT/scripts/template-init.sh" \
+    --repo "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --ref main --version 0.1.0 --commit "$(git rev-parse HEAD)" >/dev/null
+  git add .awiki
+  git -c user.email=a@b -c user.name=t commit -q -m bootstrap
+  V1="$REPO_ROOT/tests/fixtures/template-update/v1"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V1" --accept-source-change --apply --non-interactive
+  [ "$status" -eq 0 ] || {
+    echo "STATUS=$status"
+    echo "$output"
+    false
+  }
+  # Check that the migration ran (added "## Tagline" to WIKI.md).
+  grep -q "## Tagline" WIKI.md
+  # Commit B exists.
+  git log --format=%s -3 | grep -q "run migrations"
+  # State file shows Commit B committed.
+  PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
+  [ "$PHASE" = "commit-b" ]
+}
+
+@test "template-update --apply: LLM prompt staged into pending-prompts" {
+  cd "$TMP"
+  bash "$REPO_ROOT/scripts/template-init.sh" \
+    --repo "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --ref main --version 0.1.0 --commit "$(git rev-parse HEAD)" >/dev/null
+  git add .awiki
+  git -c user.email=a@b -c user.name=t commit -q -m bootstrap
+  mkdir -p content/notes && echo "## Foo" > content/notes/a.md
+  git add content && git -c user.email=a@b -c user.name=t commit -q -m add-content
+  V2="$REPO_ROOT/tests/fixtures/template-update/v2-with-llm"
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$V2" --accept-source-change --apply --non-interactive
+  [ "$status" -eq 0 ] || {
+    echo "STATUS=$status"
+    echo "$output"
+    false
+  }
+  [ -f .awiki/pending-prompts/0002-rewrite-foo.prompt.md ]
+  grep -q "Resolved scope" .awiki/pending-prompts/0002-rewrite-foo.prompt.md
+}
+
+@test "template-update --apply: high-risk LLM prompt under non-interactive auto-declined" {
+  cd "$TMP"
+  TMP_V=$(mktemp -d)
+  cp -R "$REPO_ROOT/tests/fixtures/template-update/v1/." "$TMP_V/"
+  cat > "$TMP_V/migrations/0003-high-risk.prompt.md" <<'EOF'
+---
+id: 0003-high-risk
+requires: [agent]
+scope_glob: "content/**/*.md"
+risk: high
+---
+Big rewrite.
+EOF
+  # Bump template version so source-check / sync work.
+  python3 -c "
+import re
+p='$TMP_V/template.manifest.toml'
+t=open(p).read()
+t=re.sub(r'template_version = \"0\\.2\\.0\"', 'template_version = \"0.4.0\"', t)
+open(p,'w').write(t)
+"
+  bash "$REPO_ROOT/scripts/template-init.sh" \
+    --repo "$REPO_ROOT/tests/fixtures/template-update/v0" \
+    --ref main --version 0.1.0 --commit "$(git rev-parse HEAD)" >/dev/null
+  git add .awiki
+  git -c user.email=a@b -c user.name=t commit -q -m bootstrap
+  mkdir -p content/notes && echo "## Foo" > content/notes/a.md
+  git add content && git -c user.email=a@b -c user.name=t commit -q -m add-content
+  run bash "$REPO_ROOT/scripts/template-update.sh" \
+    --source "$TMP_V" --accept-source-change --apply --non-interactive
+  [ "$status" -eq 0 ] || {
+    echo "STATUS=$status"
+    echo "$output"
+    false
+  }
+  [ ! -f .awiki/pending-prompts/0003-high-risk.prompt.md ]
+  rm -rf "$TMP_V"
 }

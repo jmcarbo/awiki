@@ -77,6 +77,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
     }
 
+    # Snapshot pre-run status so the audit only flags NEW changes the migration produced.
+    pre_out = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        capture_output=True, text=True
+    ).stdout
+    pre_lines = set(pre_out.splitlines())
+
     # Run --dry-run first as audit log.
     print(f"info: dry-run {args.script}", file=sys.stderr)
     rc = subprocess.call(["bash", str(args.script), "--dry-run"], env=env, cwd=str(repo_root))
@@ -110,8 +117,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Parse porcelain to distinguish tracked vs untracked.
     # Format: "XY filename" — untracked is "?? filename".
+    # Only consider lines that are NEW relative to pre-run snapshot.
     for line in out.splitlines():
         if not line.strip():
+            continue
+        if line in pre_lines:
             continue
         xy = line[:2]
         rel = line[3:].strip()

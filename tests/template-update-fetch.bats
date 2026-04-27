@@ -131,9 +131,9 @@ teardown() { rm -rf "$TMP"; }
   V3="$REPO_ROOT/tests/fixtures/template-update/v3-schema-bump"
   run bash "$REPO_ROOT/scripts/template-update.sh" \
     --source "$V3" --accept-source-change --schema-upgrade --apply --non-interactive
-  # Phase progresses to commit-a after Commit A is implemented.
+  # Phase progresses through commit-a, commit-b as later phases come online.
   PHASE=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json phase)
-  [[ "$PHASE" =~ ^(schema-upgrade|commit-a)$ ]]
+  [[ "$PHASE" =~ ^(schema-upgrade|commit-a|commit-b)$ ]]
   STATUS=$(python3 "$REPO_ROOT/scripts/_template_helpers/state.py" get .awiki/template-cache/_fetch/.update-state.json status)
   [ "$STATUS" = "committed" ]
   # Verify schema upgrade was recorded in applied_migrations_pending.

@@ -461,3 +461,84 @@ EOF
   run run_lint
   ! grep -F 'T10:' <<< "$output"
 }
+
+# --- T11: stale-someday (warn, page last_updated > 90d) ------------------
+
+@test "T11 fires on [>] when enclosing page last_updated > 90d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local stale; stale="$(_n_days_ago 100)"
+  cat > "$WORK/content/projects/dusty.md" <<EOF
+---
+title: "Dusty"
+type: project
+status: active
+last_updated: ${stale}
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep dusty active @home ^dustopen
+- [>] reorganize garage someday @home ^s01
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  [[ "$output" == *"T11:"* ]]
+  [[ "$output" == *"content/projects/dusty.md"* ]]
+}
+
+@test "T11 silent on [>] when enclosing page last_updated <= 90d ago" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local fresh; fresh="$(_n_days_ago 30)"
+  cat > "$WORK/content/projects/recent.md" <<EOF
+---
+title: "Recent"
+type: project
+status: active
+last_updated: ${fresh}
+draft: false
+---
+
+## Open Actions
+
+- [ ] keep recent active @home ^recopen
+- [>] reorganize garage someday @home ^s02
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -F 'T11:' <<< "$output"
+}
+
+@test "T11 boundary: exactly 90d is silent, 91d is warn" {
+  cp -R "$BATS_TEST_DIRNAME/fixtures/wiki-task-good/." "$WORK/"
+  local d90; d90="$(_n_days_ago 90)"
+  local d91; d91="$(_n_days_ago 91)"
+  cat > "$WORK/content/projects/p90.md" <<EOF
+---
+title: "P90"
+type: project
+status: active
+last_updated: ${d90}
+draft: false
+---
+
+- [ ] keep p90 alive @home ^p90keep
+- [>] item @home ^p90a
+EOF
+  cat > "$WORK/content/projects/p91.md" <<EOF
+---
+title: "P91"
+type: project
+status: active
+last_updated: ${d91}
+draft: false
+---
+
+- [ ] keep p91 alive @home ^p91keep
+- [>] item @home ^p91a
+EOF
+  AWIKI_REPO_ROOT="$WORK" bash "$BATS_TEST_DIRNAME/../scripts/action-scan.sh" >/dev/null
+  run run_lint
+  ! grep -E 'content/projects/p90\.md\|T11' <<< "$output"
+  grep -E 'content/projects/p91\.md\|T11' <<< "$output"
+}

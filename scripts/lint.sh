@@ -122,6 +122,7 @@ awiki_lint_run_task_rules() {
   awiki_lint_task_rule_T8   "$actions_tsv"
   awiki_lint_task_rule_T9   "$actions_tsv"
   awiki_lint_task_rule_T10  "$actions_tsv"
+  awiki_lint_task_rule_T11  "$actions_tsv"
   awiki_lint_task_rule_T14
   awiki_lint_task_rule_T15  "$rejected_tsv"
 }
@@ -421,6 +422,41 @@ awiki_lint_task_rule_T10() {
         "$file" "$due" "$diff" "$id"
     fi
   done < <(awk -F'\t' 'NR>1 && ($2==" " || $2=="/") && $7!="" { printf "%s\t%s\t%s\n", $1, $7, $4 }' "$act")
+}
+
+# T11: [>] someday lines whose enclosing page's last_updated frontmatter
+# is more than 90 days old. Caveat: granularity is page-level — adding a
+# new someday item resets the clock for every entry on the same page.
+# (Documented in WIKI.md.)
+awiki_lint_task_rule_T11() {
+  local act="$1"
+  [[ -f "$act" ]] || return 0
+  local today; today="$(date -u +%Y-%m-%d)"
+  declare -A page_lu_cache=()
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    local id file
+    id="$(printf '%s' "$row" | cut -f1)"
+    file="$(printf '%s' "$row" | cut -f2)"
+    [[ -n "$id" && -n "$file" ]] || continue
+    local lu
+    if [[ -n "${page_lu_cache[$file]+x}" ]]; then
+      lu="${page_lu_cache[$file]}"
+    else
+      local abs="$AWIKI_REPO_ROOT/$file"
+      lu=""
+      if [[ -f "$abs" ]]; then
+        lu="$(awiki_frontmatter_value "$abs" last_updated)"
+      fi
+      page_lu_cache[$file]="$lu"
+    fi
+    [[ "$lu" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
+    local diff; diff="$(awiki_days_between "$lu" "$today")"
+    if [[ "$diff" =~ ^-?[0-9]+$ ]] && (( diff > 90 )); then
+      printf 'LINT|WARN|%s|T11: stale-someday (page last_updated:%s, %dd ago) ^%s\n' \
+        "$file" "$lu" "$diff" "$id"
+    fi
+  done < <(awk -F'\t' 'NR>1 && $2==">" { printf "%s\t%s\n", $1, $4 }' "$act")
 }
 
 awiki_lint_task_rule_T14() {

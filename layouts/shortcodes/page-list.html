@@ -1,0 +1,6 @@
+{{ $section := .Get "section" | default .Page.Section }}
+<ul>
+{{ range where (where .Site.RegularPages "Section" $section) "Type" "ne" "section-index" }}
+  <li><a href="{{ .RelPermalink }}">{{ .Title }}</a> — {{ .Summary }}</li>
+{{ end }}
+</ul>

@@ -30,3 +30,10 @@ teardown() {
   [ -d content/datasets ]
   [ -d data ]
 }
+
+@test "data-init creates .gitkeep in each new directory" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  [ -f content/datasets/.gitkeep ]
+  [ -f data/.gitkeep ]
+}

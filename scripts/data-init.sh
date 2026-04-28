@@ -15,6 +15,7 @@ step_dirs() {
   for d in content/datasets data; do
     if [[ ! -d "$d" ]]; then
       mkdir -p "$d"
+      touch "$d/.gitkeep"
       note "created $d"
     else
       note "skip $d (exists)"

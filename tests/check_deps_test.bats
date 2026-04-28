@@ -24,3 +24,10 @@
   # Hint mentions util-linux on Linux OR flock shim/util-linux on macOS.
   [[ "$output" == *"util-linux"* || "$output" == *"flock"* ]]
 }
+
+@test "check-deps reports markdown-it-py status" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/check-deps.sh"
+  # Status may be 0 (installed) or non-zero only if a HARD dep is missing.
+  # markdown-it-py is OPTIONAL → must appear in output as either OK or OPTIONAL-MISSING.
+  echo "$output" | grep -E "^(OK\|markdown-it-py|OPTIONAL-MISSING\|markdown-it-py)" >/dev/null
+}

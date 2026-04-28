@@ -78,6 +78,14 @@ else
   echo "  install: pip3 install pyyaml" >&2
 fi
 
+# Optional Python module: markdown-it-py (used by scripts/ingest-git-transform.py).
+if command -v python3 >/dev/null 2>&1 && python3 -c "import markdown_it" >/dev/null 2>&1; then
+  echo "OK|markdown-it-py (optional)"
+else
+  echo "OPTIONAL-MISSING|markdown-it-py"
+  echo "  install: pip3 install markdown-it-py" >&2
+fi
+
 if [[ "$ERRORS" -gt 0 ]]; then
   echo "DEPS-SUMMARY|errors=$ERRORS" >&2
   exit 1

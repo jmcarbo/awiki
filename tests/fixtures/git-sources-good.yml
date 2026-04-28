@@ -1,0 +1,14 @@
+schema: 1
+repos:
+  - name: example-repo
+    url: https://github.com/example/example.git
+    paths: [README.md, docs/]
+    exclude: ["**/CHANGELOG.md"]
+    private: false
+    protect_edits: false
+    summarize: false
+    default_branch: main
+  - name: private-runbooks
+    url: git@github.com:corp/runbooks.git
+    paths: [docs/]
+    private: true

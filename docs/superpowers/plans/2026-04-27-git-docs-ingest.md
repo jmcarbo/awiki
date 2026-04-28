@@ -91,7 +91,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/check-deps.sh tests/check_deps_test.bats
-git commit -m "feat(deps): check markdown-it-py for git-docs ingest (phase 18)"
+git commit -m "feat(deps): check markdown-it-py for git-docs ingest (phase 20)"
 ```
 
 ---
@@ -114,13 +114,13 @@ Note existing `.awiki/lock` line — it currently treats lock as a single file. 
 Append to `.gitignore`:
 
 ```
-# git-docs ingest (phase 18)
+# git-docs ingest (phase 20)
 .awiki/git-state/
 .awiki/lock/
 raw/_git-cache/
 ```
 
-If a line `.awiki/lock` (file) already exists, leave it — `.awiki/lock/` (dir) entry is additional and matches a different path. We won't migrate the existing single-file lock; phase 18 introduces a `.awiki/lock/` directory of per-repo lock files used **only** by `ingest-git.sh`. The existing file lock used by `lib/lock.sh` is unchanged.
+If a line `.awiki/lock` (file) already exists, leave it — `.awiki/lock/` (dir) entry is additional and matches a different path. We won't migrate the existing single-file lock; phase 20 introduces a `.awiki/lock/` directory of per-repo lock files used **only** by `ingest-git.sh`. The existing file lock used by `lib/lock.sh` is unchanged.
 
 - [ ] **Step 3: Verify**
 
@@ -134,7 +134,7 @@ Expected: each path reported as ignored by the new lines.
 
 ```bash
 git add .gitignore
-git commit -m "chore(gitignore): ignore git-docs state, cache, per-repo lock dir (phase 18)"
+git commit -m "chore(gitignore): ignore git-docs state, cache, per-repo lock dir (phase 20)"
 ```
 
 ---
@@ -194,17 +194,15 @@ Expected: FAIL — `lib/git-state.sh` not found.
 #!/usr/bin/env bash
 # Source-only helper. Read/write per-repo state JSON for git-docs ingest.
 # Functions:
-#   awiki_git_state_path <repo_key>       → echoes .awiki/git-state/<repo_key>.json
-#   awiki_git_state_load <repo_key>       → prints JSON; '{}' if missing
-#   awiki_git_state_save <repo_key> <json> → atomic write (tmp + rename)
-#   awiki_git_state_validate <json>       → exits 0 if schema=1 and required keys present
+#   awiki_git_state_path <repo_key>             → echoes .awiki/git-state/<repo_key>.json
+#   awiki_git_state_load <repo_key>             → prints JSON; '{}' if missing
+#   awiki_git_state_save <repo_key> <json>      → atomic write (tmp + rename)
+#   awiki_git_state_validate <json>             → exits 0 if schema=1 and required keys present
+#   awiki_git_state_validate_repo_key <repo_key> → exits 0 if repo_key is safe (no path traversal)
 
 awiki_git_state_path() {
   local repo_key="$1"
-  if [[ -z "$repo_key" ]]; then
-    echo "ERROR: awiki_git_state_path requires repo_key" >&2
-    return 1
-  fi
+  awiki_git_state_validate_repo_key "$repo_key" || return 1
   echo ".awiki/git-state/${repo_key}.json"
 }
 
@@ -220,6 +218,7 @@ awiki_git_state_load() {
 
 awiki_git_state_save() {
   local repo_key="$1" json="$2"
+  awiki_git_state_validate_repo_key "$repo_key" || return 1
   local path
   path="$(awiki_git_state_path "$repo_key")" || return 1
   mkdir -p "$(dirname "$path")"
@@ -242,13 +241,30 @@ except Exception as e:
     print(f"ERROR: invalid JSON: {e}", file=sys.stderr); sys.exit(1)
 if obj.get("schema") != 1:
     print("ERROR: schema must be 1", file=sys.stderr); sys.exit(1)
-for key in ("repo_key","repo_name","url","head_sha","files"):
+for key in ("repo_key","repo_name","url","default_branch","head_sha","ingested_at","private","files"):
     if key not in obj:
         print(f"ERROR: missing key: {key}", file=sys.stderr); sys.exit(1)
 sys.exit(0)
 PY
 }
+
+awiki_git_state_validate_repo_key() {
+  local repo_key="$1"
+  if [[ -z "$repo_key" ]]; then
+    echo "ERROR: repo_key is empty" >&2
+    return 1
+  fi
+  if [[ "$repo_key" =~ \.\. ]] || [[ "$repo_key" == /* ]] || [[ "$repo_key" =~ / ]]; then
+    echo "ERROR: repo_key contains path-traversal chars: $repo_key" >&2
+    return 1
+  fi
+  return 0
+}
 ```
+
+`awiki_git_state_path` and `awiki_git_state_save` MUST call
+`awiki_git_state_validate_repo_key` before constructing or writing the
+path so a poisoned `repo_key` cannot escape `.awiki/git-state/`.
 
 - [ ] **Step 4: Run test, expect pass**
 
@@ -278,27 +294,45 @@ Append to `tests/ingest_git_lib_test.bats`:
 
 @test "git-state: validate() rejects schema!=1" {
   source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
-  run awiki_git_state_validate '{"schema":2,"repo_key":"rk","repo_name":"r","url":"u","head_sha":"s","files":{}}'
+  run awiki_git_state_validate '{"schema":2,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","ingested_at":"t","private":false,"files":{}}'
   [ "$status" -ne 0 ]
 }
 
 @test "git-state: validate() accepts well-formed" {
   source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
-  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","head_sha":"s","files":{}}'
+  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","ingested_at":"t","private":false,"files":{}}'
   [ "$status" -eq 0 ]
+}
+
+@test "git-state: validate() rejects missing ingested_at (spec §7.2 required)" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","private":false,"files":{}}'
+  [ "$status" -ne 0 ]
+}
+
+@test "git-state: path() rejects repo_key with .. (path traversal)" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_path "../escape"
+  [ "$status" -ne 0 ]
+}
+
+@test "git-state: path() rejects repo_key with / " {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_path "evil/path"
+  [ "$status" -ne 0 ]
 }
 ```
 
-- [ ] **Step 6: Run all four tests, expect pass**
+- [ ] **Step 6: Run all tests, expect pass**
 
 Run: `bats tests/ingest_git_lib_test.bats`
-Expected: 4 of 4 PASS.
+Expected: 8 of 8 PASS (path + load + save + 2 validate + 1 missing-key + 2 path-traversal).
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add scripts/lib/git-state.sh tests/ingest_git_lib_test.bats
-git commit -m "feat(git-docs): add lib/git-state.sh — atomic JSON state per repo (phase 18)"
+git commit -m "feat(git-docs): add lib/git-state.sh — atomic JSON state per repo (phase 20)"
 ```
 
 ---
@@ -524,7 +558,7 @@ Expected: PASS for the 6 sync tests; the 3 yaml-loading tests pass if pyyaml ins
 
 ```bash
 git add scripts/lib/git-config.sh tests/ingest_git_lib_test.bats tests/fixtures/git-sources-good.yml tests/fixtures/git-sources-bad.yml
-git commit -m "feat(git-docs): add lib/git-config.sh — yaml parse + name/paths validation (phase 18)"
+git commit -m "feat(git-docs): add lib/git-config.sh — yaml parse + name/paths validation (phase 20)"
 ```
 
 ---
@@ -738,7 +772,7 @@ Expected: 5 of 5 PASS.
 
 ```bash
 git add scripts/lib/git-clone.sh scripts/lib/.. tests/ingest_git_lib_test.bats tests/util/build-git-fixture.sh
-git commit -m "feat(git-docs): add lib/git-clone.sh + fixture builder (phase 18)"
+git commit -m "feat(git-docs): add lib/git-clone.sh + fixture builder (phase 20)"
 ```
 
 ---
@@ -963,7 +997,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/README.md
-git commit -m "feat(git-docs): add transform.py — frontmatter strip + emit (phase 18)"
+git commit -m "feat(git-docs): add transform.py — frontmatter strip + emit (phase 20)"
 ```
 
 ---
@@ -1202,7 +1236,7 @@ Expected: 5 of 5 PASS (including the 1 from task 6).
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/docs/intro.md tests/fixtures/git-docs-good/seed/docs/foo.md
-git commit -m "feat(git-docs): transform.py — rewrite md links to wikilinks (phase 18)"
+git commit -m "feat(git-docs): transform.py — rewrite md links to wikilinks (phase 20)"
 ```
 
 ---
@@ -1352,7 +1386,7 @@ Expected: 7 of 7 PASS.
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/docs/img/arch.png tests/fixtures/git-docs-good/seed/docs/intro.md
-git commit -m "feat(git-docs): transform.py — copy images + rewrite path (phase 18)"
+git commit -m "feat(git-docs): transform.py — copy images + rewrite path (phase 20)"
 ```
 
 ---
@@ -1515,7 +1549,7 @@ Expected: 2 of 2 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh skeleton — argparse, lock, dry-run (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh skeleton — argparse, lock, dry-run (phase 20)"
 ```
 
 ---
@@ -1662,7 +1696,7 @@ Expected: 4 of 4 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — walk + diff (added/modified/removed) (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — walk + diff (added/modified/removed) (phase 20)"
 ```
 
 ---
@@ -1811,7 +1845,7 @@ Expected: 6 of 6 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — slug map + transform invocation + write (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — slug map + transform invocation + write (phase 20)"
 ```
 
 ---
@@ -1890,7 +1924,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — generate repo entity page (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — generate repo entity page (phase 20)"
 ```
 
 ---
@@ -1960,7 +1994,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — graveyard removed files to raw/_originals/git/ (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — graveyard removed files to raw/_originals/git/ (phase 20)"
 ```
 
 ---
@@ -2058,7 +2092,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — persist .awiki/git-state/<key>.json (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — persist .awiki/git-state/<key>.json (phase 20)"
 ```
 
 ---
@@ -2125,7 +2159,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — batched log/catalog/qmd housekeeping (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — batched log/catalog/qmd housekeeping (phase 20)"
 ```
 
 ---
@@ -2207,7 +2241,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflicts to checkpoint (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflicts to checkpoint (phase 20)"
 ```
 
 ---
@@ -2224,7 +2258,7 @@ git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflict
 Insert in `justfile` after `ingest-batch-list:`:
 
 ```
-# === git-docs ingest (phase 18) ===
+# === git-docs ingest (phase 20) ===
 ingest-git spec *flags:
     bash scripts/ingest-git.sh {{spec}} {{flags}}
 
@@ -2283,7 +2317,7 @@ Expected: PASS.
 
 ```bash
 git add justfile WIKI.md tests/ingest_git_test.bats
-git commit -m "feat(git-docs): justfile recipe + WIKI.md §4.7 doc (phase 18)"
+git commit -m "feat(git-docs): justfile recipe + WIKI.md §4.7 doc (phase 20)"
 ```
 
 ---
@@ -2351,7 +2385,7 @@ Expected: 3 of 3 PASS. If FAIL, fix the orchestrator inline (likely a bug in the
 
 ```bash
 git add tests/ingest_git_test.bats
-git commit -m "test(git-docs): lock exit codes 14 + 15 + --repo-name override (phase 18)"
+git commit -m "test(git-docs): lock exit codes 14 + 15 + --repo-name override (phase 20)"
 ```
 
 ---
@@ -2388,7 +2422,7 @@ Expected: PASS. If FAIL, the transform's emitted frontmatter is missing a requir
 
 ```bash
 git add tests/ingest_git_test.bats scripts/ingest-git-transform.py
-git commit -m "test(git-docs): lock lint-clean invariant on derived pages (phase 18)"
+git commit -m "test(git-docs): lock lint-clean invariant on derived pages (phase 20)"
 ```
 
 ---
@@ -2426,7 +2460,7 @@ Expected: PASS.
 
 ```bash
 git add tests/ingest_git_test.bats
-git commit -m "test(git-docs): self-host smoke — ingest awiki's own docs/superpowers/ (phase 18)"
+git commit -m "test(git-docs): self-host smoke — ingest awiki's own docs/superpowers/ (phase 20)"
 ```
 
 ---
@@ -2461,19 +2495,19 @@ Optional: actually run `just ingest-git <some-real-repo>` once on a small real O
 - [ ] **Step 3: Append phase log entry**
 
 ```bash
-bash scripts/log-append.sh phase "phase 18 complete — git-docs ingest pipeline (ingest-git.sh + 3 libs + transform.py + 4 bats files)"
+bash scripts/log-append.sh phase "phase 20 complete — git-docs ingest pipeline (ingest-git.sh + 3 libs + transform.py + 4 bats files)"
 ```
 
 - [ ] **Step 4: Commit log entry**
 
 ```bash
 git add content/log.md
-git commit -m "chore(log): record phase 18 complete (git-docs ingest)"
+git commit -m "chore(log): record phase 20 complete (git-docs ingest)"
 ```
 
 ---
 
-## Open items deferred to phase 19+ (not blocking phase 18)
+## Open items deferred to phase 19+ (not blocking phase 20)
 
 - MCP tool surfacing of `ingest_git` (spec §10 #5).
 - Cross-repo wikilink resolution (spec §3 non-goal).

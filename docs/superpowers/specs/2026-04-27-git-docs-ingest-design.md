@@ -3,7 +3,7 @@
 **Status:** draft
 **Date:** 2026-04-27
 **Author:** brainstormed with Claude (Opus 4.7)
-**Phase target:** phase 18 (follows phase 17 task-layer)
+**Phase target:** phase 20 (follows phase 19 task-layer review/polish)
 
 ## 1. Summary
 
@@ -359,7 +359,7 @@ tests). Cover:
    from render. Likely safe but verify.
 5. **MCP tool** — surface `ingest_git` alongside existing
    `ingest_source`/`lint`/`query_wiki`/`update_catalog` MCP tools.
-   Defer to phase 18.5 or v2.
+   Defer to phase 20.5 or v2.
 6. **Justfile recipe naming** — `ingest-git` chosen (matches
    `ingest-pdf`, `ingest-audio` siblings).
 7. **Default include paths** — locked at
@@ -369,7 +369,7 @@ tests). Cover:
 
 ## 11. Phase + sequencing
 
-- **Phase 18:** this spec.
-- **Phase 19+ candidates** (separate specs): `git-history`, `git-issues`,
+- **Phase 20:** this spec.
+- **Phase 21+ candidates** (separate specs): `git-history`, `git-issues`,
   `git-code`. Each should be brainstormed independently before any
   implementation work.

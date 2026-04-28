@@ -37,3 +37,40 @@ teardown() {
   [ -f content/datasets/.gitkeep ]
   [ -f data/.gitkeep ]
 }
+
+@test "data-init appends AWIKI_DATA_LAYER=on if absent" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  run grep -E '^AWIKI_DATA_LAYER=on$' .awiki/config
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init does not duplicate AWIKI_DATA_LAYER on re-run" {
+  run bash scripts/data-init.sh
+  run bash scripts/data-init.sh
+  run grep -c '^AWIKI_DATA_LAYER=' .awiki/config
+  [[ "$output" == "1" ]]
+}
+
+@test "data-init appends AWIKI_DATASET_INLINE_MAX_ROWS=500 default" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  run grep -E '^AWIKI_DATASET_INLINE_MAX_ROWS=500$' .awiki/config
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init appends AWIKI_DATASET_INLINE_MAX_BYTES=51200 default" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  run grep -E '^AWIKI_DATASET_INLINE_MAX_BYTES=51200$' .awiki/config
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init preserves user-set AWIKI_DATASET_INLINE_MAX_ROWS" {
+  echo 'AWIKI_DATASET_INLINE_MAX_ROWS=1000' >> .awiki/config
+  run bash scripts/data-init.sh
+  run grep -c '^AWIKI_DATASET_INLINE_MAX_ROWS=' .awiki/config
+  [[ "$output" == "1" ]]
+  run grep -E '^AWIKI_DATASET_INLINE_MAX_ROWS=1000$' .awiki/config
+  [ "$status" -eq 0 ]
+}

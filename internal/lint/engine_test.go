@@ -1,11 +1,27 @@
 package lint
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+type fakeRunner struct {
+	output string
+	code   int
+	err    error
+	name   string
+	args   []string
+}
+
+func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, int, error) {
+	r.name = name
+	r.args = append([]string(nil), args...)
+	return r.output, r.code, r.err
+}
 
 func TestRunBrokenWikilinkEmitsErrorAndExitTwo(t *testing.T) {
 	contentDir := t.TempDir()
@@ -32,19 +48,79 @@ func TestRunBrokenWikilinkIncludesFrontmatterSources(t *testing.T) {
 	assertDiagnosticCount(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-source]]", 1)
 }
 
-func TestRunOnlySynthSuppressesCoreRules(t *testing.T) {
+func TestRunOnlySynthDelegatesToLegacyLintAndImportsDiagnostics(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
+	runner := &fakeRunner{
+		output: "LINT|ERROR|content/synthesis/demo.md|S1: marker integrity failed\n",
+	}
 
-	collector, code := Run(Options{ContentDir: contentDir, Only: "synth"})
+	collector, code := Run(Options{ContentDir: contentDir, Only: "synth", OnlyFile: "content/synthesis/demo.md", Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink")
+	assertDiagnosticContains(t, collector, Error, "content/synthesis/demo.md", "S1: marker integrity failed")
+	if runner.name != "env" {
+		t.Fatalf("runner name = %q, want env", runner.name)
+	}
+	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=synth", "--file=content/synthesis/demo.md", contentDir}
+	if !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("runner args = %#v, want %#v", runner.args, want)
+	}
+}
+
+func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
+	runner := &fakeRunner{}
+
+	collector, code := Run(Options{ContentDir: contentDir, Only: "data", Runner: runner})
 
 	if code != 0 {
 		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
 	}
 	assertNoDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink")
-	if len(collector.Diagnostics) != 0 {
-		t.Fatalf("Diagnostics = %#v, want none for non-core only namespace", collector.Diagnostics)
+	if runner.name != "env" {
+		t.Fatalf("runner name = %q, want env", runner.name)
 	}
+	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=data", contentDir}
+	if !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("runner args = %#v, want %#v", runner.args, want)
+	}
+}
+
+func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{code: 1}
+
+	collector, code := Run(Options{ContentDir: contentDir, HugoCheck: true, Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertDiagnosticContains(t, collector, Error, "hugo", "template render failed (run 'just build' for details)")
+	want := []string{"--source", ".", "--renderToMemory", "--logLevel", "error"}
+	if runner.name != "hugo" || !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("runner call = %q %#v, want hugo %#v", runner.name, runner.args, want)
+	}
+}
+
+func TestRunHugoCheckMissingBinaryAddsInfo(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{code: 127}
+
+	collector, code := Run(Options{ContentDir: contentDir, HugoCheck: true, Runner: runner})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertDiagnosticContains(t, collector, Info, "hugo", "--hugo-check requested but hugo not on PATH; skipping")
 }
 
 func TestRunDuplicateSlugEmitsErrorAndIgnoresDuplicateIndexSlug(t *testing.T) {

@@ -1,5 +1,7 @@
 package lint
 
+import "awiki/internal/adapters"
+
 type Options struct {
 	Fix            bool
 	Only           string
@@ -9,4 +11,5 @@ type Options struct {
 	ContentDir     string
 	RepoRoot       string
 	Today          string
+	Runner         adapters.Runner
 }

@@ -69,3 +69,44 @@ func EvidenceQuoteMatchesSource(quote string, source wiki.Page, idx *wiki.Index)
 	normalizedSource := NormalizeEvidenceText(rewrittenSource)
 	return normalizedQuote != "" && strings.Contains(normalizedSource, normalizedQuote)
 }
+
+var evidenceLinePattern = regexp.MustCompile(`(?m)^>\s+"(.+)"\s+—\s+\[\[([a-z0-9][a-z0-9-]*)\]\]\s*$`)
+
+func LintS3(page wiki.Page, idx *wiki.Index) []Diagnostic {
+	region, regionDiagnostics := ParseGeneratedRegion(page.Body)
+	if len(regionDiagnostics) > 0 {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	for _, match := range evidenceLinePattern.FindAllStringSubmatch(region.Body, -1) {
+		quote := match[1]
+		slug := match[2]
+		source, ok := resolvePage(idx, slug)
+		if !ok {
+			diagnostics = append(diagnostics, Diagnostic{
+				Level:   "ERROR",
+				File:    page.Path,
+				Code:    "S3",
+				Message: "evidence cites unresolvable slug: " + slug,
+			})
+			continue
+		}
+		if EvidenceQuoteMatchesSource(quote, source, idx) {
+			continue
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Level:   "ERROR",
+			File:    page.Path,
+			Code:    "S3",
+			Message: "evidence quote not found in cited source: " + slug,
+		})
+	}
+	return diagnostics
+}
+
+func resolvePage(idx *wiki.Index, slug string) (wiki.Page, bool) {
+	if idx == nil {
+		return wiki.Page{}, false
+	}
+	return idx.Resolve(slug)
+}

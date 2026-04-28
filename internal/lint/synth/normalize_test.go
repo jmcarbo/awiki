@@ -103,6 +103,81 @@ The source references [[s1]] directly.
 	}
 }
 
+func TestLintS3EvidenceQuoteMatch(t *testing.T) {
+	contentDir := t.TempDir()
+	source := writeSynthPage(t, contentDir, "s-smart-quotes.md", `---
+title: "Smart Quotes Source"
+type: source
+---
+
+Bush wrote that “the human mind operates by association,” and warned that
+record-keeping had outpaced our ability to use it.
+`)
+	page := writeSynthPage(t, contentDir, "synthesis.md", `---
+title: "Synthesis"
+type: synthesis
+plugin: briefing
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=x -->
+## Evidence
+> "the human mind operates by association" — [[s-smart-quotes]]
+<!-- END GENERATED -->
+`)
+	idx := wiki.BuildIndex([]wiki.Page{source, page})
+
+	diagnostics := LintS3(page, &idx)
+
+	assertNoDiagnostic(t, diagnostics, "S3")
+}
+
+func TestLintS3EvidenceQuoteMiss(t *testing.T) {
+	contentDir := t.TempDir()
+	source := writeSynthPage(t, contentDir, "s1.md", `---
+title: "Source"
+type: source
+---
+
+The source contains a grounded quote.
+`)
+	page := writeSynthPage(t, contentDir, "synthesis.md", `---
+title: "Synthesis"
+type: synthesis
+plugin: briefing
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=x -->
+## Evidence
+> "hallucinated quote" — [[s1]]
+<!-- END GENERATED -->
+`)
+	idx := wiki.BuildIndex([]wiki.Page{source, page})
+
+	diagnostics := LintS3(page, &idx)
+
+	assertDiagnostic(t, diagnostics, "ERROR", "S3", "evidence quote not found in cited source: s1")
+}
+
+func TestLintS3UnresolvableSlug(t *testing.T) {
+	contentDir := t.TempDir()
+	page := writeSynthPage(t, contentDir, "synthesis.md", `---
+title: "Synthesis"
+type: synthesis
+plugin: briefing
+---
+
+<!-- BEGIN GENERATED plugin=briefing scope_hash=x -->
+## Evidence
+> "quote" — [[ghost]]
+<!-- END GENERATED -->
+`)
+	idx := wiki.BuildIndex([]wiki.Page{page})
+
+	diagnostics := LintS3(page, &idx)
+
+	assertDiagnostic(t, diagnostics, "ERROR", "S3", "evidence cites unresolvable slug: ghost")
+}
+
 func writePageAt(t *testing.T, contentDir string, rel string, body string) wiki.Page {
 	t.Helper()
 	path := filepath.Join(contentDir, rel)

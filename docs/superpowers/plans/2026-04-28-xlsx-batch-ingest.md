@@ -598,7 +598,8 @@ def _iter_sheet_rows(sheet) -> list[list]:
 
 
 def extract(args) -> int:
-    from python_calamine import CalamineWorkbook  # imported lazily so --help works without dep
+    # imported lazily so --help works without dep
+    from python_calamine import CalamineWorkbook, SheetVisibleEnum
     in_path = Path(args.in_path)
     out_dir = Path(args.out_dir)
     csv_dir = Path(args.csv_dir)
@@ -615,12 +616,14 @@ def extract(args) -> int:
     sheets_out: list[dict] = []
     taken: set[str] = set()
 
-    for sheet_name in wb.sheet_names:
-        sheet = wb.get_sheet_by_name(sheet_name)
-        visible = getattr(sheet, "visible", True)
-        if not visible:
+    # Visibility lives on wb.sheets_metadata, NOT on CalamineSheet itself.
+    # Filter Hidden + VeryHidden the same way (anything not Visible is skipped).
+    for meta in wb.sheets_metadata:
+        sheet_name = meta.name
+        if meta.visible != SheetVisibleEnum.Visible:
             print(f"XLSX-SKIP|sheet={sheet_name}|reason=hidden", file=sys.stderr)
             continue
+        sheet = wb.get_sheet_by_name(sheet_name)
         rows = _iter_sheet_rows(sheet)
         if not rows:
             print(f"XLSX-SKIP|sheet={sheet_name}|reason=empty", file=sys.stderr)

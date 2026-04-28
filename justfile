@@ -18,6 +18,9 @@ ingest path:
 ingest-with-agent path agent="claude":
     bash scripts/ingest.sh --agent {{agent}} {{path}}
 
+ingest-xlsx path *flags:
+    bash scripts/ingest-xlsx.sh {{path}} {{flags}}
+
 ingest-batch-list:
     @find raw/inbox/batch -type f | sort
 

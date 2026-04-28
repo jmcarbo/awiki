@@ -62,6 +62,8 @@ draft: false
 
 No script needed — the agent decides when image content is load-bearing. For dense visual sources (slides, infographics), the agent should default to image-pass; for text-with-decorative-images, text-pass alone is sufficient.
 
+**Spreadsheet ingest:** `.xlsx` / `.xls` / `.ods` files dropped under `raw/inbox/` are pre-processed by `scripts/ingest-xlsx.sh` (manual: `just ingest-xlsx <path>`; auto: watchdog detects extension and runs the same script). The wrapper writes one `source` page per visible non-empty sheet (slug `<workbook>--<sheet>`) plus a per-sheet CSV under `raw/processed/_originals/<workbook>/`. The resulting markdown files re-enter the standard ingest flow (steps 2-9 above). Configure preview-row cap with `AWIKI_XLSX_PREVIEW_ROWS` (default 50). Requires `pip3 install python-calamine`.
+
 ### 4.2 Query
 
 1. Read `content/catalog.md`.

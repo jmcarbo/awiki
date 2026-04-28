@@ -13,3 +13,7 @@
 
 content/inbox.md filter=git-crypt diff=git-crypt
 content/agenda/** filter=git-crypt diff=git-crypt
+
+# binary fixtures — keep them out of EOL normalization and PR diffs
+tests/fixtures/xlsx/*.xlsx binary
+tests/fixtures/xlsx/*.xlsx linguist-generated

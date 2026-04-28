@@ -45,3 +45,14 @@
   rm -rf "$WORK"
   [[ "$output" == *"data layer"* ]] || true   # advisory; CI envs usually have python3
 }
+
+@test "check-deps reports python-calamine status" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/check-deps.sh"
+  echo "$output" | grep -E "^(OK\|python-calamine|OPTIONAL-MISSING\|python-calamine)" >/dev/null
+}
+
+@test "check-deps prints install hint when python-calamine missing" {
+  run env AWIKI_FAKE_MISSING=python_calamine bash "$BATS_TEST_DIRNAME/../scripts/check-deps.sh"
+  [[ "$output" == *"OPTIONAL-MISSING|python-calamine"* ]]
+  [[ "$output" == *"pip3 install python-calamine"* ]]
+}

@@ -29,3 +29,20 @@ teardown() {
   echo "$output" | grep -q "PLAN|"
   echo "$output" | grep -q "repo_key=local-repo"
 }
+
+@test "ingest-git: --dry-run reports added=1 on first run with single README" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "added=1"
+  echo "$output" | grep -q "modified=0"
+  echo "$output" | grep -q "removed=0"
+}
+
+@test "ingest-git: --paths=docs/ excludes README" {
+  mkdir -p "$WORK/repo/docs"
+  printf "# Doc\n\nbody\n" > "$WORK/repo/docs/intro.md"
+  git -C "$WORK/repo" add -A && git -C "$WORK/repo" commit -q -m more
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo" --dry-run --paths=docs/
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "added=1"
+}

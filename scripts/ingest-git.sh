@@ -244,8 +244,61 @@ for rel in "${TO_WRITE[@]}"; do
   fi
 done
 
+# Move derived pages for removed upstream files to graveyard
+if [[ "${#REMOVED[@]}" -gt 0 ]]; then
+  graveyard="raw/_originals/git/${REPO_KEY}"
+  mkdir -p "$graveyard"
+  for prel in "${REMOVED[@]}"; do
+    slug="${PRIOR_SLUG[$prel]}"
+    [[ -z "$slug" ]] && continue
+    src="$OUT_SOURCES/${slug}.md"
+    if [[ -f "$src" ]]; then
+      mv -f "$src" "$graveyard/${slug}.md"
+      echo "REMOVED|$prel|→|$graveyard/${slug}.md"
+    fi
+  done
+fi
+
 TODAY="$(date -u +%F)"
 NOW_ISO="$(date -u +%FT%TZ)"
+
+# Persist state JSON so next run can diff correctly (schema §7.2)
+NEW_FILES_JSON="$(AWIKI_NOW_ISO="$NOW_ISO" python3 -c '
+import json, sys, os
+files = {}
+now_iso = os.environ.get("AWIKI_NOW_ISO", "")
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line: continue
+    rel, blob, slug, out = line.split("\t")
+    files[rel] = {"blob_sha": blob, "slug": slug, "out_path": out, "last_ingested": now_iso}
+print(json.dumps(files))
+' < <(
+  for rel in "${CURRENT_FILES[@]}"; do
+    slug="${SLUG_MAP[$rel]}"
+    printf "%s\t%s\t%s\t%s\n" "$rel" "${CURRENT_BLOB[$rel]}" "$slug" "$OUT_SOURCES/${slug}.md"
+  done
+))"
+
+STATE_JSON="$(python3 -c '
+import json, sys
+files = json.loads(sys.argv[1])
+out = {
+    "schema": 1,
+    "repo_key": sys.argv[2],
+    "repo_name": sys.argv[3],
+    "url": sys.argv[4],
+    "default_branch": sys.argv[5],
+    "head_sha": sys.argv[6],
+    "ingested_at": sys.argv[7],
+    "private": sys.argv[8] == "1",
+    "files": files,
+}
+print(json.dumps(out, indent=2))
+' "$NEW_FILES_JSON" "$REPO_KEY" "$REPO_NAME" "$SPEC" "$DEFAULT_BRANCH" "$HEAD_SHA" "$NOW_ISO" "${PRIVATE_FLAG:-0}")"
+
+awiki_git_state_save "$REPO_KEY" "$STATE_JSON"
+
 {
   echo "---"
   echo "title: \"${REPO_NAME}\""

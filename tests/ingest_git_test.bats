@@ -75,3 +75,19 @@ teardown() {
   grep -q "^git_sha:" content/entities/repo-repo.md
   grep -q "\[\[git-repo-readme\]\]" content/entities/repo-repo.md
 }
+
+@test "ingest-git: removes derived page when upstream file deleted" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p "$WORK/repo/docs"
+  printf "# Doc 1\n\nbody text\n" > "$WORK/repo/docs/d1.md"
+  printf "# Doc 2\n\nbody text\n" > "$WORK/repo/docs/d2.md"
+  git -C "$WORK/repo" add -A && git -C "$WORK/repo" commit -q -m two
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ -f content/sources/git-repo-docs-d1.md ]
+  [ -f content/sources/git-repo-docs-d2.md ]
+  git -C "$WORK/repo" rm -q docs/d2.md
+  git -C "$WORK/repo" commit -q -m rm
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  ! [ -f content/sources/git-repo-docs-d2.md ]
+  [ -f raw/_originals/git/local-repo/git-repo-docs-d2.md ]
+}

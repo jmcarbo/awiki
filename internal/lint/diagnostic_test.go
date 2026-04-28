@@ -12,6 +12,13 @@ func TestDiagnosticRecordFormat(t *testing.T) {
 	}
 }
 
+func TestDiagnosticRecordFormatWithRuleCode(t *testing.T) {
+	d := Diagnostic{Level: Error, File: "content/datasets/bad.md", Code: "D1", Message: "missing storage"}
+	if got, want := d.Record(), "LINT|ERROR|content/datasets/bad.md|D1|missing storage"; got != want {
+		t.Fatalf("Record() = %q, want %q", got, want)
+	}
+}
+
 func TestSummaryAndExitCode(t *testing.T) {
 	var c Collector
 	c.Add(Diagnostic{Level: Error, File: "a.md", Message: "bad"})

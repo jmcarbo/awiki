@@ -185,6 +185,33 @@ func TestRunImportsLowercaseLegacyTemplateLevels(t *testing.T) {
 	assertDiagnosticContains(t, collector, Warn, "template.manifest.toml", "template warning")
 }
 
+func TestRunImportsLegacyRuleCodeDiagnostics(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{outputByOnly: map[string]string{
+		"data": "LINT|ERROR|content/datasets/bad.md|D1|missing storage\n",
+	}}
+
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: filepath.Dir(contentDir), Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	if len(collector.Diagnostics) == 0 {
+		t.Fatal("Run() imported no diagnostics")
+	}
+	for _, diagnostic := range collector.Diagnostics {
+		if diagnostic.File == "content/datasets/bad.md" {
+			if diagnostic.Code != "D1" || diagnostic.Message != "missing storage" {
+				t.Fatalf("imported diagnostic = %#v, want Code D1 and Message missing storage", diagnostic)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing imported data diagnostic: %#v", collector.Diagnostics)
+}
+
 func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))

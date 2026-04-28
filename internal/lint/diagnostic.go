@@ -13,10 +13,14 @@ const (
 type Diagnostic struct {
 	Level   Level
 	File    string
+	Code    string
 	Message string
 }
 
 func (d Diagnostic) Record() string {
+	if d.Code != "" {
+		return fmt.Sprintf("LINT|%s|%s|%s|%s", d.Level, d.File, d.Code, d.Message)
+	}
 	return fmt.Sprintf("LINT|%s|%s|%s", d.Level, d.File, d.Message)
 }
 

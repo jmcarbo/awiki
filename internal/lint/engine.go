@@ -161,8 +161,8 @@ func importExternalRecords(c *Collector, output string) int {
 }
 
 func importDiagnostic(c *Collector, line string) bool {
-	parts := strings.SplitN(line, "|", 4)
-	if len(parts) != 4 {
+	parts := strings.SplitN(line, "|", 5)
+	if len(parts) != 4 && len(parts) != 5 {
 		return false
 	}
 	levelText := strings.ToUpper(parts[1])
@@ -175,7 +175,12 @@ func importDiagnostic(c *Collector, line string) bool {
 	default:
 		return false
 	}
-	c.Add(Diagnostic{Level: level, File: parts[2], Message: parts[3]})
+	diagnostic := Diagnostic{Level: level, File: parts[2], Message: parts[3]}
+	if len(parts) == 5 {
+		diagnostic.Code = parts[3]
+		diagnostic.Message = parts[4]
+	}
+	c.Add(diagnostic)
 	return true
 }
 

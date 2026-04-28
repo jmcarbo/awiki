@@ -11,6 +11,15 @@ ROWS_PY="$REPO_ROOT/scripts/lib/dataset-rows.py"
 # shellcheck source=/dev/null
 [[ -f "$REPO_ROOT/scripts/lib/dataset-fm.sh" ]] && source "$REPO_ROOT/scripts/lib/dataset-fm.sh"
 
+FIX=0
+while [[ ${1:-} == --* ]]; do
+  case "$1" in
+    --fix) FIX=1; shift ;;
+    --) shift; break ;;
+    *) shift ;;
+  esac
+done
+
 _emit() { # _emit <level> <file> <code> <msg>
   printf 'LINT|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4"
 }
@@ -122,8 +131,10 @@ lint_data_one() {
   local data_file=""
   if [[ "$storage" == "file" ]]; then
     if [[ -z "$data_path" ]]; then _emit error "$rel" D2 "storage=file but data_path missing"; return; fi
-    if [[ ! -f "$REPO_ROOT/$data_path" ]]; then _emit error "$rel" D2 "data file absent: $data_path"; return; fi
-    data_file="$REPO_ROOT/$data_path"
+    local resolved
+    if [[ "$data_path" = /* ]]; then resolved="$data_path"; else resolved="$REPO_ROOT/$data_path"; fi
+    if [[ ! -f "$resolved" ]]; then _emit error "$rel" D2 "data file absent: $data_path"; return; fi
+    data_file="$resolved"
   fi
   if [[ "$storage" == "inline" ]]; then
     local info
@@ -135,6 +146,54 @@ lint_data_one() {
   if [[ -n "$data_file" && -s "$data_file" ]]; then
     _lint_d5 "$page" "$format" "$data_file"
   fi
+
+  # Thresholds (D6).
+  local cfg_rows=500 cfg_bytes=51200
+  if [[ -f "$REPO_ROOT/.awiki/config" ]]; then
+    # shellcheck disable=SC1091
+    source <(grep -E '^AWIKI_DATASET_INLINE_MAX_(ROWS|BYTES)=' "$REPO_ROOT/.awiki/config" || true)
+    cfg_rows="${AWIKI_DATASET_INLINE_MAX_ROWS:-500}"
+    cfg_bytes="${AWIKI_DATASET_INLINE_MAX_BYTES:-51200}"
+  fi
+
+  if [[ -n "$data_file" && -s "$data_file" ]]; then
+    local actual_rows
+    actual_rows="$(python3 "$ROWS_PY" count --format="$format" --file="$data_file" 2>/dev/null || echo 0)"
+    local declared_rows
+    declared_rows="$(fm_get "$page" rows || echo 0)"
+    declared_rows="${declared_rows:-0}"
+
+    if [[ "$storage" == "inline" ]]; then
+      local size
+      size="$(wc -c < "$data_file")"
+      if (( actual_rows > cfg_rows )) || (( size > cfg_bytes )); then
+        _emit warn "$rel" D6 "inline dataset over threshold (rows=$actual_rows bytes=$size); run dataset-compact"
+      fi
+    fi
+
+    if [[ "$declared_rows" != "$actual_rows" ]]; then
+      if [[ $FIX -eq 1 ]]; then
+        fm_set "$page" rows "$actual_rows"
+        _emit info "$rel" FIX "rows: $declared_rows -> $actual_rows"
+      else
+        _emit warn "$rel" D7 "declared rows=$declared_rows but actual=$actual_rows (run with --fix)"
+      fi
+    fi
+  fi
+
+  # D8 — data_path inside data/ tree.
+  if [[ "$storage" == "file" && -n "$data_path" ]]; then
+    case "$data_path" in
+      data/*|data/private/*) ;;
+      *) _emit warn "$rel" D8 "data_path outside data/: $data_path" ;;
+    esac
+  fi
+
+  # D9 — provenance check.
+  if grep -q -E '^sources: *\[\] *$' "$page" || ! grep -q -E '^sources:' "$page"; then
+    _emit info "$rel" D9 "no sources declared"
+  fi
+
   [[ "$storage" == "inline" && -n "$data_file" ]] && rm -f "$data_file"
 }
 

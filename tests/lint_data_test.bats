@@ -186,3 +186,113 @@ EOF
   [[ "$output" != *"|D5|"* ]]
   rm -f /tmp/big.csv
 }
+
+@test "D6 warns when inline rows exceed AWIKI_DATASET_INLINE_MAX_ROWS" {
+  printf 'AWIKI_DATASET_INLINE_MAX_ROWS=2\nAWIKI_DATASET_INLINE_MAX_BYTES=51200\n' > .awiki/config
+  cat > content/datasets/big.md <<'EOF'
+---
+title: "big"
+type: dataset
+storage: inline
+format: csv
+rows: 3
+---
+
+## Data
+
+```csv
+a,b
+1,2
+3,4
+5,6
+```
+EOF
+  run bash scripts/lint-data.sh
+  [[ "$output" == *"|D6|"* ]]
+}
+
+@test "D7 warns when cached rows != actual" {
+  cat > content/datasets/stale.md <<'EOF'
+---
+title: "stale"
+type: dataset
+storage: inline
+format: csv
+rows: 99
+---
+
+## Data
+
+```csv
+a,b
+1,2
+```
+EOF
+  run bash scripts/lint-data.sh
+  [[ "$output" == *"|D7|"* ]]
+}
+
+@test "D7 --fix updates cached rows" {
+  cat > content/datasets/stale.md <<'EOF'
+---
+title: "stale"
+type: dataset
+storage: inline
+format: csv
+rows: 99
+---
+
+## Data
+
+```csv
+a,b
+1,2
+```
+EOF
+  run bash scripts/lint-data.sh --fix
+  run grep -E '^rows: 1$' content/datasets/stale.md
+  [ "$status" -eq 0 ]
+}
+
+@test "D8 warns when data_path is outside data/" {
+  cp /dev/null /tmp/escape.csv
+  printf 'a\n' > /tmp/escape.csv
+  cat > content/datasets/escape.md <<'EOF'
+---
+title: "escape"
+type: dataset
+storage: file
+format: csv
+rows: 0
+data_path: /tmp/escape.csv
+---
+
+## Provenance
+EOF
+  run bash scripts/lint-data.sh
+  [[ "$output" == *"|D8|"* ]]
+  rm -f /tmp/escape.csv
+}
+
+@test "D9 info-level warning when sources is empty" {
+  cat > content/datasets/orphan.md <<'EOF'
+---
+title: "orphan"
+type: dataset
+storage: inline
+format: csv
+rows: 0
+sources: []
+---
+
+## Data
+
+```csv
+a
+```
+
+## Sources
+EOF
+  run bash scripts/lint-data.sh
+  [[ "$output" == *"|D9|"* ]]
+}

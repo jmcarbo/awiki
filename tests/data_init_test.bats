@@ -104,3 +104,28 @@ teardown() {
   run grep -c -F 'Page kind: `mutated`' WIKI.md
   [[ "$output" == "0" ]]
 }
+
+@test "data-init is byte-idempotent on WIKI.md re-runs" {
+  bash scripts/data-init.sh
+  cp WIKI.md WIKI.md.snapshot
+  bash scripts/data-init.sh
+  bash scripts/data-init.sh
+  run cmp -s WIKI.md WIKI.md.snapshot
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init refuses to patch WIKI.md with BEGIN but no END marker" {
+  # Seed a malformed WIKI.md: BEGIN marker, then user content, no END.
+  printf -- '%s\n' '<!-- BEGIN data-layer -->' 'user content that must survive' > WIKI.md
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  # User content must still be present.
+  run grep -F 'user content that must survive' WIKI.md
+  [ "$status" -eq 0 ]
+  # BEGIN marker still exactly once.
+  run grep -c -F '<!-- BEGIN data-layer -->' WIKI.md
+  [[ "$output" == "1" ]]
+  # Block was not appended again.
+  run grep -c -F 'Page kind: `dataset`' WIKI.md
+  [[ "$output" == "0" ]]
+}

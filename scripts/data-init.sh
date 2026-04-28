@@ -62,9 +62,13 @@ step_wiki_md() {
   local begin='<!-- BEGIN data-layer -->'
   local end='<!-- END data-layer -->'
   if grep -qF "$begin" "$WIKI_MD"; then
+    if ! grep -qF "$end" "$WIKI_MD"; then
+      warn "$WIKI_MD has BEGIN marker but no END marker — refusing to patch"
+      return 0
+    fi
     # Replace the existing block in-place (idempotent + refresh).
     awk -v begin="$begin" -v end="$end" -v template_file="$TEMPLATE" '
-      BEGIN { in_block=0; while ((getline line < template_file) > 0) tmpl = tmpl line "\n" }
+      BEGIN { in_block=0; while ((getline line < template_file) > 0) tmpl = tmpl line "\n"; sub(/\n$/, "", tmpl) }
       index($0, begin) { print tmpl; in_block=1; next }
       in_block && index($0, end) { in_block=0; next }
       !in_block { print }

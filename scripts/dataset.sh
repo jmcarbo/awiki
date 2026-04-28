@@ -247,6 +247,7 @@ cmd_compact() {
     cp "$(fm_get "$page" data_path)" "$tmp"
   fi
   rows="$(python3 "$ROWS_PY" count --format="$format" --file="$tmp")"
+  [[ "$rows" =~ ^[0-9]+$ ]] || die "row counter returned non-numeric: '$rows'"
   size="$(wc -c < "$tmp")"
   rm -f "$tmp"
 
@@ -267,6 +268,8 @@ cmd_compact() {
     return 0
   fi
   if [[ "$storage" == "file" && $over -eq 0 ]]; then
+    grep -qE '^## Provenance[[:space:]]*$' "$page" \
+      || die "$page missing '## Provenance' heading; cannot insert ## Data block"
     # Move file -> inline.
     local src
     src="$(fm_get "$page" data_path)"

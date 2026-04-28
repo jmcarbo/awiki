@@ -119,6 +119,18 @@ task-init:
 data-init:
     bash scripts/data-init.sh
 
+# Scaffold a new dataset page. Use --from=<csv-path> to seed rows.
+dataset-new slug *args:
+    bash scripts/dataset.sh new {{slug}} {{args}}
+
+# Flip inline <-> file based on threshold (.awiki/config). Idempotent.
+dataset-compact slug:
+    bash scripts/dataset.sh compact {{slug}}
+
+# Refresh rows + run schema validation if columns: declared.
+dataset-validate slug:
+    bash scripts/dataset.sh validate {{slug}}
+
 capture *text:
     bash scripts/capture.sh -- {{text}}
 

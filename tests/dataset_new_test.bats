@@ -4,6 +4,7 @@ setup() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
   WORK="$(mktemp -d)"
   cp -r "$REPO_ROOT/scripts" "$WORK/scripts"
+  cp "$REPO_ROOT/justfile" "$WORK/justfile"
   cp "$REPO_ROOT/tests/fixtures/data-layer/demo.csv" "$WORK/demo.csv"
   mkdir -p "$WORK/content/datasets" "$WORK/data" "$WORK/.awiki"
   printf -- "AWIKI_DATA_LAYER=on\nAWIKI_DATASET_INLINE_MAX_ROWS=500\nAWIKI_DATASET_INLINE_MAX_BYTES=51200\n" > "$WORK/.awiki/config"
@@ -68,4 +69,10 @@ EOF
   rm -rf "$TMPBIN"
   [ "$status" -ne 0 ]
   [[ "$output" == *"non-numeric"* ]]
+}
+
+@test "just dataset-new wrapper works" {
+  run just dataset-new us-pop --format=csv --from=demo.csv
+  [ "$status" -eq 0 ]
+  [ -f content/datasets/us-pop.md ]
 }

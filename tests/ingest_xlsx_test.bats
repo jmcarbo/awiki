@@ -181,3 +181,57 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   fields=$(echo "$stderr" | grep "^XLSX-ERROR" | awk -F'|' '{print NF}')
   [ "$fields" = "3" ]
 }
+
+@test "ingest-xlsx archives original, removes source, prints XLSX-CONVERTED" {
+  cp raw/inbox/batch/single-sheet.xlsx raw/inbox/interactive/single-sheet.xlsx
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/interactive/single-sheet.xlsx
+  [ "$status" -eq 0 ]
+  [ -f raw/processed/_originals/single-sheet/single-sheet.xlsx ]
+  [ -f raw/processed/_originals/single-sheet/single-sheet--sales.csv ]
+  [ -f raw/inbox/interactive/single-sheet--sales.md ]
+  [ ! -f raw/inbox/interactive/single-sheet.xlsx ]
+  [[ "$output" == *"XLSX-CONVERTED|"* ]]
+  [[ "$output" == *"XLSX-NEXT|raw/inbox/interactive/single-sheet--sales.md"* ]]
+}
+
+@test "ingest-xlsx rejects bad extension" {
+  echo "x" > raw/inbox/interactive/notes.txt
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/interactive/notes.txt
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"reason=bad-ext"* ]]
+}
+
+@test "ingest-xlsx rejects path outside raw/inbox/" {
+  cp raw/inbox/batch/single-sheet.xlsx /tmp/outside-$$.xlsx
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" "/tmp/outside-$$.xlsx"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"reason=bad-path"* ]]
+  rm -f /tmp/outside-$$.xlsx
+}
+
+@test "ingest-xlsx exits 5 with hint when python-calamine is faked-missing" {
+  run env AWIKI_FAKE_MISSING=python_calamine bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/batch/single-sheet.xlsx
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"reason=missing-dep"* ]]
+  [[ "$output" == *"pip3 install python-calamine"* ]]
+}
+
+@test "ingest-xlsx empty workbook exits 6 and preserves source" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/batch/empty-and-hidden.xlsx
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"XLSX-EMPTY|"* ]]
+  [ -f raw/inbox/batch/empty-and-hidden.xlsx ]
+}
+
+@test "ingest-xlsx corrupt workbook exits 3 and preserves source" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/batch/corrupt.xlsx
+  [ "$status" -eq 3 ]
+  [ -f raw/inbox/batch/corrupt.xlsx ]
+}
+
+@test "ingest-xlsx --preview-rows propagated" {
+  cp raw/inbox/batch/single-sheet.xlsx raw/inbox/interactive/single-sheet.xlsx
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/interactive/single-sheet.xlsx --preview-rows=1
+  [ "$status" -eq 0 ]
+  grep -E '^rows_preview: 1$' raw/inbox/interactive/single-sheet--sales.md
+}

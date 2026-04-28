@@ -41,6 +41,15 @@ elif [[ -f scripts/lint-synth.sh ]]; then
   source scripts/lint-synth.sh
 fi
 
+# Source data lint extension (D-codes).
+if [[ -f "$(dirname "$0")/lint-data.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/lint-data.sh"
+elif [[ -f scripts/lint-data.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/lint-data.sh
+fi
+
 apply_fixes() {
   local page="$1"
   if ! grep -q '^last_updated:' "$page"; then
@@ -961,6 +970,13 @@ if [[ -z "$ONLY" || "$ONLY" = "synth" || "$ONLY" = "all" ]]; then
     fi
   fi
 fi
+
+# --- Data lint dispatch -----------------------------------------------------
+if [[ "$ONLY" == "data" ]]; then
+  lint_data_all
+  exit 0
+fi
+[[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR/datasets" ]] && lint_data_all || true
 
 if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then
   if command -v hugo >/dev/null 2>&1; then

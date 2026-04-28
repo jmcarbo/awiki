@@ -11,14 +11,17 @@ ROWS_PY="$REPO_ROOT/scripts/lib/dataset-rows.py"
 # shellcheck source=/dev/null
 [[ -f "$REPO_ROOT/scripts/lib/dataset-fm.sh" ]] && source "$REPO_ROOT/scripts/lib/dataset-fm.sh"
 
-FIX=0
-while [[ ${1:-} == --* ]]; do
-  case "$1" in
-    --fix) FIX=1; shift ;;
-    --) shift; break ;;
-    *) shift ;;
-  esac
-done
+# When sourced from lint.sh, FIX may already be set by the caller.
+: "${FIX:=0}"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  while [[ ${1:-} == --* ]]; do
+    case "$1" in
+      --fix) FIX=1; shift ;;
+      --) shift; break ;;
+      *) shift ;;
+    esac
+  done
+fi
 
 _emit() { # _emit <level> <file> <code> <msg>
   printf 'LINT|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4"

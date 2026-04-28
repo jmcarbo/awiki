@@ -296,3 +296,29 @@ EOF
   run bash scripts/lint-data.sh
   [[ "$output" == *"|D9|"* ]]
 }
+
+@test "lint.sh --only=data delegates to lint-data.sh" {
+  cat > content/datasets/bad.md <<'EOF'
+---
+type: dataset
+storage: inline
+---
+
+## Data
+EOF
+  run bash scripts/lint.sh --only=data
+  [[ "$output" == *"|D1|"* ]] || [[ "$output" == *"|D3|"* ]]
+}
+
+@test "lint.sh default mode includes D-codes" {
+  cat > content/datasets/bad.md <<'EOF'
+---
+type: dataset
+storage: inline
+---
+
+## Data
+EOF
+  run bash scripts/lint.sh
+  [[ "$output" == *"|D"*"|"* ]]
+}

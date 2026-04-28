@@ -166,3 +166,21 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -qE "^${fixture}\|[0-9a-f]{40}\|main$"
 }
+
+@test "git-clone: resolve falls back to main on detached-HEAD local repo" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  fixture="$(mktemp -d)/repo"
+  seed="$(mktemp -d)/seed"; mkdir -p "$seed"; echo hi > "$seed/x"
+  bash "$BATS_TEST_DIRNAME/util/build-git-fixture.sh" "$seed" "$fixture"
+  git -C "$fixture" checkout --quiet --detach HEAD
+  run awiki_git_clone_resolve "$fixture" "local-repo"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^${fixture}\|[0-9a-f]{40}\|main$"
+}
+
+@test "git-clone: repo_key strips .git suffix on local path" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  d="$(mktemp -d)/foo.git"; mkdir -p "$d"
+  run awiki_git_clone_repo_key "$d"
+  [ "$status" -eq 0 ]; [ "$output" = "local-foo" ]
+}

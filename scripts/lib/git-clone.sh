@@ -15,7 +15,7 @@ awiki_git_clone_repo_key() {
     local rp
     rp="$(cd "$spec" 2>/dev/null && pwd || true)"
     if [[ -z "$rp" ]]; then rp="$spec"; fi
-    echo "local-$(basename "$rp")"
+    echo "local-$(basename "$rp" .git)"
     return 0
   fi
   # file:// URL
@@ -66,7 +66,9 @@ awiki_git_clone_resolve() {
     else
       git -C "$checkout" fetch --quiet --prune origin || return 11
       local default_branch
-      default_branch="$(git -C "$checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)"
+      default_branch="$(git -C "$checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+      default_branch="${default_branch#origin/}"
+      [[ -z "$default_branch" ]] && default_branch="main"
       git -C "$checkout" reset --quiet --hard "origin/${default_branch}" || return 11
     fi
   fi
@@ -76,7 +78,9 @@ awiki_git_clone_resolve() {
   local branch
   branch="$(git -C "$checkout" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="HEAD"
   if [[ "$branch" = "HEAD" ]]; then
-    branch="$(git -C "$checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo main)"
+    branch="$(git -C "$checkout" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    branch="${branch#origin/}"
+    [[ -z "$branch" ]] && branch="main"
   fi
   printf '%s|%s|%s\n' "$checkout" "$sha" "$branch"
 }

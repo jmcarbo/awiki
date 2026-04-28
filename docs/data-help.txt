@@ -1,0 +1,32 @@
+=== awiki data layer — recipe reference ===
+
+just data-init
+  Per-step idempotent enabler. Creates content/datasets/, data/, sets
+  AWIKI_DATA_LAYER=on + threshold defaults in .awiki/config, patches
+  WIKI.md with the data-layer block.
+  Re-runs are safe: each step skips work that is already done.
+
+just dataset-new <slug> [--format=csv] [--from=<path>]
+  Scaffolds content/datasets/<slug>.md. With --from, seeds the inline
+  ## Data block from a local file. Refuses if slug exists.
+  Slug rule: ^[a-z0-9][a-z0-9-]*$.
+  Formats: csv | tsv | json | dsv | topojson.
+
+just dataset-compact <slug>
+  Flips storage between inline and file based on
+  AWIKI_DATASET_INLINE_MAX_ROWS / _MAX_BYTES (.awiki/config). Idempotent.
+  Refuses to inline a file dataset that exceeds the threshold.
+
+just dataset-validate <slug>
+  Recounts rows and rewrites the cached `rows:` frontmatter. If the
+  page declares `columns:`, runs full schema check (every row, every
+  column). Lint runs only a sampled subset (first 50 + last 10).
+
+just lint --only=data       # run D-codes only
+just lint --only=data --fix # auto-fix D7 (cached rows mismatch)
+
+MCP tools:
+  list_datasets()        -> { datasets, errors }
+  get_dataset(slug)      -> { slug, frontmatter, sample_rows[20], total_rows, ... }
+
+Charts ship in Plan 2; this layer ships datasets-as-pages only.

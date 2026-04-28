@@ -121,10 +121,15 @@ AGENT_RC=0
 if [[ -n "$AGENT_CLI" && "$MODE" == "batch" ]]; then
   if command -v "$AGENT_CLI" >/dev/null 2>&1; then
     echo "AGENT-INVOKE|cli=$AGENT_CLI|mode=$MODE"
+    # AWIKI_AGENT_FLAGS: extra flags passed to the agent CLI before the
+    # prompt arg. Word-split on unquoted expansion. Set in .awiki/config
+    # for non-interactive batch runs (e.g. claude needs
+    # `--permission-mode acceptEdits` so Write/Edit don't block).
+    # shellcheck disable=SC2086
     case "$AGENT_CLI" in
-      claude) "$AGENT_CLI" --print "$PROMPT" || AGENT_RC=6 ;;
-      codex|opencode|gemini) "$AGENT_CLI" -p "$PROMPT" || AGENT_RC=6 ;;
-      *) "$AGENT_CLI" "$PROMPT" || AGENT_RC=6 ;;
+      claude) "$AGENT_CLI" ${AWIKI_AGENT_FLAGS:-} --print "$PROMPT" || AGENT_RC=6 ;;
+      codex|opencode|gemini) "$AGENT_CLI" ${AWIKI_AGENT_FLAGS:-} -p "$PROMPT" || AGENT_RC=6 ;;
+      *) "$AGENT_CLI" ${AWIKI_AGENT_FLAGS:-} "$PROMPT" || AGENT_RC=6 ;;
     esac
   else
     echo "AGENT-SKIP|reason=cli-not-found|cli=$AGENT_CLI" >&2

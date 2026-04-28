@@ -76,10 +76,22 @@ echo "$COUNT" > "$COUNTER_FILE"
 echo "INGEST-OK|src=$SRC|dest=$DEST|mode=$MODE|count=$COUNT"
 
 # Auto-lint
+# scripts/lint.sh exits 0 (clean), 1 (warnings only), 2 (errors). Only
+# treat errors as auto-ingest failure — fresh batches routinely emit
+# warnings (orphans, missing-from-catalog) before the agent has run
+# steps 3-9 of the WIKI.md §4.1 workflow.
 LINT_RC=0
 if [[ "$COUNT" -ge "$THRESHOLD" ]]; then
   echo "AUTO-LINT|threshold=$THRESHOLD|count=$COUNT"
-  if ! bash "$SCRIPT_DIR/lint.sh"; then
+  LINT_EXIT=0
+  if [[ -n "${AWIKI_LINT_CMD:-}" ]]; then
+    # Test/override hook. Run in subshell so an `exit` inside the
+    # supplied command cannot terminate the ingest script itself.
+    ( eval "$AWIKI_LINT_CMD" ) || LINT_EXIT=$?
+  else
+    bash "$SCRIPT_DIR/lint.sh" || LINT_EXIT=$?
+  fi
+  if [[ "$LINT_EXIT" -ge 2 ]]; then
     LINT_RC=4
   fi
   echo "0" > "$COUNTER_FILE"

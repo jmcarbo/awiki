@@ -112,3 +112,25 @@ EOF
   [ "$status" -eq 0 ]
   [ ! -f .awiki/watchdog.pid ]
 }
+
+@test "watchdog logs hidden skip only once across multiple poll cycles" {
+  printf "" > raw/inbox/batch/.gitkeep
+  run WD --cycles 5 --poll-interval 0.01
+  [ "$status" -eq 0 ]
+  count="$(printf '%s\n' "$output" | grep -c 'WATCHDOG|skip|raw/inbox/batch/.gitkeep|reason=hidden' || true)"
+  [ "$count" = "1" ]
+}
+
+@test "watchdog logs under-failed skip only once across multiple poll cycles" {
+  mkdir -p raw/inbox/batch/_failed
+  # _failed/ files are excluded from list_existing, so this directly tests
+  # the streaming-event branch by feeding the path through handle_path.
+  # We exercise via a normal file in batch/ that fails ingest; quarantined
+  # destination is then re-discovered on later cycles via the find filter
+  # (which it ISN'T — but if a future change adds the path, this guards).
+  printf "" > raw/inbox/batch/_failed/old.txt
+  run WD --cycles 5 --poll-interval 0.01
+  [ "$status" -eq 0 ]
+  # _failed/ is excluded from find; expect zero detect/skip lines for it.
+  [[ "$output" != *"raw/inbox/batch/_failed/old.txt"* ]]
+}

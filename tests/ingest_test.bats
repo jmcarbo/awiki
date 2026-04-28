@@ -64,3 +64,20 @@ teardown() {
   # Should NOT have invoked claude on interactive queue.
   [[ "$output" != *"AGENT-INVOKE"* ]]
 }
+
+@test "ingest does not fail when auto-lint emits warnings only" {
+  printf "AWIKI_LINT_AFTER_N=1\n" > .awiki/config
+  export AWIKI_LINT_CMD='echo "LINT-SUMMARY|errors=0|warnings=3|info=0"; exit 1'
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh" raw/inbox/interactive/sample.md
+  [[ "$output" == *"AUTO-LINT|"* ]]
+  [[ "$output" == *"LINT-SUMMARY|errors=0|warnings=3"* ]]
+  [ "$status" -eq 0 ]
+}
+
+@test "ingest fails with rc=4 when auto-lint reports errors" {
+  printf "AWIKI_LINT_AFTER_N=1\n" > .awiki/config
+  export AWIKI_LINT_CMD='echo "LINT-SUMMARY|errors=2|warnings=0|info=0"; exit 2'
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh" raw/inbox/interactive/sample.md
+  [[ "$output" == *"AUTO-LINT|"* ]]
+  [ "$status" -eq 4 ]
+}

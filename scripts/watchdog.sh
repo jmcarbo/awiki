@@ -14,6 +14,7 @@ AGENT_CLI="${AWIKI_AGENT:-}"
 BACKEND_OVERRIDE="${AWIKI_WATCHDOG_BACKEND:-}"
 CATCHUP=0
 ONCE=0
+CYCLES="${AWIKI_WATCHDOG_CYCLES:-0}"
 POLL_INTERVAL="${AWIKI_WATCHDOG_POLL_INTERVAL:-2}"
 STABLE_CHECKS="${AWIKI_WATCHDOG_STABLE_CHECKS:-2}"
 STABLE_INTERVAL="${AWIKI_WATCHDOG_STABLE_INTERVAL:-1.5}"
@@ -36,6 +37,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --catchup) CATCHUP=1; shift ;;
     --once) ONCE=1; shift ;;
+    --cycles) CYCLES="$2"; shift 2 ;;
+    --cycles=*) CYCLES="${1#--cycles=}"; shift ;;
     --agent) AGENT_CLI="$2"; shift 2 ;;
     --agent=*) AGENT_CLI="${1#--agent=}"; shift ;;
     --backend) BACKEND_OVERRIDE="$2"; shift 2 ;;
@@ -74,6 +77,7 @@ fi
 echo "$$" > "$PID_FILE"
 
 declare -A SEEN
+declare -A SKIPPED
 STOP=0
 
 cleanup() {
@@ -204,6 +208,25 @@ handle_path() {
   esac
   if [[ -n "${SEEN[$p]:-}" ]]; then return 0; fi
   if [[ ! -f "$p" ]]; then return 0; fi
+
+  # Persistent skip filters: hidden files (.gitkeep, .DS_Store) and paths
+  # under _failed/ never become ingestible. Log the skip exactly once per
+  # path per process — otherwise polling backends spam the log every cycle.
+  if is_hidden "$p"; then
+    if [[ -z "${SKIPPED[$p]:-}" ]]; then
+      echo "WATCHDOG|skip|$p|reason=hidden"
+      SKIPPED[$p]=1
+    fi
+    return 0
+  fi
+  if is_under_failed "$p"; then
+    if [[ -z "${SKIPPED[$p]:-}" ]]; then
+      echo "WATCHDOG|skip|$p|reason=under-failed"
+      SKIPPED[$p]=1
+    fi
+    return 0
+  fi
+
   SEEN[$p]=1
   process_file "$p" || true
   unset 'SEEN[$p]'
@@ -242,6 +265,7 @@ case "$BACKEND" in
     done < <(inotifywait -m -r -q -e close_write -e moved_to --format '%w%f' "$WATCH_DIR" 2>/dev/null)
     ;;
   poll)
+    iter=0
     while (( STOP == 0 )); do
       while IFS= read -r p; do
         [[ -z "$p" ]] && continue
@@ -249,6 +273,8 @@ case "$BACKEND" in
         (( STOP == 1 )) && break
       done < <(list_existing)
       (( STOP == 1 )) && break
+      iter=$((iter + 1))
+      if (( CYCLES > 0 )) && (( iter >= CYCLES )); then break; fi
       sleep "$POLL_INTERVAL"
     done
     ;;

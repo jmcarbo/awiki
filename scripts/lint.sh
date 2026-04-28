@@ -974,6 +974,27 @@ if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then
   fi
 fi
 
+# --- Template-update lint subroutines ---------------------------------------
+# Runs template.manifest.toml/migrations/pending-prompts/provenance/availability
+# checks. Output is LINT|<level>|<file>|<msg>; we tally lower-cased levels so
+# the summary line stays consistent. Non-zero exit from the helper is non-fatal
+# at the wrapper level (we already counted via parsed output).
+if [[ -x "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" ]] \
+   || [[ -f "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" ]]; then
+  TEMPLATE_LINT_OUT="$(python3 "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" --root "$AWIKI_REPO_ROOT" 2>&1 || true)"
+  if [[ -n "$TEMPLATE_LINT_OUT" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      echo "$line"
+      case "$line" in
+        LINT\|error\|*)   ERRORS=$((ERRORS + 1)) ;;
+        LINT\|warning\|*) WARNS=$((WARNS + 1)) ;;
+        LINT\|info\|*)    INFOS=$((INFOS + 1)) ;;
+      esac
+    done <<< "$TEMPLATE_LINT_OUT"
+  fi
+fi
+
 echo "LINT-SUMMARY|errors=$ERRORS|warnings=$WARNS|info=$INFOS"
 
 if [[ "$ERRORS" -gt 0 ]]; then exit 2; fi

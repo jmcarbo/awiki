@@ -207,6 +207,17 @@ After running the base smoke test:
 
 5. The page appears under the Synthesis section of `content/catalog.md` after running `just update-catalog` (or via the MCP `update_catalog` tool).
 
+## Pulling template updates
+
+Once your wiki is bootstrapped, you can pull awiki template updates with:
+
+```bash
+just template-update          # dry-run plan
+just template-update --apply  # execute on dedicated review branch
+```
+
+See [docs/template-update.md](docs/template-update.md) for the full guide, trust model, and recovery flows.
+
 ## License
 
 Choose your own per-clone. Template ships without a LICENSE file.

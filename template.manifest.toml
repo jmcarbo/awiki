@@ -1,0 +1,23 @@
+schema_version = 1
+template_version = "1.0.0"
+
+[strategies]
+overwrite        = ["scripts/**", "layouts/**", "mcp/awiki-server/**", "deploy/**", "scheduled/**", "BOOTSTRAP.md", "README.md", "justfile", "tests/**"]
+preserve         = ["content/**", "raw/**", ".obsidian/workspace*", "secrets/**", "themes/**"]
+three_way        = ["WIKI.md", "hugo.toml", "content/_index.md", "content/log.md", ".gitignore", "CLAUDE.md", "AGENTS.md"]
+attributes_merge = [".gitattributes"]
+template_only    = ["template.manifest.toml", "migrations/**"]
+
+[new_file_default]
+strategy = "prompt"
+
+[bootstrap]
+ordered_steps = [
+  "dep-check", "domain", "wiki-name", "privacy", "track-processed",
+  "theme", "publish-log", "patch-identity", "install-qmd",
+  "wire-qmd-mcp", "wire-awiki-mcp", "log-init", "stage-commit",
+  "template-init", "smoke-test"
+]
+
+[bootstrap.dangerous]
+ids = ["theme", "wire-qmd-mcp", "wire-awiki-mcp", "install-qmd"]

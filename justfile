@@ -131,3 +131,26 @@ review:
     bash scripts/agenda.sh
     bash scripts/lint.sh
     bash scripts/review-status.sh
+
+# === template ===
+template-init:
+    bash scripts/template-init.sh --repo "${TEMPLATE_REPO:?TEMPLATE_REPO required}" \
+                                   --ref "${TEMPLATE_REF:-main}" \
+                                   --version "${TEMPLATE_VERSION:?TEMPLATE_VERSION required}" \
+                                   --commit "${TEMPLATE_COMMIT:?TEMPLATE_COMMIT required}"
+
+# === template (added Phase 09) ===
+template-update *args:
+    bash scripts/template-update.sh {{args}}
+
+template-status:
+    bash scripts/template-update.sh --status
+
+template-gc:
+    bash scripts/template-update.sh --gc
+
+bootstrap-step id:
+    bash scripts/template-step.sh {{id}}
+
+template-retrofit:
+    bash scripts/template-retrofit.sh

@@ -1,0 +1,18 @@
+schema_version = 1
+template_version = "0.2.0"
+
+[strategies]
+overwrite        = ["scripts/**", "BOOTSTRAP.md"]
+preserve         = ["content/**", "raw/**"]
+three_way        = ["WIKI.md", "hugo.toml"]
+attributes_merge = [".gitattributes"]
+template_only    = ["template.manifest.toml", "migrations/**"]
+
+[new_file_default]
+strategy = "prompt"
+
+[bootstrap]
+ordered_steps = ["dep-check", "domain", "stage-commit"]
+
+[bootstrap.dangerous]
+ids = []

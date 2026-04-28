@@ -68,7 +68,7 @@ _prepare() {
   _reject_attach "$sql" || return $?
   mkdir -p "$CACHE_DIR"
   local refs ddl=""
-  refs="$(_resolve_refs "$sql")"
+  refs="$(_resolve_refs "$sql")" || { die "ref resolution failed"; return 4; }
   while IFS= read -r slug; do
     [[ -z "$slug" ]] && continue
     if [[ ! -f "$DATASETS_DIR/$slug.md" ]]; then
@@ -83,6 +83,10 @@ _prepare() {
 }
 
 cmd_run() {
+  if [[ $# -lt 1 ]]; then
+    die "usage: query-engine.sh <run|hash> \"<SQL>\""
+    return 1
+  fi
   local sql="$1"
   local ddl
   ddl="$(_prepare "$sql")" || return $?
@@ -100,18 +104,34 @@ $sql
 }
 
 cmd_hash() {
+  if [[ $# -lt 1 ]]; then
+    die "usage: query-engine.sh <run|hash> \"<SQL>\""
+    return 1
+  fi
   local sql="$1"
-  local refs slug fmt path file_hash payload=""
-  refs="$(_resolve_refs "$sql")" || return $?
+  _reject_attach "$sql" || return $?
+  local refs slug fmt file_hash payload=""
+  refs="$(_resolve_refs "$sql")" || { die "ref resolution failed"; return 4; }
   while IFS= read -r slug; do
     [[ -z "$slug" ]] && continue
+    if [[ ! -f "$DATASETS_DIR/$slug.md" ]]; then
+      die "unknown dataset: $slug"
+      return 3
+    fi
     fmt="$(_format_for "$slug")"
-    path="$DATASETS_DIR/$slug.md"
-    file_hash="$(shasum -a 256 "$path" | awk '{print $1}')"
+    local tmp_extract
+    tmp_extract="$(mktemp)"
+    if ! python3 "$EXTRACT_PY" --slug="$slug" --datasets-dir="$DATASETS_DIR" --out="$tmp_extract" >/dev/null 2>&1; then
+      rm -f "$tmp_extract"
+      die "extract for hash failed: $slug"
+      return 4
+    fi
+    file_hash="$(shasum -a 256 "$tmp_extract" | awk '{print $1}')"
+    rm -f "$tmp_extract"
     payload+="$slug:$file_hash"$'\n'
   done <<< "$refs"
   local norm
-  norm="$(printf '%s' "$sql" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//')"
+  norm="$(printf '%s' "$sql" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//' | tr '[:upper:]' '[:lower:]')"
   printf '%s\n%s' "$norm" "$payload" | shasum -a 256 | awk '{print $1}'
 }
 

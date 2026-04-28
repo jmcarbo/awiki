@@ -101,3 +101,55 @@ MD
   [ "$h1" = "$h2" ]
   [ -n "$h1" ]
 }
+
+@test "hash exits 3 for unknown dataset" {
+  run bash scripts/lib/query-engine.sh hash "SELECT * FROM ghost ORDER BY 1"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"unknown dataset: ghost"* ]]
+}
+
+@test "hash exits 9 for ATTACH" {
+  run bash scripts/lib/query-engine.sh hash "ATTACH 'foo.db'; SELECT 1"
+  [ "$status" -eq 9 ]
+}
+
+@test "hash is whitespace + case insensitive" {
+  h1=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  h2=$(bash scripts/lib/query-engine.sh hash "select   ID  from  TRADES order by id")
+  [ "$h1" = "$h2" ]
+}
+
+@test "hash unaffected by frontmatter changes (only fence body matters)" {
+  h1=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  # Touch last_updated in trades.md frontmatter
+  python3 - <<'PY'
+import re, pathlib
+p = pathlib.Path("content/datasets/trades.md")
+text = p.read_text()
+text = re.sub(r'^last_updated:.*$', 'last_updated: 2099-01-01', text, count=1, flags=re.M)
+p.write_text(text)
+PY
+  h2=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  [ "$h1" = "$h2" ]
+}
+
+@test "hash differs when fence body changes" {
+  h1=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  # Append a row to the trades fence body via dataset compact path is heavy;
+  # instead mutate the markdown body directly.
+  python3 - <<'PY'
+import re, pathlib
+p = pathlib.Path("content/datasets/trades.md")
+text = p.read_text()
+text = re.sub(r"```csv\n(.*?)\n```", lambda m: "```csv\n" + m.group(1) + "\n6,gear,99.0,2\n```", text, count=1, flags=re.S)
+p.write_text(text)
+PY
+  h2=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  [ "$h1" != "$h2" ]
+}
+
+@test "run with no SQL arg exits 1 with usage" {
+  run bash scripts/lib/query-engine.sh run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"usage"* ]]
+}

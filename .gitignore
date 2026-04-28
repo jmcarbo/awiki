@@ -43,6 +43,11 @@ content/synthesis/.staged/*
 .awiki/task-count
 .awiki/maps/
 
+# git-docs ingest (phase 20)
+.awiki/git-state/
+.awiki/lock/
+raw/_git-cache/
+
 # === git worktrees ===
 .worktrees/
 

@@ -176,6 +176,7 @@ cmd_validate() {
   # Refresh rows count.
   local actual
   actual="$(python3 "$ROWS_PY" count --format="$format" --file="$data_file")"
+  [[ "$actual" =~ ^[0-9]+$ ]] || die "row counter returned non-numeric: '$actual'"
   fm_set "$page" rows "$actual"
   note "validated $slug (rows=$actual)"
 }

@@ -4,6 +4,7 @@ setup() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
   WORK="$(mktemp -d)"
   cp -r "$REPO_ROOT/scripts" "$WORK/scripts"
+  cp "$REPO_ROOT/justfile" "$WORK/justfile"
   mkdir -p "$WORK/content/datasets" "$WORK/content/charts" "$WORK/data" "$WORK/assets/charts"
   cp "$REPO_ROOT/tests/fixtures/data-layer/demo.csv" "$WORK/data/demo.csv"
   cat > "$WORK/content/datasets/demo.md" <<'EOF'
@@ -133,4 +134,27 @@ EOF
   run bash scripts/chart.sh render-one nope
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown chart"* ]]
+}
+
+@test "just charts-render runs chart.sh render" {
+  need_vlconvert
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"}}
+```
+EOF
+  mkdir -p content/concepts
+  run just charts-render
+  [ "$status" -eq 0 ]
+  [ -f assets/charts/p-fig0.svg ]
+}
+
+@test "just charts-render-one runs chart.sh render-one" {
+  need_vlconvert
+  run just charts-render-one nope
+  [ "$status" -ne 0 ]
 }

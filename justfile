@@ -135,6 +135,17 @@ dataset-validate slug:
 data-help:
     cat docs/data-help.txt
 
+# Walk every vega-lite fence + type:chart page; regen stale SVG sidecars
+# under assets/charts/. Uses scripts/lib/vendor-vega.sh if vendored bundle
+# absent. Requires the `vl-convert` Rust binary.
+charts-render:
+    bash scripts/chart.sh render
+
+# Single-chart regen for fast iteration. Argument is the chart-id
+# (`<page-slug>-fig<N>` for inline charts, `<slug>` for type:chart pages).
+charts-render-one chart_id:
+    bash scripts/chart.sh render-one {{chart_id}}
+
 capture *text:
     bash scripts/capture.sh -- {{text}}
 

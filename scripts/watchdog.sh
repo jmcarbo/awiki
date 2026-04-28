@@ -138,6 +138,17 @@ run_ingest() {
   fi
 }
 
+dispatch_path() {
+  local path="$1"
+  case "${path,,}" in
+    *.xlsx|*.xls|*.ods)
+      bash "$SCRIPT_DIR/ingest-xlsx.sh" "$path"
+      return $?
+      ;;
+  esac
+  run_ingest "$path"
+}
+
 process_file() {
   local path="$1"
 
@@ -185,7 +196,7 @@ process_file() {
   echo "WATCHDOG|stable|$path|size=$cur"
 
   local rc=0
-  run_ingest "$path" || rc=$?
+  dispatch_path "$path" || rc=$?
 
   if (( rc == 0 )); then
     echo "WATCHDOG|ingest-ok|$path"

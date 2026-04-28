@@ -114,6 +114,11 @@ help:
 task-init:
     bash scripts/task-init.sh
 
+# === data layer (opt-in) ===
+# Per-step idempotent enabler for datasets + charts. Mirrors task-init.
+data-init:
+    bash scripts/data-init.sh
+
 capture *text:
     bash scripts/capture.sh -- {{text}}
 

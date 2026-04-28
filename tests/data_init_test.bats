@@ -4,6 +4,7 @@ setup() {
   WORK="$(mktemp -d)"
   REPO_ROOT="$(git rev-parse --show-toplevel)"
   cp -r "$REPO_ROOT/scripts" "$WORK/scripts"
+  cp "$REPO_ROOT/justfile" "$WORK/justfile"
   mkdir -p "$WORK/content" "$WORK/.awiki"
   printf -- "AWIKI_LINT_AFTER_N=5\nAWIKI_STALE_DAYS=90\nAWIKI_LOG_QUERIES=0\n" > "$WORK/.awiki/config"
   printf -- "---\ntitle: \"WIKI\"\n---\n\n# WIKI\n" > "$WORK/WIKI.md"
@@ -128,4 +129,13 @@ teardown() {
   # Block was not appended again.
   run grep -c -F 'Page kind: `dataset`' WIKI.md
   [[ "$output" == "0" ]]
+}
+
+@test "just data-init recipe runs the script" {
+  run just data-init
+  [ "$status" -eq 0 ]
+  [ -d content/datasets ]
+  [ -d data ]
+  run grep -E '^AWIKI_DATA_LAYER=on$' .awiki/config
+  [ "$status" -eq 0 ]
 }

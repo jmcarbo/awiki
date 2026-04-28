@@ -30,3 +30,32 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   [[ "$output" == *"--out-dir"* ]]
   [[ "$output" == *"--csv-dir"* ]]
 }
+
+@test "xlsx-extract --infer-headers returns header strings when row is all strings" {
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-headers '["region","amount","date"]'
+  [ "$status" -eq 0 ]
+  [ "$output" = '["region", "amount", "date"]' ]
+}
+
+@test "xlsx-extract --infer-headers synthesises col_N when first row not all strings" {
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-headers '[1,2,3]'
+  [ "$status" -eq 0 ]
+  [ "$output" = '["col_1", "col_2", "col_3"]' ]
+}
+
+@test "xlsx-extract --infer-headers synthesises col_N when any cell empty" {
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-headers '["region","",""]'
+  [ "$status" -eq 0 ]
+  [ "$output" = '["col_1", "col_2", "col_3"]' ]
+}
+
+@test "xlsx-extract --infer-type classifies column samples" {
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[1,2,3]'
+  [ "$output" = "number" ]
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '["a","b"]'
+  [ "$output" = "text" ]
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[true,false]'
+  [ "$output" = "bool" ]
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[1,"a"]'
+  [ "$output" = "mixed" ]
+}

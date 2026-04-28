@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 
 
+_BAD = object()
+
+
 def _open_csv(path, delimiter):
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter=delimiter)
@@ -52,7 +55,7 @@ def _coerce(value, ty):
         return str(value)
     if ty == "integer":
         if isinstance(value, bool):
-            return None  # bool subclasses int; reject.
+            return _BAD  # bool subclasses int; reject.
         if isinstance(value, int):
             return value
         s = str(value).strip()
@@ -76,9 +79,6 @@ def _coerce(value, ty):
             return False
         return _BAD
     return _BAD
-
-
-_BAD = object()
 
 
 def _validate(rows, schema):

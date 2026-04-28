@@ -44,9 +44,6 @@ EOF
 }
 
 @test "dataset-rows validate csv flags wrong type" {
-  cat > schema.json <<'EOF'
-[{"name":"year","type":"string"},{"name":"pop","type":"integer"},{"name":"country","type":"string"}]
-EOF
   # pop=331 is integer-shaped so passes; force a number-only check
   printf 'year,pop,country\n2020,3.5,US\n' > bad.csv
   cat > schema.json <<'EOF'
@@ -67,4 +64,21 @@ EOF
   printf 'year,pop,country\n' > empty.csv
   run python3 "$REPO_ROOT/scripts/lib/dataset-rows.py" count --format=csv --file=empty.csv
   [[ "$output" == "0" ]]
+}
+
+@test "dataset-rows validate json rejects bool for integer column" {
+  printf '[{"a":true},{"a":1}]' > bools.json
+  cat > schema.json <<'EOF'
+[{"name":"a","type":"integer"}]
+EOF
+  run python3 "$REPO_ROOT/scripts/lib/dataset-rows.py" validate --format=json --file=bools.json --schema=schema.json
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"row=1"*"col=a"*"want=integer"* ]]
+}
+
+@test "dataset-rows count dsv (semicolon) returns 3" {
+  printf 'year;pop;country\n2020;331;US\n2021;333;US\n2022;335;US\n' > demo.dsv
+  run python3 "$REPO_ROOT/scripts/lib/dataset-rows.py" count --format=dsv --file=demo.dsv
+  [ "$status" -eq 0 ]
+  [[ "$output" == "3" ]]
 }

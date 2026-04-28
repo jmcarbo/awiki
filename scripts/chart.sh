@@ -184,6 +184,8 @@ _render_one() {
   printf '%s' "$resolved" > "$resolved_tmp"
   if vl-convert vl2svg --input "$resolved_tmp" --output "$sidecar" 2>/tmp/vlc.err; then
     printf '%s' "$hash" > "$sidecar.hash"
+    # Cache the resolved spec next to the SVG for the Hugo render-hook.
+    printf '%s' "$resolved" > "$ASSETS_DIR/$chart_id.json"
     rm -f "$sidecar.failed"
     _inject_preview "$page" "$chart_id"
     note "rendered $chart_id"

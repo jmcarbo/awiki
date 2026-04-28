@@ -1,0 +1,38 @@
+{{- $spec := .Inner -}}
+{{- $idx  := .Ordinal -}}
+{{- $slug := .Page.File.BaseFileName | default "page" -}}
+{{- $isChartPage := eq .Page.Type "chart" -}}
+{{- $cid := cond $isChartPage $slug (printf "%s-fig%d" $slug $idx) -}}
+{{- $cachePath := printf "assets/charts/%s.json" $cid -}}
+{{- $resolved := $spec -}}
+{{- if fileExists $cachePath -}}
+  {{- $resolved = readFile $cachePath -}}
+{{- end -}}
+<div class="vega-embed" id="{{ $cid }}" data-spec='{{ $resolved | safeJS }}'></div>
+{{- if not (.Page.Scratch.Get "vega-embed-loaded") -}}
+  {{- .Page.Scratch.Set "vega-embed-loaded" true -}}
+<script src="{{ "/vendor/vega/vega.min.js" | relURL }}"></script>
+<script src="{{ "/vendor/vega/vega-lite.min.js" | relURL }}"></script>
+<script src="{{ "/vendor/vega/vega-embed.min.js" | relURL }}"></script>
+<script>
+(function(){
+  function hydrate(){
+    document.querySelectorAll('.vega-embed[data-spec]').forEach(function(el){
+      if (el.dataset.hydrated) return;
+      el.dataset.hydrated = '1';
+      try {
+        var spec = JSON.parse(el.getAttribute('data-spec'));
+        vegaEmbed('#' + el.id, spec, {actions: false}).catch(function(err){
+          el.innerHTML = '<pre class="vega-error">' + (err && err.message || err) + '</pre>';
+        });
+      } catch (e) {
+        el.innerHTML = '<pre class="vega-error">' + e.message + '</pre>';
+      }
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hydrate);
+  } else { hydrate(); }
+})();
+</script>
+{{- end -}}

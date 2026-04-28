@@ -55,3 +55,17 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"unsupported format"* ]]
 }
+
+@test "dataset new bails when row counter returns non-numeric" {
+  TMPBIN="$(mktemp -d)"
+  cat > "$TMPBIN/python3" <<'EOF'
+#!/usr/bin/env bash
+echo "not-a-number"
+exit 0
+EOF
+  chmod +x "$TMPBIN/python3"
+  PATH="$TMPBIN:$PATH" run bash scripts/dataset.sh new garbo --format=csv --from=demo.csv
+  rm -rf "$TMPBIN"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"non-numeric"* ]]
+}

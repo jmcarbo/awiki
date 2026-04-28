@@ -44,7 +44,9 @@ cmd_new() {
   local body=""
   if [[ -n "$from" ]]; then
     [[ -f "$from" ]] || die "source file not found: $from"
+    command -v python3 >/dev/null 2>&1 || die "python3 required for --from row counting"
     rows="$(python3 "$ROWS_PY" count --format="$format" --file="$from")"
+    [[ "$rows" =~ ^[0-9]+$ ]] || die "row counter returned non-numeric: '$rows'"
     body="$(cat "$from")"
   fi
 

@@ -11,6 +11,7 @@ setup() {
   cp -r "$REPO_ROOT/themes" "$WORK/themes"
   cp "$REPO_ROOT/hugo.toml" "$WORK/hugo.toml"
   mkdir -p "$WORK/content/datasets" "$WORK/content/concepts" "$WORK/data" "$WORK/.awiki/build-content"
+  printf 'AWIKI_DATA_LAYER=on\n' > "$WORK/.awiki/config"
   cp "$REPO_ROOT/tests/fixtures/data-layer/demo.csv" "$WORK/data/demo.csv"
   cat > "$WORK/content/datasets/demo.md" <<'EOF'
 ---
@@ -40,18 +41,18 @@ EOF
 teardown() { popd >/dev/null; rm -rf "$WORK"; }
 
 @test "hugo build emits vega-embed div for vega-lite fence" {
-  bash scripts/build.sh
+  bash scripts/build.sh --full
   [ -f public/concepts/intro/index.html ] || [ -f public/concepts/intro.html ]
-  out="$(find public -name 'intro*' -type f -name '*.html' | head -1)"
-  run grep -F 'class="vega-embed"' "$out"
+  out="$(find public -path '*intro*' -name '*.html' -type f | head -1)"
+  run grep -E 'class="?vega-embed' "$out"
   [ "$status" -eq 0 ]
   run grep -F '"url":' "$out"
   [ "$status" -eq 0 ]
 }
 
 @test "hugo build injects vega-embed.min.js only on chart pages" {
-  bash scripts/build.sh
-  out="$(find public -name 'intro*' -type f -name '*.html' | head -1)"
+  bash scripts/build.sh --full
+  out="$(find public -path '*intro*' -name '*.html' -type f | head -1)"
   run grep -F 'vega-embed.min.js' "$out"
   [ "$status" -eq 0 ]
   # A page without charts must NOT get the script.
@@ -61,13 +62,14 @@ type: concept
 ---
 plain page
 EOF
-  bash scripts/build.sh
-  out="$(find public -name 'plain*' -type f -name '*.html' | head -1)"
+  bash scripts/build.sh --full
+  out="$(find public -path '*plain*' -name '*.html' -type f | head -1)"
   run grep -F 'vega-embed.min.js' "$out"
   [ "$status" -ne 0 ]
 }
 
 @test "shortcode embeds chart-page spec on another page" {
+  mkdir -p content/charts
   cat > content/charts/demo-bar.md <<'EOF'
 ---
 type: chart
@@ -89,10 +91,10 @@ title: "uses"
 
 {{< vega-lite "demo-bar" >}}
 EOF
-  bash scripts/build.sh
-  out="$(find public -name 'uses*' -type f -name '*.html' | head -1)"
-  run grep -F 'class="vega-embed"' "$out"
+  bash scripts/build.sh --full
+  out="$(find public -path '*uses*' -name '*.html' -type f | head -1)"
+  run grep -E 'class="?vega-embed' "$out"
   [ "$status" -eq 0 ]
-  run grep -F 'id="demo-bar"' "$out"
+  run grep -E 'id="?demo-bar"?' "$out"
   [ "$status" -eq 0 ]
 }

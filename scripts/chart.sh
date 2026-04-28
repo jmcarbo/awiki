@@ -168,8 +168,8 @@ _render_one() {
   local page="$1" chart_id="$2" spec_tmp="$3"
   local resolved hash existing_hash sidecar
   sidecar="$ASSETS_DIR/$chart_id.svg"
-  resolved="$(python3 "$RESOLVE_PY" --spec="$spec_tmp" --base-url=/ --repo-root="$REPO_ROOT" --src="$page")"
-  if [[ $? -ne 0 ]]; then
+  if ! resolved="$(python3 "$RESOLVE_PY" --spec="$spec_tmp" --base-url=/ --repo-root="$REPO_ROOT" --src="$page" 2>&1)"; then
+    printf '%s\n' "$resolved" >&2
     return 2
   fi
   hash="$(printf '%s' "$resolved" | shasum -a 1 | awk '{print $1}')"
@@ -213,9 +213,7 @@ cmd_render() {
   local rc=0
   while IFS=$'\t' read -r page chart_id spec_tmp; do
     [[ -z "$chart_id" ]] && continue
-    if ! _render_one "$page" "$chart_id" "$spec_tmp"; then
-      rc=$?
-    fi
+    _render_one "$page" "$chart_id" "$spec_tmp" || rc=$?
     current_ids+=("$chart_id")
     rm -f "$spec_tmp"
   done < <(_walk_charts)
@@ -224,9 +222,9 @@ cmd_render() {
     while IFS= read -r -d '' f; do
       local base
       base="$(basename "$f")"
+      base="${base%.svg.hash}"
+      base="${base%.svg.failed}"
       base="${base%.svg}"
-      base="${base%.hash}"
-      base="${base%.failed}"
       local found=0
       for id in "${current_ids[@]:-}"; do
         [[ "$id" == "$base" ]] && { found=1; break; }

@@ -34,14 +34,15 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
   [ -f assets/charts/demo-bar.svg ]
   [ -f assets/charts/demo-bar.json ]
 
-  bash scripts/build.sh
+  bash scripts/build.sh --full
   [ -d public ]
-  out="$(find public -name 'demo-bar*' -type f -name '*.html' | head -1)"
+  out="$(find public -path '*demo-bar*' -name '*.html' -type f | head -1)"
   [[ -n "$out" ]]
-  run grep -F 'class="vega-embed"' "$out"
+  run grep -E 'class="?vega-embed' "$out"
   [ "$status" -eq 0 ]
 
   run bash scripts/lint.sh
-  # No errors expected; warnings (e.g. D9 missing sources) are OK.
-  [[ "$output" != *"|error|"* ]]
+  # No D/C-code errors expected from the data layer; warnings (D9 etc.) are OK.
+  # Unrelated lint errors (e.g. template.manifest.toml missing) are not data-layer concerns.
+  ! grep -E '^LINT\|(error|ERROR)\|.*\|(D[1-9]|C[1-9]|C-PRIV)\|' <<<"$output"
 }

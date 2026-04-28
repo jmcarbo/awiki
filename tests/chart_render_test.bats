@@ -31,6 +31,7 @@ need_vlconvert() {
 
 @test "render produces SVG for inline fence" {
   need_vlconvert
+  mkdir -p content/concepts
   cat > content/concepts/intro.md <<'EOF'
 ---
 type: concept
@@ -42,7 +43,6 @@ type: concept
 {"mark":"bar","data":{"name":"[[demo]]"},"encoding":{"x":{"field":"year"}}}
 ```
 EOF
-  mkdir -p content/concepts
   run bash scripts/chart.sh render
   [ "$status" -eq 0 ]
   [ -f assets/charts/intro-fig0.svg ]
@@ -87,6 +87,7 @@ EOF
 
 @test "render fails fast on broken resolver" {
   need_vlconvert
+  mkdir -p content/concepts
   cat > content/concepts/intro.md <<'EOF'
 ---
 type: concept
@@ -96,7 +97,6 @@ type: concept
 {"mark":"bar","data":{"name":"[[no-such-slug]]"}}
 ```
 EOF
-  mkdir -p content/concepts
   run bash scripts/chart.sh render
   [ "$status" -ne 0 ]
   [[ "$output" == *"RESOLVE|"*"no-such-slug"* ]]
@@ -138,6 +138,7 @@ EOF
 
 @test "just charts-render runs chart.sh render" {
   need_vlconvert
+  mkdir -p content/concepts
   cat > content/concepts/p.md <<'EOF'
 ---
 type: concept
@@ -147,7 +148,6 @@ type: concept
 {"mark":"bar","data":{"name":"[[demo]]"}}
 ```
 EOF
-  mkdir -p content/concepts
   run just charts-render
   [ "$status" -eq 0 ]
   [ -f assets/charts/p-fig0.svg ]

@@ -159,3 +159,43 @@ p.write_text(s)
   grep -q "USER EDIT MARKER" content/sources/git-repo-readme.md
   [ -f raw/inbox/checkpoint/.staged/git-repo-readme.md ]
 }
+
+@test "ingest-git: exits 14 on slug collision" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p "$WORK/repo/docs/foo"
+  printf "# A\n\nbody text content\n" > "$WORK/repo/docs/foo-bar.md"
+  printf "# B\n\nbody text content\n" > "$WORK/repo/docs/foo/bar.md"
+  git -C "$WORK/repo" add -A && git -C "$WORK/repo" commit -q -m collide
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ "$status" -eq 14 ]
+  echo "$output$stderr" | grep -qi "slug collision"
+}
+
+@test "ingest-git: exits 15 on repo entity name conflict" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p content/entities
+  cat > content/entities/repo-repo.md <<EOF
+---
+title: repo
+type: entity
+git_url: https://different.example/foo.git
+---
+EOF
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ "$status" -eq 15 ]
+}
+
+@test "ingest-git: --repo-name override sidesteps name conflict" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p content/entities
+  cat > content/entities/repo-repo.md <<EOF
+---
+title: repo
+type: entity
+git_url: https://different.example/foo.git
+---
+EOF
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo" --repo-name=alt
+  [ "$status" -eq 0 ]
+  [ -f content/entities/repo-alt.md ]
+}

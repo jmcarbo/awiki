@@ -59,6 +59,15 @@ elif [[ -f scripts/lint-chart.sh ]]; then
   source scripts/lint-chart.sh
 fi
 
+# Source query lint extension (Q-codes).
+if [[ -f "$(dirname "$0")/lint-query.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/lint-query.sh"
+elif [[ -f scripts/lint-query.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/lint-query.sh
+fi
+
 apply_fixes() {
   local page="$1"
   if ! grep -q '^last_updated:' "$page"; then
@@ -997,6 +1006,16 @@ if [[ "$ONLY" == "chart" ]]; then
   chart_errors="$(printf '%s\n' "$chart_out" | grep -c '^LINT|ERROR|' || true)"
   chart_errors="${chart_errors:-0}"
   if (( chart_errors > 0 )); then
+    exit 2
+  fi
+  exit 0
+fi
+if [[ "$ONLY" == "query" ]]; then
+  query_out="$(lint_query_all)"
+  printf '%s\n' "$query_out"
+  query_errors="$(printf '%s\n' "$query_out" | grep -c '^LINT|ERROR|' || true)"
+  query_errors="${query_errors:-0}"
+  if (( query_errors > 0 )); then
     exit 2
   fi
   exit 0

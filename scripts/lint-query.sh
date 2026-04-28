@@ -47,6 +47,28 @@ PY
       missing=1
     fi
   done < <(printf '%s' "$sql" | python3 "$RESOLVE_PY")
+
+  # Q3 — determinism (only on materialized type:query pages).
+  if printf '%s' "$sql" | python3 "$DETERMINISM_PY" 2>/tmp/q3.err >/dev/null; then
+    :
+  else
+    _emit_q error "$rel" Q3 "$(cat /tmp/q3.err | tr '\n' ' ')"
+    rm -f /tmp/q3.err
+    missing=1
+  fi
+  rm -f /tmp/q3.err
+
+  # Q4 — sidecar staleness.
+  local slug; slug="$(basename "$page" .md)"
+  local sidecar="content/queries/$slug.sql.hash"
+  if [[ -f "$sidecar" ]]; then
+    local now_hash; now_hash="sha256-$(bash "$ENGINE" hash "$sql")"
+    local prev_hash; prev_hash="$(cat "$sidecar" | tr -d '[:space:]')"
+    if [[ "$now_hash" != "$prev_hash" ]]; then
+      _emit_q error "$rel" Q4 "sidecar stale: $sidecar (run \`just query-render-one $slug\`)"
+      missing=1
+    fi
+  fi
   return $missing
 }
 

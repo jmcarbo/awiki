@@ -29,4 +29,30 @@ MCP tools:
   list_datasets()        -> { datasets, errors }
   get_dataset(slug)      -> { slug, frontmatter, sample_rows[20], total_rows, ... }
 
-Charts ship in Plan 2; this layer ships datasets-as-pages only.
+=== charts ===
+
+just chart-new <slug> --data=<dataset-slug>
+  Scaffold a content/charts/<slug>.md (type: chart) with a skeleton
+  vega-lite spec referencing the named dataset.
+
+just charts-render
+  Walk every ```vega-lite``` fence + every type:chart page. For each:
+    - resolve [[slug]] data references (scripts/lib/vl-resolve.py)
+    - hash the resolved spec
+    - skip if assets/charts/<id>.svg + .hash match
+    - else call vl-convert vl2svg, write SVG + hash + cached resolved JSON
+    - update Obsidian managed-region preview block in source page
+  Cleans orphan sidecars + managed regions.
+
+just charts-render-one <chart-id>
+  Single-chart regen. <chart-id> is `<page-slug>-fig<N>` for inline charts
+  or just `<slug>` for type:chart pages.
+
+Hugo render-hook: ```vega-lite``` blocks render as <div class="vega-embed">,
+hydrated by lazy-loaded vendored vega-embed.min.js.
+
+Obsidian: install obsidian-vega-lite (or Obsidian Charts) to render live.
+Without a plugin, the managed-region SVG sidecar shows in reading view.
+Suppress sidecar injection: AWIKI_CHART_OBSIDIAN_PREVIEW=off in .awiki/config.
+
+MCP tool: list_charts() -> { charts, errors }

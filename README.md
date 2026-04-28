@@ -219,6 +219,24 @@ Per-step idempotent. Creates `content/datasets/`, `data/`, sets
 
 Per-recipe usage: see `docs/data-help.txt`.
 
+### Charts (Plan 2)
+
+Embed Vega-Lite charts in any page:
+
+````markdown
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{...}}
+```
+````
+
+The `[[demo]]` reference is resolved at build time to a URL (file storage)
+or inline values (inline storage). Hugo renders interactive charts via
+vendored vega-embed; Obsidian renders live with `obsidian-vega-lite` (or
+Obsidian Charts) installed, otherwise via SVG sidecar previews.
+
+Run `just charts-render` to regenerate sidecars; `just build` invokes it
+automatically. Per-recipe usage: `just data-help`.
+
 ## Example
 
 Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog. The synthesis demo lives at `examples/sample-wiki/content/synthesis/memex-briefing.md`.

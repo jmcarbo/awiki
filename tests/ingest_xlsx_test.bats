@@ -235,3 +235,26 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   [ "$status" -eq 0 ]
   grep -E '^rows_preview: 1$' raw/inbox/interactive/single-sheet--sales.md
 }
+
+@test "ingest-xlsx rejects traversal paths even under raw/inbox/" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" raw/inbox/../etc/passwd
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"reason=bad-path"* ]]
+}
+
+@test "ingest-xlsx strips leading ./ from relative paths" {
+  cp raw/inbox/batch/single-sheet.xlsx raw/inbox/interactive/single-sheet.xlsx
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" ./raw/inbox/interactive/single-sheet.xlsx
+  [ "$status" -eq 0 ]
+  [ -f raw/inbox/interactive/single-sheet--sales.md ]
+}
+
+@test "ingest-xlsx rejects workbooks whose stem slugifies to empty" {
+  # `!!!.xlsx` -> stem `!!!` -> slugify("") which produces empty.
+  cp raw/inbox/batch/single-sheet.xlsx 'raw/inbox/interactive/!!!.xlsx'
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-xlsx.sh" 'raw/inbox/interactive/!!!.xlsx'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"reason=bad-slug"* ]]
+  # Source preserved so user can rename.
+  [ -f 'raw/inbox/interactive/!!!.xlsx' ]
+}

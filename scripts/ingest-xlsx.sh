@@ -37,6 +37,15 @@ if [[ "$SRC" = /* ]]; then
   esac
 fi
 
+# Strip a leading `./` so callers can supply tab-completed forms.
+SRC="${SRC#./}"
+
+# Reject any traversal segment so `raw/inbox/../etc/passwd` does not
+# satisfy the textual `raw/inbox/*` gate below.
+case "/$SRC/" in
+  */../*) echo "XLSX-ERROR|reason=bad-path|src=$SRC" >&2; exit 2 ;;
+esac
+
 case "$SRC" in
   raw/inbox/*) ;;
   *) echo "XLSX-ERROR|reason=bad-path|src=$SRC" >&2; exit 2 ;;
@@ -52,7 +61,7 @@ esac
 # Preflight: python-calamine. Honour AWIKI_FAKE_MISSING for tests.
 if [[ "${AWIKI_FAKE_MISSING:-}" == "python_calamine" ]] || \
    ! python3 -c "import python_calamine" >/dev/null 2>&1; then
-  echo "XLSX-ERROR|reason=missing-dep|dep=python-calamine"
+  echo "XLSX-ERROR|reason=missing-dep|dep=python-calamine" >&2
   echo "  install: pip3 install python-calamine" >&2
   exit 5
 fi
@@ -60,6 +69,7 @@ fi
 BASE="$(basename "$SRC")"
 STEM="${BASE%.*}"
 SLUG="$(python3 "$SCRIPT_DIR/lib/xlsx-extract.py" --slugify "$STEM")"
+[[ -n "$SLUG" ]] || { echo "XLSX-ERROR|reason=bad-slug|src=$SRC|stem=$STEM" >&2; exit 2; }
 
 ORIG_DIR="raw/processed/_originals/$SLUG"
 mkdir -p "$ORIG_DIR"
@@ -85,7 +95,13 @@ if [[ "$EXTRACT_RC" -ne 0 ]]; then
 fi
 
 # Manifest is single-line JSON on stdout.
-SHEETS=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])['sheets']))" "$MANIFEST")
+SHEETS_RC=0
+SHEETS=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])['sheets']))" "$MANIFEST") || SHEETS_RC=$?
+if [[ "$SHEETS_RC" -ne 0 ]]; then
+  echo "XLSX-ERROR|reason=bad-manifest|src=$SRC|rc=$SHEETS_RC" >&2
+  bash "$SCRIPT_DIR/log-append.sh" xlsx "bad-manifest $BASE rc=$SHEETS_RC" >/dev/null 2>&1 || true
+  exit "$SHEETS_RC"
+fi
 if [[ "$SHEETS" -eq 0 ]]; then
   echo "XLSX-EMPTY|workbook=$SLUG|src=$SRC"
   bash "$SCRIPT_DIR/log-append.sh" xlsx "empty $BASE" >/dev/null 2>&1 || true

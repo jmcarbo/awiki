@@ -207,3 +207,14 @@ EOF
   run bash "$BATS_TEST_DIRNAME/../scripts/lint.sh"
   ! echo "$output" | grep -E "^LINT\\|error\\|" >/dev/null
 }
+
+@test "ingest-git: self-host smoke — ingests this repo's docs/" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  awiki_root="$BATS_TEST_DIRNAME/.."
+  if [[ ! -e "$awiki_root/.git" ]]; then skip "not a git repo"; fi
+  printf -- '---\ntitle: Catalog\ntype: catalog\n---\n\n## Sources\n\n## Entities\n' > content/catalog.md
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$awiki_root" --paths=docs/superpowers/specs/ --repo-name=awiki-self
+  [ "$status" -eq 0 ]
+  [ -f content/entities/repo-awiki-self.md ]
+  ls content/sources/git-awiki-self-* >/dev/null
+}

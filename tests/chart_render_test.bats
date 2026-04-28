@@ -100,3 +100,37 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"RESOLVE|"*"no-such-slug"* ]]
 }
+
+@test "render-one re-renders only the matching chart-id" {
+  need_vlconvert
+  mkdir -p content/concepts
+  cat > content/concepts/intro.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"}}
+```
+EOF
+  cat > content/concepts/other.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"line","data":{"name":"[[demo]]"}}
+```
+EOF
+  bash scripts/chart.sh render
+  rm assets/charts/intro-fig0.svg
+  bash scripts/chart.sh render-one intro-fig0
+  [ -f assets/charts/intro-fig0.svg ]
+}
+
+@test "render-one fails when chart-id unknown" {
+  need_vlconvert
+  run bash scripts/chart.sh render-one nope
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown chart"* ]]
+}

@@ -176,7 +176,23 @@ cmd_render() {
   return $rc
 }
 
-cmd_render_one() { die "render-one not implemented yet (Task 6)"; }
+cmd_render_one() {
+  local target="${1:-}"
+  [[ -n "$target" ]] || die "usage: chart.sh render-one <chart-id>"
+  if ! command -v vl-convert >/dev/null 2>&1; then
+    die "vl-convert missing"
+  fi
+  mkdir -p "$ASSETS_DIR"
+  local found=0
+  while IFS=$'\t' read -r page chart_id spec_tmp; do
+    if [[ "$chart_id" == "$target" ]]; then
+      found=1
+      _render_one "$page" "$chart_id" "$spec_tmp" || exit $?
+    fi
+    rm -f "$spec_tmp"
+  done < <(_walk_charts)
+  [[ $found -eq 1 ]] || die "unknown chart: $target"
+}
 
 main() {
   [[ $# -ge 1 ]] || die "usage: chart.sh <new|render|render-one> [args...]"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	datalint "awiki/internal/lint/data"
 	synthlint "awiki/internal/lint/synth"
 	tasklint "awiki/internal/lint/task"
 	"awiki/internal/wiki"
@@ -18,7 +19,7 @@ type ruleRegistry struct {
 	ruleSets map[string]RuleSet
 }
 
-var defaultRuleRegistry = newRuleRegistry(synthRuleSet{}, taskRuleSet{})
+var defaultRuleRegistry = newRuleRegistry(synthRuleSet{}, taskRuleSet{}, dataRuleSet{})
 
 func newRuleRegistry(ruleSets ...RuleSet) *ruleRegistry {
 	r := &ruleRegistry{ruleSets: make(map[string]RuleSet)}
@@ -144,6 +145,32 @@ func (taskRuleSet) Run(_ context.Context, opts Options, _ *wiki.Index) (Collecto
 			Level:   Level(diagnostic.Level),
 			File:    diagnostic.File,
 			Message: message,
+		})
+	}
+	return c, err
+}
+
+type dataRuleSet struct{}
+
+func (dataRuleSet) Name() string { return "data" }
+
+func (dataRuleSet) Run(_ context.Context, opts Options, _ *wiki.Index) (Collector, error) {
+	var c Collector
+	diagnostics, fixes, err := datalint.Run(datalint.Options{
+		RepoRoot:   opts.RepoRoot,
+		ContentDir: opts.ContentDir,
+		OnlyFile:   opts.OnlyFile,
+		Fix:        opts.Fix,
+	})
+	for _, fix := range fixes {
+		c.AddFix(FixRecord{File: fix.File, Message: fix.Message})
+	}
+	for _, diagnostic := range diagnostics {
+		c.Add(Diagnostic{
+			Level:   Level(diagnostic.Level),
+			File:    diagnostic.File,
+			Code:    diagnostic.Code,
+			Message: diagnostic.Message,
 		})
 	}
 	return c, err

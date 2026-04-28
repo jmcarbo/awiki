@@ -73,20 +73,20 @@ func TestRunOnlyDeferredNamespaceDelegatesToLegacyLintAndImportsDiagnostics(t *t
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
 	runner := &fakeRunner{
-		output: "LINT|ERROR|content/datasets/demo.md|D1|missing storage\n",
+		output: "LINT|ERROR|content/charts/demo.md|C1|missing chart\n",
 	}
 
-	collector, code := Run(Options{ContentDir: contentDir, Only: "data", OnlyFile: "content/datasets/demo.md", Runner: runner})
+	collector, code := Run(Options{ContentDir: contentDir, Only: "chart", OnlyFile: "content/charts/demo.md", Runner: runner})
 
 	if code != 2 {
 		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
 	}
 	assertNoDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink")
-	assertDiagnosticContains(t, collector, Error, "content/datasets/demo.md", "missing storage")
+	assertDiagnosticContains(t, collector, Error, "content/charts/demo.md", "missing chart")
 	if runner.name != "env" {
 		t.Fatalf("runner name = %q, want env", runner.name)
 	}
-	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=data", "--file=content/datasets/demo.md", contentDir}
+	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=chart", "--file=content/charts/demo.md", contentDir}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("runner args = %#v, want %#v", runner.args, want)
 	}
@@ -96,12 +96,12 @@ func TestRunOnlyDeferredNonzeroWithoutLintRecordsAddsError(t *testing.T) {
 	contentDir := t.TempDir()
 	runner := &fakeRunner{output: "bash: scripts/lint.sh: No such file or directory\n", code: 127}
 
-	collector, code := Run(Options{ContentDir: contentDir, Only: "data", Runner: runner})
+	collector, code := Run(Options{ContentDir: contentDir, Only: "chart", Runner: runner})
 
 	if code != 2 {
 		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
 	}
-	assertDiagnosticContains(t, collector, Error, "data", "legacy lint failed with exit code 127")
+	assertDiagnosticContains(t, collector, Error, "chart", "legacy lint failed with exit code 127")
 }
 
 func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
@@ -109,7 +109,7 @@ func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
 	runner := &fakeRunner{}
 
-	collector, code := Run(Options{ContentDir: contentDir, Only: "data", Runner: runner})
+	collector, code := Run(Options{ContentDir: contentDir, Only: "chart", Runner: runner})
 
 	if code != 0 {
 		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
@@ -118,7 +118,7 @@ func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
 	if runner.name != "env" {
 		t.Fatalf("runner name = %q, want env", runner.name)
 	}
-	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=data", contentDir}
+	want := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--only=chart", contentDir}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("runner args = %#v, want %#v", runner.args, want)
 	}
@@ -130,7 +130,7 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
 	runner := &fakeRunner{
 		outputByOnly: map[string]string{
-			"data": "LINT|ERROR|content/datasets/bad.md|D1|missing storage\n",
+			"chart": "LINT|ERROR|content/charts/bad.md|C1|missing chart\n",
 		},
 	}
 
@@ -140,9 +140,9 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
 	}
 	assertDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-target]]")
-	assertDiagnosticContains(t, collector, Error, "content/datasets/bad.md", "missing storage")
+	assertDiagnosticContains(t, collector, Error, "content/charts/bad.md", "missing chart")
 	assertLegacyOnlyNotCalled(t, runner, "synth")
-	assertLegacyOnlyCalled(t, runner, "data")
+	assertLegacyOnlyNotCalled(t, runner, "data")
 	assertLegacyOnlyCalled(t, runner, "chart")
 	assertLegacyOnlyNotCalled(t, runner, "task")
 	assertLegacyOnlyCalled(t, runner, "query")
@@ -162,7 +162,7 @@ func TestRunDefaultAlternateContentDirDelegatesLegacyNamespaces(t *testing.T) {
 		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
 	}
 	assertLegacyOnlyNotCalled(t, runner, "synth")
-	assertLegacyOnlyCalled(t, runner, "data")
+	assertLegacyOnlyNotCalled(t, runner, "data")
 	assertLegacyOnlyCalled(t, runner, "chart")
 	assertLegacyOnlyNotCalled(t, runner, "task")
 	assertLegacyOnlyCalled(t, runner, "query")
@@ -173,7 +173,7 @@ func TestRunImportsLowercaseLegacyTemplateLevels(t *testing.T) {
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
 	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
 	runner := &fakeRunner{outputByOnly: map[string]string{
-		"data": "LINT|error|template.manifest.toml|template failure\nLINT|warning|template.manifest.toml|template warning\n",
+		"chart": "LINT|error|template.manifest.toml|template failure\nLINT|warning|template.manifest.toml|template warning\n",
 	}}
 
 	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: filepath.Dir(contentDir), Runner: runner})
@@ -190,7 +190,7 @@ func TestRunImportsLegacyRuleCodeDiagnostics(t *testing.T) {
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
 	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
 	runner := &fakeRunner{outputByOnly: map[string]string{
-		"data": "LINT|ERROR|content/datasets/bad.md|D1|missing storage\n",
+		"chart": "LINT|ERROR|content/charts/bad.md|C1|missing chart\n",
 	}}
 
 	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: filepath.Dir(contentDir), Runner: runner})
@@ -202,14 +202,14 @@ func TestRunImportsLegacyRuleCodeDiagnostics(t *testing.T) {
 		t.Fatal("Run() imported no diagnostics")
 	}
 	for _, diagnostic := range collector.Diagnostics {
-		if diagnostic.File == "content/datasets/bad.md" {
-			if diagnostic.Code != "D1" || diagnostic.Message != "missing storage" {
-				t.Fatalf("imported diagnostic = %#v, want Code D1 and Message missing storage", diagnostic)
+		if diagnostic.File == "content/charts/bad.md" {
+			if diagnostic.Code != "C1" || diagnostic.Message != "missing chart" {
+				t.Fatalf("imported diagnostic = %#v, want Code C1 and Message missing chart", diagnostic)
 			}
 			return
 		}
 	}
-	t.Fatalf("missing imported data diagnostic: %#v", collector.Diagnostics)
+	t.Fatalf("missing imported chart diagnostic: %#v", collector.Diagnostics)
 }
 
 func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {

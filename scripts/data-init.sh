@@ -23,6 +23,7 @@ step_config() {
   _ensure_kv "AWIKI_DATASET_INLINE_MAX_ROWS" "500"
   _ensure_kv "AWIKI_DATASET_INLINE_MAX_BYTES" "51200"
   _ensure_kv "AWIKI_CHART_OBSIDIAN_PREVIEW" "on"
+  _ensure_kv "AWIKI_QUERY_LAYER" "on"
 }
 
 _ensure_kv() {
@@ -36,7 +37,7 @@ _ensure_kv() {
 }
 
 step_dirs() {
-  for d in content/datasets content/charts data assets/charts static/vendor/vega; do
+  for d in content/datasets content/queries content/charts data assets/charts static/vendor/vega; do
     if [[ ! -d "$d" ]]; then
       mkdir -p "$d"
       touch "$d/.gitkeep"

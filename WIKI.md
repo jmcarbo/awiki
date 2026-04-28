@@ -28,7 +28,7 @@ draft: false
 ```
 
 - Body structure: lead paragraph (≤100 words) → sections → `## Related` (wikilinks) → `## Sources`.
-- `type` enum splits into **page kinds** (`entity`, `concept`, `topic`, `source`, `synthesis`, `deck`, `chart`, `canvas`) and **system pages** (`log`, `catalog`, `section-index`). System pages have separate validation; orphan-check exempts them.
+- `type` enum splits into **page kinds** (`entity`, `concept`, `topic`, `source`, `synthesis`, `deck`, `chart`, `query`, `canvas`) and **system pages** (`log`, `catalog`, `section-index`). System pages have separate validation; orphan-check exempts them.
 - Wikilinks in frontmatter `sources:` are YAML strings, NOT rendered as links by Obsidian or Hugo. The body `## Sources` section mirrors them as real links.
 
 ## 3. Wikilink Rules
@@ -253,6 +253,71 @@ args.
 5. **Out of scope here:** commit history mining, code symbol extraction,
    issues/PRs, cross-repo wikilinks. See spec at
    `docs/superpowers/specs/2026-04-27-git-docs-ingest-design.md`.
+
+### 4.8 Query
+
+The query layer adds a SQL surface over awiki datasets via DuckDB. Three
+frontends share one engine (`scripts/lib/query-engine.sh`):
+
+- **CLI ad-hoc** — `just query "<SQL>"` prints rows to stdout; add
+  `--out=<slug>` to materialize the result as a new dataset page.
+- **`type: query` page** — a managed wiki page whose SQL is re-evaluated on
+  build; result lands in a companion dataset page.
+- **Inline `awiki-query` fence** — SQL embedded in any page; build pre-pass
+  evaluates and replaces the managed region with a markdown table.
+
+#### Page-kind schema (`type: query`)
+
+Required frontmatter keys beyond the base set:
+
+| Key             | Type   | Meaning                                                 |
+|-----------------|--------|---------------------------------------------------------|
+| `out`           | string | Destination dataset slug (materialized on render).      |
+| `sources`       | list   | Dataset slugs the SQL reads (used by lint + privacy).   |
+| `privacy`       | string | `public` \| `private` (Stage 1: author-declares).      |
+| `deterministic` | bool   | `true` if SQL is determinism-safe (no `RANDOM()` etc.). |
+| `sql_hash`      | string | SHA-256 of the SQL body; written by renderer.           |
+
+#### Inline `awiki-query` fence
+
+````markdown
+```sql awiki-query id="<id>"
+SELECT ...
+```
+````
+
+The `id` attribute is required and unique per page. The build pre-pass
+(`just query-fence-render`) evaluates the SQL and writes the result between
+managed-region markers:
+
+```
+<!-- BEGIN query:<id> -->
+| col1 | col2 |
+| ...  | ...  |
+<!-- END query:<id> -->
+```
+
+Hand-edits inside the markers are flagged by lint rule Q5.
+
+#### Lint rules (Q-series)
+
+| Code    | Level | Summary                                                          |
+|---------|-------|------------------------------------------------------------------|
+| `Q1`    | error | `type: query` page missing required frontmatter key.             |
+| `Q2`    | error | `out` dataset slug does not exist or is stale vs `sql_hash`.     |
+| `Q3`    | error | `sources` references a non-existent dataset slug.                |
+| `Q4`    | error | `deterministic: true` but SQL contains banned tokens.            |
+| `Q5`    | error | Hand-edit detected inside an `awiki-query` managed region.       |
+| `Q-PRIV`| warn  | Query page is `public` but reads a `private` source (stub; Stage 3 enforces floor). |
+
+Run `just lint --only=query` to execute Q1–Q5 + Q-PRIV.
+
+#### Privacy model
+
+Stage 1 (current): author declares `privacy:` in frontmatter; lint issues an
+advisory warning when a public query reads a private source (Q-PRIV stub).
+Stage 3 will enforce a mandatory floor: queries that touch any private source
+are forced to `private` regardless of the declared value.
 
 ## 5. Inbox Queues
 

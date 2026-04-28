@@ -212,3 +212,17 @@ teardown() {
   run cat static/vendor/vega/vega.min.js
   [[ "$output" == "cached" ]]
 }
+
+@test "data-init creates content/queries directory" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  [ -d content/queries ]
+  [ -f content/queries/.gitkeep ]
+}
+
+@test "data-init enables query layer flag" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  run grep -E '^AWIKI_QUERY_LAYER=on$' .awiki/config
+  [ "$status" -eq 0 ]
+}

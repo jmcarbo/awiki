@@ -378,6 +378,8 @@ if [[ "$FULL" -eq 1 ]]; then
   # Render Vega-Lite chart sidecars before Hugo runs (no-op if data layer off
   # or vl-convert missing).
   if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
+    bash scripts/query.sh render || echo "BUILD|WARN|query-render returned non-zero"
+    bash scripts/query.sh fence-render || echo "BUILD|WARN|query-fence-render returned non-zero"
     bash scripts/chart.sh render || echo "BUILD|WARN|charts-render returned non-zero"
   fi
   hugo --minify --destination public

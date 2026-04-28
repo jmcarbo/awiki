@@ -58,3 +58,6 @@ tests/fixtures/spike-obsidian-vault/.obsidian/
 
 # template-update cache (gitignored; rebuildable from template.json pin)
 .awiki/template-cache/
+
+# DuckDB query layer cache
+.cache/duckdb/

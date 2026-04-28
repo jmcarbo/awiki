@@ -95,6 +95,10 @@ if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
     echo "WARN: data layer is on but vl-convert is missing — chart sidecars won't render"
     echo "      install: cargo install vl-convert OR download from https://github.com/vega/vl-convert/releases"
   fi
+  if [[ "${AWIKI_FAKE_MISSING:-}" == "duckdb" ]] || ! command -v duckdb >/dev/null 2>&1; then
+    echo "WARN: data layer is on but duckdb is missing — query layer won't run"
+    echo "      install: brew install duckdb (macOS) OR https://duckdb.org/docs/installation/"
+  fi
 fi
 
 if [[ "$ERRORS" -gt 0 ]]; then

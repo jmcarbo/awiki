@@ -237,6 +237,28 @@ Obsidian Charts) installed, otherwise via SVG sidecar previews.
 Run `just charts-render` to regenerate sidecars; `just build` invokes it
 automatically. Per-recipe usage: `just data-help`.
 
+### Query layer
+
+SQL surface over awiki datasets via DuckDB.
+
+```bash
+just query "SELECT category, SUM(amount) FROM trades GROUP BY 1"
+just query-new monthly-totals --out=monthly-totals-dataset
+```
+
+Inline queries use an `awiki-query` fenced code block with a mandatory `id`
+attribute; `just build` evaluates the SQL and renders the result as a markdown
+table inside a managed region:
+
+````markdown
+```sql awiki-query id="top-categories"
+SELECT category, SUM(amount) AS total FROM trades GROUP BY 1 ORDER BY 2 DESC
+```
+````
+
+Schema details (page-kind `query`, lint rules Q1–Q5, privacy model): see
+`WIKI.md` §Query.
+
 ## Example
 
 Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog. The synthesis demo lives at `examples/sample-wiki/content/synthesis/memex-briefing.md`.

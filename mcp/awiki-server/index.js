@@ -16,6 +16,7 @@ import { loadActionsTsv, applyFilter, isTsvStale } from "./lib/list-actions.js";
 import { listDatasets } from "./lib/list-datasets.js";
 import { getDataset } from "./lib/get-dataset.js";
 import { listCharts } from "./lib/list-charts.js";
+import { listQueries } from "./lib/list-queries.js";
 
 const FILTER_SCHEMA = {
   type: "object",
@@ -172,6 +173,11 @@ const TOOLS = [
   {
     name: "list_charts",
     description: "Enumerate every vega-lite fence + every type:chart page.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "list_queries",
+    description: "Enumerate every type:query page + every inline awiki-query fence.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
@@ -495,6 +501,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "list_charts": {
         const result = listCharts(REPO_ROOT);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+      case "list_queries": {
+        const result = listQueries(REPO_ROOT);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
       default:

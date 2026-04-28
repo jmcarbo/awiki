@@ -116,12 +116,13 @@ _obsidian_preview_enabled() {
 
 _inject_preview() {
   local page="$1" chart_id="$2"
-  python3 - "$page" "$chart_id" "$ASSETS_DIR" "$REPO_ROOT" <<'PY'
-import re, sys, os
-page, cid, assets_dir, repo_root = sys.argv[1:5]
-text = open(page).read()
-begin = f"<!-- BEGIN chart-preview:{cid} -->"
-end = f"<!-- END chart-preview:{cid} -->"
+  local body_file
+  body_file="$(mktemp)"
+
+  # Compute body: relative sidecar path when preview on, empty when off.
+  python3 - "$page" "$chart_id" "$ASSETS_DIR" "$REPO_ROOT" "$body_file" <<'PY'
+import sys, os
+page, cid, assets_dir, repo_root, body_file = sys.argv[1:6]
 
 # Pick body (or empty if AWIKI_CHART_OBSIDIAN_PREVIEW=off).
 preview_on = True
@@ -140,28 +141,13 @@ if preview_on:
 else:
     body = ""
 
-block = f"{begin}\n{body}\n{end}"
-
-if begin in text:
-    new = re.sub(re.escape(begin) + r"\n.*?\n" + re.escape(end), block, text, count=1, flags=re.S)
-else:
-    # Insert after the closing fence of THIS chart-id (need to find which).
-    # We find the Nth ```vega-lite``` fence where N matches the chart-id suffix.
-    # For chart pages, the fence is unique on page.
-    if "-fig" in cid and cid.rsplit("-fig", 1)[1].isdigit():
-        idx = int(cid.rsplit("-fig", 1)[1])
-    else:
-        idx = 0
-    pattern = re.compile(r"(```vega-lite\s*\n.*?\n```)", re.S)
-    matches = list(pattern.finditer(text))
-    if idx >= len(matches):
-        new = text  # nothing to anchor to
-    else:
-        m = matches[idx]
-        insert_at = m.end()
-        new = text[:insert_at] + "\n\n" + block + text[insert_at:]
-open(page, "w").write(new)
+open(body_file, "w").write(body)
 PY
+
+  # shellcheck source=lib/managed-region.sh
+  source "$REPO_ROOT/scripts/lib/managed-region.sh"
+  managed_region_replace "$page" chart-preview "$chart_id" "$body_file"
+  rm -f "$body_file"
 }
 
 _render_one() {

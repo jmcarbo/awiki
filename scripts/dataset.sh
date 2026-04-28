@@ -81,8 +81,106 @@ cmd_new() {
   note "created $page (rows=$rows)"
 }
 
+# Extract the inline ```<format>``` block from a dataset page to stdout.
+_extract_inline() {
+  local page="$1" format="$2"
+  awk -v fmt="$format" '
+    /^## Data[[:space:]]*$/ { in_data=1; next }
+    in_data && match($0, "^```" fmt "[[:space:]]*$") { in_block=1; next }
+    in_block && /^```[[:space:]]*$/ { in_block=0; in_data=0; next }
+    in_block { print }
+  ' "$page"
+}
+
+# Extract `columns:` YAML block to a JSON file. Empty file if no columns.
+_columns_to_json() {
+  local page="$1" out="$2"
+  python3 - "$page" "$out" <<'PY'
+import re, sys, json
+page, out = sys.argv[1], sys.argv[2]
+with open(page) as f:
+    txt = f.read()
+m = re.search(r"^---\s*\n(.*?)\n---\s*$", txt, re.M | re.S)
+if not m:
+    open(out, "w").write("[]"); sys.exit(0)
+fm = m.group(1)
+# Crude columns parser: lines like `  - { name: x, type: y }` or block style.
+cols = []
+in_cols = False
+for line in fm.splitlines():
+    if line.startswith("columns:"):
+        in_cols = True; continue
+    if in_cols:
+        if line and not line.startswith((" ", "\t")):
+            in_cols = False
+            continue
+        item = line.strip()
+        if not item.startswith("-"):
+            continue
+        body = item[1:].strip()
+        if body.startswith("{") and body.endswith("}"):
+            inner = body[1:-1]
+            entry = {}
+            for part in inner.split(","):
+                if ":" not in part:
+                    continue
+                k, v = part.split(":", 1)
+                entry[k.strip()] = v.strip().strip('"').strip("'")
+            cols.append(entry)
+open(out, "w").write(json.dumps(cols))
+PY
+}
+
+cmd_validate() {
+  local slug=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --) shift; break ;;
+      -*) die "unknown flag: $1" ;;
+      *) slug="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$slug" ]] || die "usage: dataset.sh validate <slug>"
+  local page="$DATASETS_DIR/$slug.md"
+  [[ -f "$page" ]] || die "$page not found"
+
+  local storage format
+  storage="$(fm_get "$page" storage)"
+  format="$(fm_get "$page" format)"
+  [[ -n "$storage" ]] || die "missing storage in $page"
+  [[ -n "$format" ]] || die "missing format in $page"
+
+  local data_file
+  if [[ "$storage" == "file" ]]; then
+    data_file="$(fm_get "$page" data_path)"
+    [[ -f "$data_file" ]] || die "data_path not found: $data_file"
+  else
+    data_file="$(mktemp)"
+    _extract_inline "$page" "$format" > "$data_file"
+    trap "rm -f $data_file" EXIT
+  fi
+
+  # Validate against schema if present.
+  local schema_file
+  schema_file="$(mktemp)"
+  _columns_to_json "$page" "$schema_file"
+  if [[ "$(cat "$schema_file")" != "[]" ]]; then
+    if ! python3 "$ROWS_PY" validate --format="$format" --file="$data_file" --schema="$schema_file"; then
+      rm -f "$schema_file"
+      die "schema validation failed for $slug"
+    fi
+  fi
+  rm -f "$schema_file"
+
+  # Refresh rows count.
+  local actual
+  actual="$(python3 "$ROWS_PY" count --format="$format" --file="$data_file")"
+  fm_set "$page" rows "$actual"
+  note "validated $slug (rows=$actual)"
+}
+
 cmd_compact() { die "compact not implemented yet (Task 9)"; }
-cmd_validate() { die "validate not implemented yet (Task 8)"; }
 
 main() {
   [[ $# -ge 1 ]] || die "usage: dataset.sh <new|compact|validate> [args...]"

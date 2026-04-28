@@ -82,3 +82,138 @@ EOF
   [[ "$output" != *"|C2|"* ]]
   [[ "$output" != *"|C3|"* ]]
 }
+
+@test "C4 fires when spec field not in dataset columns" {
+  cat > content/datasets/typed.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 1
+columns:
+  - { name: a, type: integer }
+  - { name: b, type: integer }
+---
+
+## Data
+
+```csv
+a,b
+1,2
+```
+EOF
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[typed]]"},"encoding":{"x":{"field":"missing"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C4|"* ]]
+  [[ "$output" == *"missing"* ]]
+}
+
+@test "C5 fires on type:chart page with no fence" {
+  cat > content/charts/empty.md <<'EOF'
+---
+type: chart
+chart_engine: vega-lite
+---
+
+# empty chart page
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C5|"* ]]
+}
+
+@test "C6 fires when chart_data disagrees with body data.name" {
+  cat > content/datasets/demo.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/datasets/other.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/charts/c.md <<'EOF'
+---
+type: chart
+chart_engine: vega-lite
+chart_data: "[[demo]]"
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[other]]"},"encoding":{"x":{"field":"a"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C6|"* ]]
+}
+
+@test "C6 --fix updates chart_data to match body" {
+  cat > content/datasets/demo.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/datasets/other.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/charts/c.md <<'EOF'
+---
+type: chart
+chart_engine: vega-lite
+chart_data: "[[demo]]"
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[other]]"},"encoding":{"x":{"field":"a"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh --fix
+  run grep -F 'chart_data: "[[other]]"' content/charts/c.md
+  [ "$status" -eq 0 ]
+}

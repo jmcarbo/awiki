@@ -68,8 +68,97 @@ PY
         _emit_c error "$rel" C3 "$line"
       done <<<"$resolve_out"
     fi
+    # C4 — field-in-columns check (only if both sides declare).
+    python3 - "$tmp" "$REPO_ROOT" "$rel" "$chart_id" <<'PY' || true
+import json, re, sys, os
+spec_path, repo_root, rel, cid = sys.argv[1:5]
+spec = json.load(open(spec_path))
+data = spec.get("data") or {}
+name = data.get("name", "")
+m = re.match(r"^\[\[([a-z0-9][a-z0-9-]*)\]\]$", name)
+if not m: sys.exit(0)
+ds = os.path.join(repo_root, "content", "datasets", m.group(1) + ".md")
+if not os.path.exists(ds): sys.exit(0)
+text = open(ds).read()
+fm = re.search(r"^---\s*\n(.*?)\n---\s*$", text, re.M | re.S)
+if not fm: sys.exit(0)
+cols = []
+in_cols = False
+for line in fm.group(1).splitlines():
+    if line.startswith("columns:"): in_cols = True; continue
+    if in_cols:
+        if line and not line.startswith((" ", "\t")):
+            in_cols = False; continue
+        it = line.strip()
+        if it.startswith("-"):
+            body = it[1:].strip()
+            if body.startswith("{") and body.endswith("}"):
+                inner = body[1:-1]
+                for part in inner.split(","):
+                    if ":" in part:
+                        k, v = part.split(":", 1)
+                        if k.strip() == "name":
+                            cols.append(v.strip().strip('"').strip("'"))
+if not cols: sys.exit(0)
+
+def fields(node):
+    out = []
+    if isinstance(node, dict):
+        if isinstance(node.get("encoding"), dict):
+            for ch, enc in node["encoding"].items():
+                if isinstance(enc, dict) and isinstance(enc.get("field"), str):
+                    out.append(enc["field"])
+        for v in node.values():
+            out.extend(fields(v))
+    if isinstance(node, list):
+        for v in node:
+            out.extend(fields(v))
+    return out
+
+bad = [f for f in fields(spec) if f not in cols]
+for f in bad:
+    print(f"LINT|error|{rel}|C4|field '{f}' not in [[{m.group(1)}]] columns (chart={cid})")
+PY
     rm -f "$tmp"
   done < <(_extract_fences_for_lint "$page")
+}
+
+lint_chart_pages() {
+  local pages_dir="$REPO_ROOT/content/charts"
+  [[ -d "$pages_dir" ]] || return 0
+  while IFS= read -r -d '' page; do
+    local rel="${page#$REPO_ROOT/}"
+    # C5 — chart page must have at least one vega-lite fence when chart_engine=vega-lite.
+    if grep -q '^chart_engine: *vega-lite' "$page" && ! grep -q '^```vega-lite' "$page"; then
+      _emit_c error "$rel" C5 "chart_engine=vega-lite but no vega-lite fence"
+      continue
+    fi
+    # C6 — chart_data vs body data.name.
+    local declared body
+    declared="$(awk '/^chart_data:/ { sub(/^chart_data: */, ""); gsub(/^"|"$/, ""); print; exit }' "$page")"
+    body="$(python3 - "$page" <<'PY' 2>/dev/null || true
+import re, json, sys
+text = open(sys.argv[1]).read()
+m = re.search(r"```vega-lite\s*\n(.*?)\n```", text, re.S)
+if not m: sys.exit(0)
+try:
+    spec = json.loads(m.group(1))
+except Exception:
+    sys.exit(0)
+data = spec.get("data") or {}
+name = data.get("name", "")
+if name: print(name)
+PY
+)"
+    if [[ -n "$declared" && -n "$body" && "$declared" != "$body" ]]; then
+      if [[ $FIX -eq 1 ]]; then
+        sed -i.bak "s|^chart_data: .*|chart_data: \"$body\"|" "$page" && rm -f "$page.bak"
+        _emit_c info "$rel" FIX "chart_data: $declared -> $body"
+      else
+        _emit_c warn "$rel" C6 "chart_data $declared disagrees with body $body"
+      fi
+    fi
+  done < <(find "$pages_dir" -type f -name '*.md' -print0)
 }
 
 lint_chart_all() {
@@ -78,6 +167,7 @@ lint_chart_all() {
     grep -q '^```vega-lite' "$page" || continue
     lint_chart_one "$page"
   done < <(find "$REPO_ROOT/content" -type f -name '*.md' -print0)
+  lint_chart_pages
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

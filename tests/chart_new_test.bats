@@ -4,6 +4,7 @@ setup() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
   WORK="$(mktemp -d)"
   cp -r "$REPO_ROOT/scripts" "$WORK/scripts"
+  cp "$REPO_ROOT/justfile" "$WORK/justfile"
   mkdir -p "$WORK/content/datasets" "$WORK/content/charts"
   cat > "$WORK/content/datasets/demo.md" <<'EOF'
 ---
@@ -51,4 +52,10 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
   run bash scripts/chart.sh new demo-bar --data=demo
   [ "$status" -ne 0 ]
   [[ "$output" == *"already exists"* ]]
+}
+
+@test "just chart-new wrapper works" {
+  run just chart-new demo-bar --data=demo
+  [ "$status" -eq 0 ]
+  [ -f content/charts/demo-bar.md ]
 }

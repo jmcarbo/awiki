@@ -135,6 +135,10 @@ dataset-validate slug:
 data-help:
     cat docs/data-help.txt
 
+# Scaffold a type:chart page that references an existing dataset.
+chart-new slug *args:
+    bash scripts/chart.sh new {{slug}} {{args}}
+
 # Walk every vega-lite fence + type:chart page; regen stale SVG sidecars
 # under assets/charts/. Uses scripts/lib/vendor-vega.sh if vendored bundle
 # absent. Requires the `vl-convert` Rust binary.

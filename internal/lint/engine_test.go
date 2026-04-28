@@ -10,16 +10,27 @@ import (
 )
 
 type fakeRunner struct {
-	output string
-	code   int
-	err    error
-	name   string
-	args   []string
+	output       string
+	outputByOnly map[string]string
+	code         int
+	err          error
+	name         string
+	args         []string
+	calls        []fakeRunnerCall
+}
+
+type fakeRunnerCall struct {
+	name string
+	args []string
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, int, error) {
 	r.name = name
 	r.args = append([]string(nil), args...)
+	r.calls = append(r.calls, fakeRunnerCall{name: name, args: append([]string(nil), args...)})
+	if output, ok := r.outputByOnly[onlyArgValue(args)]; ok {
+		return output, r.code, r.err
+	}
 	return r.output, r.code, r.err
 }
 
@@ -91,6 +102,30 @@ func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
 	}
 }
 
+func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
+	runner := &fakeRunner{
+		outputByOnly: map[string]string{
+			"synth": "LINT|ERROR|content/synthesis/bad.md|S1: missing BEGIN GENERATED marker\n",
+		},
+	}
+
+	collector, code := Run(Options{ContentDir: contentDir, Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-target]]")
+	assertDiagnosticContains(t, collector, Error, "content/synthesis/bad.md", "S1: missing BEGIN GENERATED marker")
+	assertLegacyOnlyCalled(t, runner, "synth")
+	assertLegacyOnlyCalled(t, runner, "data")
+	assertLegacyOnlyCalled(t, runner, "chart")
+	assertLegacyOnlyCalled(t, runner, "task")
+	assertLegacyOnlyCalled(t, runner, "query")
+	assertLegacyOnlyNotCalled(t, runner, "")
+}
+
 func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
@@ -121,6 +156,34 @@ func TestRunHugoCheckMissingBinaryAddsInfo(t *testing.T) {
 		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
 	}
 	assertDiagnosticContains(t, collector, Info, "hugo", "--hugo-check requested but hugo not on PATH; skipping")
+}
+
+func onlyArgValue(args []string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--only=") {
+			return strings.TrimPrefix(arg, "--only=")
+		}
+	}
+	return ""
+}
+
+func assertLegacyOnlyCalled(t *testing.T, runner *fakeRunner, only string) {
+	t.Helper()
+	for _, call := range runner.calls {
+		if call.name == "env" && onlyArgValue(call.args) == only {
+			return
+		}
+	}
+	t.Fatalf("legacy --only=%s was not called; calls = %#v", only, runner.calls)
+}
+
+func assertLegacyOnlyNotCalled(t *testing.T, runner *fakeRunner, only string) {
+	t.Helper()
+	for _, call := range runner.calls {
+		if call.name == "env" && onlyArgValue(call.args) == only {
+			t.Fatalf("legacy --only=%s was called; calls = %#v", only, runner.calls)
+		}
+	}
 }
 
 func TestRunDuplicateSlugEmitsErrorAndIgnoresDuplicateIndexSlug(t *testing.T) {

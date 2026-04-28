@@ -55,6 +55,7 @@ func Run(opts Options) (Collector, int) {
 
 	idx := wiki.BuildIndex(pages)
 	runCoreRules(&c, idx)
+	runDeferredLegacyLint(&c, runner, opts)
 	if opts.HugoCheck {
 		runHugoCheck(&c, runner)
 	}
@@ -62,12 +63,23 @@ func Run(opts Options) (Collector, int) {
 }
 
 func isDeferredNamespace(only string) bool {
-	switch only {
-	case "synth", "data", "chart", "task", "query":
-		return true
-	default:
-		return false
+	for _, namespace := range deferredNamespaces() {
+		if only == namespace {
+			return true
+		}
 	}
+	return false
+}
+
+func runDeferredLegacyLint(c *Collector, runner adapters.Runner, opts Options) {
+	for _, namespace := range deferredNamespaces() {
+		output, _, _ := adapters.LegacyLint(context.Background(), runner, opts.RepoRoot, namespace, opts.OnlyFile, opts.ContentDir, opts.Fix)
+		importExternalRecords(c, output)
+	}
+}
+
+func deferredNamespaces() []string {
+	return []string{"synth", "data", "chart", "task", "query"}
 }
 
 func runHugoCheck(c *Collector, runner adapters.Runner) {

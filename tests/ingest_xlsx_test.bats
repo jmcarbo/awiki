@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   command -v python3 >/dev/null 2>&1 || skip "python3 not installed"
   python3 -c "import python_calamine" 2>/dev/null || skip "python-calamine not installed"
@@ -96,4 +98,53 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   grep -F 'EMEA,100,2026-01-01' csv/single-sheet--sales.csv
   # Manifest emitted on stdout (single line of JSON)
   echo "$output" | python3 -c "import sys,json; m=json.load(sys.stdin); assert m['workbook_slug']=='single-sheet'; assert len(m['sheets'])==1; assert m['sheets'][0]['rows_total']==3"
+}
+
+@test "xlsx-extract multi-sheet skips hidden and processes visible non-empty" {
+  mkdir -p out csv
+  # --separate-stderr keeps XLSX-SKIP lines out of $output so json.load works.
+  run --separate-stderr python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/multi-sheet-with-hidden.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel raw/processed/_originals/multi --original-rel raw/processed/_originals/multi/multi-sheet-with-hidden.xlsx \
+    --slug-prefix multi
+  [ "$status" -eq 0 ]
+  [ -f out/multi--sales.md ]
+  [ -f out/multi--inventory.md ]
+  [ ! -f out/multi--hiddenscratch.md ]
+  [[ "$stderr" == *"XLSX-SKIP|sheet=HiddenScratch|reason=hidden"* ]]
+  echo "$output" | python3 -c "import sys,json; m=json.load(sys.stdin); names=[s['name'] for s in m['sheets']]; assert names==['Sales','Inventory'], names"
+}
+
+@test "xlsx-extract empty-and-hidden workbook returns empty manifest" {
+  mkdir -p out csv
+  run --separate-stderr python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/empty-and-hidden.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix x
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"XLSX-SKIP|sheet=Empty|reason=empty"* ]]
+  [[ "$stderr" == *"XLSX-SKIP|sheet=AlsoHidden|reason=hidden"* ]]
+  echo "$output" | python3 -c "import sys,json; m=json.load(sys.stdin); assert m['sheets']==[]"
+}
+
+@test "xlsx-extract collision sheet names get -2 suffix" {
+  mkdir -p out csv
+  run --separate-stderr python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/collision-sheet-names.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix wb
+  [ "$status" -eq 0 ]
+  [ -f out/wb--sales-data.md ]
+  [ -f out/wb--sales-data-2.md ]
+  [[ "$stderr" == *"XLSX-DUP|slug=wb--sales-data|resolved=wb--sales-data-2"* ]]
+}
+
+@test "xlsx-extract corrupt workbook exits 3" {
+  mkdir -p out csv
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/corrupt.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix bad
+  [ "$status" -eq 3 ]
 }

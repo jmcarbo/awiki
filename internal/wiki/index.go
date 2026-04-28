@@ -52,7 +52,7 @@ func BuildIndex(pages []Page) Index {
 	}
 
 	for _, page := range pages {
-		for _, link := range page.Links {
+		for _, link := range allPageLinks(page) {
 			target, ok := idx.Resolve(link.Target)
 			if !ok {
 				continue
@@ -62,6 +62,14 @@ func BuildIndex(pages []Page) Index {
 	}
 
 	return idx
+}
+
+func allPageLinks(page Page) []Link {
+	links := append([]Link(nil), page.Links...)
+	for _, source := range page.Sources {
+		links = append(links, ExtractLinks(source)...)
+	}
+	return links
 }
 
 func (idx Index) Resolve(target string) (Page, bool) {

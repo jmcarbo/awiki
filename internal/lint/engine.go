@@ -4,6 +4,10 @@ import "awiki/internal/wiki"
 
 func Run(opts Options) (Collector, int) {
 	var c Collector
+	if opts.Only != "" && opts.Only != "all" {
+		return c, c.ExitCode()
+	}
+
 	pages, err := wiki.DiscoverPages(opts.ContentDir)
 	if err != nil {
 		c.Add(Diagnostic{

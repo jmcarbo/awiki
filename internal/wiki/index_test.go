@@ -43,6 +43,16 @@ func TestBuildIndexRecordsInboundLinksToResolvedTargets(t *testing.T) {
 	}
 }
 
+func TestBuildIndexRecordsInboundLinksFromFrontmatterSources(t *testing.T) {
+	referrer := pageForIndex("referrer")
+	referrer.Sources = []string{"[[source]]"}
+	source := pageForIndex("source")
+
+	idx := BuildIndex([]Page{referrer, source})
+
+	assertPageSlugs(t, "Inbound[source]", idx.Inbound["source"], []string{"referrer"})
+}
+
 func TestBuildIndexDuplicateSlugDetectionIgnoresIndexPages(t *testing.T) {
 	first := pageForIndex("duplicate")
 	second := pageForIndex("duplicate")

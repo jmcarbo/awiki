@@ -32,6 +32,21 @@ func TestRunBrokenWikilinkIncludesFrontmatterSources(t *testing.T) {
 	assertDiagnosticCount(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-source]]", 1)
 }
 
+func TestRunOnlySynthSuppressesCoreRules(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
+
+	collector, code := Run(Options{ContentDir: contentDir, Only: "synth"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink")
+	if len(collector.Diagnostics) != 0 {
+		t.Fatalf("Diagnostics = %#v, want none for non-core only namespace", collector.Diagnostics)
+	}
+}
+
 func TestRunDuplicateSlugEmitsErrorAndIgnoresDuplicateIndexSlug(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/dup.md", pageContent("Dup A", "entity", nil, nil, longBody("Duplicate slug source A.")))
@@ -110,6 +125,19 @@ func TestRunOrphanPageEmitsInfoAndSectionIndexIsExempt(t *testing.T) {
 	}
 	assertDiagnosticContains(t, collector, Info, "entities/orphan.md", "orphan")
 	assertNoDiagnosticContains(t, collector, Info, "entities/_index.md", "orphan")
+}
+
+func TestRunSourcesFrontmatterLinksCountAsInboundForOrphans(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "sources/source.md", pageContent("Source", "source", nil, nil, longBody("Source is referenced only from another page frontmatter.")))
+	writeLintPage(t, contentDir, "entities/referrer.md", pageContentWithSources("Referrer", "entity", nil, nil, []string{"[[source]]"}, longBody("Referrer has no body wikilink to source.")))
+
+	collector, code := Run(Options{ContentDir: contentDir})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Info, "sources/source.md", "orphan")
 }
 
 func TestRunPrivateCatalogDoesNotEnableCatalogCoverage(t *testing.T) {

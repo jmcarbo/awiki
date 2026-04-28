@@ -185,3 +185,30 @@ teardown() {
   run grep -F 'data/private/**' .gitattributes
   [ "$status" -ne 0 ]
 }
+
+@test "data-init drops vendored vega bundle in static/vendor/vega when missing" {
+  # Simulate cached bundle (no network in CI sandbox).
+  export AWIKI_VEGA_VENDOR_LOCAL_DIR="$REPO_ROOT/tests/fixtures/data-layer/vendor-vega-cache"
+  mkdir -p "$AWIKI_VEGA_VENDOR_LOCAL_DIR"
+  printf 'vega.min.js' > "$AWIKI_VEGA_VENDOR_LOCAL_DIR/vega.min.js"
+  printf 'vega-lite.min.js' > "$AWIKI_VEGA_VENDOR_LOCAL_DIR/vega-lite.min.js"
+  printf 'vega-embed.min.js' > "$AWIKI_VEGA_VENDOR_LOCAL_DIR/vega-embed.min.js"
+  REPO_ROOT="$REPO_ROOT" AWIKI_VEGA_VENDOR_LOCAL_DIR="$AWIKI_VEGA_VENDOR_LOCAL_DIR" \
+    run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  [ -f static/vendor/vega/vega.min.js ]
+  [ -f static/vendor/vega/vega-lite.min.js ]
+  [ -f static/vendor/vega/vega-embed.min.js ]
+  rm -rf "$AWIKI_VEGA_VENDOR_LOCAL_DIR"
+}
+
+@test "data-init skips vega bundle download when files already exist" {
+  mkdir -p static/vendor/vega
+  printf 'cached' > static/vendor/vega/vega.min.js
+  printf 'cached' > static/vendor/vega/vega-lite.min.js
+  printf 'cached' > static/vendor/vega/vega-embed.min.js
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  run cat static/vendor/vega/vega.min.js
+  [[ "$output" == "cached" ]]
+}

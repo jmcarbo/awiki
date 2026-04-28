@@ -76,6 +76,19 @@ step_encryption() {
   note "added git-crypt patterns for data + charts"
 }
 
+step_vendor_vega() {
+  if [[ -f "static/vendor/vega/vega.min.js" \
+     && -f "static/vendor/vega/vega-lite.min.js" \
+     && -f "static/vendor/vega/vega-embed.min.js" ]]; then
+    note "skip vega vendor (all files present)"
+    return 0
+  fi
+  if [[ ! -x scripts/lib/vendor-vega.sh ]]; then
+    chmod +x scripts/lib/vendor-vega.sh
+  fi
+  bash scripts/lib/vendor-vega.sh static/vendor/vega || warn "vega vendor failed"
+}
+
 WIKI_MD="WIKI.md"
 TEMPLATE="scripts/templates/wiki-data-layer.md"
 
@@ -115,6 +128,7 @@ step_wiki_md() {
 main() {
   note "start"
   step_dirs
+  step_vendor_vega
   step_wiki_md
   step_encryption
   step_config

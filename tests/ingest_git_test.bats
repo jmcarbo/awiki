@@ -46,3 +46,22 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "added=1"
 }
+
+@test "ingest-git: full run writes one source page from README" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ "$status" -eq 0 ]
+  [ -f content/sources/git-repo-readme.md ]
+  grep -q "^type: source" content/sources/git-repo-readme.md
+  grep -q "^git_repo: repo" content/sources/git-repo-readme.md
+}
+
+@test "ingest-git: full run honors --private routing" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p content/private/sources content/private/entities
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo" --private
+  [ "$status" -eq 0 ]
+  [ -f content/private/sources/git-repo-readme.md ]
+  ! [ -f content/sources/git-repo-readme.md ]
+  grep -q "private" content/private/sources/git-repo-readme.md
+}

@@ -157,6 +157,61 @@ for prel in "${!PRIOR_BLOB[@]}"; do
   fi
 done
 
+flatten_slug() {
+  local rel="$1"
+  local stem="${rel%.md}"
+  stem="${stem%.mdx}"
+  stem="${stem,,}"
+  stem="${stem//\//-}"
+  echo "git-${REPO_NAME}-${stem}"
+}
+
+declare -A SLUG_MAP
+for rel in "${CURRENT_FILES[@]}"; do
+  SLUG_MAP["$rel"]="$(flatten_slug "$rel")"
+done
+
+declare -A SEEN_SLUG
+for rel in "${CURRENT_FILES[@]}"; do
+  s="${SLUG_MAP[$rel]}"
+  if [[ -n "${SEEN_SLUG[$s]:-}" ]]; then
+    echo "ERROR: slug collision: $s ← ${SEEN_SLUG[$s]} and $rel" >&2
+    exit 14
+  fi
+  SEEN_SLUG[$s]="$rel"
+done
+
+SLUG_MAP_JSON="$(python3 -c '
+import json, sys
+m = {}
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line: continue
+    rel, slug = line.split("\t", 1)
+    m[rel] = slug
+print(json.dumps(m))
+' < <(for r in "${!SLUG_MAP[@]}"; do printf '%s\t%s\n' "$r" "${SLUG_MAP[$r]}"; done))"
+
+if [[ -n "${PRIVATE_FLAG:-}" ]]; then
+  OUT_SOURCES="content/private/sources"
+  OUT_ENTITIES="content/private/entities"
+  ASSET_OUT_DIR="content/private/sources/_assets/git-${REPO_NAME}"
+else
+  OUT_SOURCES="content/sources"
+  OUT_ENTITIES="content/entities"
+  ASSET_OUT_DIR="content/sources/_assets/git-${REPO_NAME}"
+fi
+mkdir -p "$OUT_SOURCES" "$OUT_ENTITIES" "$ASSET_OUT_DIR"
+
+ENTITY_PATH="$OUT_ENTITIES/repo-${REPO_NAME}.md"
+if [[ -f "$ENTITY_PATH" ]]; then
+  existing_url="$(awk -F': ' '/^git_url: /{print $2; exit}' "$ENTITY_PATH" || true)"
+  if [[ -n "$existing_url" && "$existing_url" != "$SPEC" && -z "${REPO_NAME_OVERRIDE:-}" ]]; then
+    echo "ERROR: repo entity $ENTITY_PATH already exists with git_url=$existing_url; pass --repo-name=<override>" >&2
+    exit 15
+  fi
+fi
+
 if [[ -n "$DRY_RUN" ]]; then
   echo "PLAN|spec=$SPEC|repo_key=$REPO_KEY|repo_name=$REPO_NAME|checkout=$CHECKOUT|head=$HEAD_SHA|branch=$DEFAULT_BRANCH|private=${PRIVATE_FLAG:-0}"
   echo "PLAN|added=${#ADDED[@]}|modified=${#MODIFIED[@]}|removed=${#REMOVED[@]}|unchanged=${#UNCHANGED[@]}"
@@ -166,5 +221,29 @@ if [[ -n "$DRY_RUN" ]]; then
   exit 0
 fi
 
-# (subsequent tasks add walk + transform + write + housekeeping)
-echo "OK|repo_key=$REPO_KEY|head=$HEAD_SHA"
+TO_WRITE=("${ADDED[@]+"${ADDED[@]}"}" "${MODIFIED[@]+"${MODIFIED[@]}"}")
+WRITE_OK=0
+WRITE_FAIL=0
+PRIVATE_ARG=""
+[[ -n "${PRIVATE_FLAG:-}" ]] && PRIVATE_ARG="--private"
+
+for rel in "${TO_WRITE[@]}"; do
+  slug="${SLUG_MAP[$rel]}"
+  out="$OUT_SOURCES/${slug}.md"
+  if printf '%s' "$SLUG_MAP_JSON" | python3 "$SCRIPT_DIR/ingest-git-transform.py" \
+        --in "$CHECKOUT/$rel" --out "$out" \
+        --repo-key "$REPO_KEY" --repo-name "$REPO_NAME" --repo-relpath "$rel" \
+        --git-url "$SPEC" --git-blob-sha "${CURRENT_BLOB[$rel]}" \
+        --asset-out-dir "$ASSET_OUT_DIR" \
+        --upstream-root "$CHECKOUT" \
+        $PRIVATE_ARG ; then
+    WRITE_OK=$((WRITE_OK+1))
+  else
+    WRITE_FAIL=$((WRITE_FAIL+1))
+    echo "FAIL|transform|$rel" >&2
+  fi
+done
+
+echo "OK|repo_key=$REPO_KEY|added=${#ADDED[@]}|modified=${#MODIFIED[@]}|removed=${#REMOVED[@]}|written=$WRITE_OK|failed=$WRITE_FAIL"
+
+if [[ "$WRITE_FAIL" -gt 0 ]]; then exit 2; fi

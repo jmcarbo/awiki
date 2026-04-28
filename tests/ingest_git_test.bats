@@ -131,6 +131,15 @@ assert 'README.md' in o['files']
   [ "$output" = "1" ]
 }
 
+@test "ingest-git: just recipe dispatches to script" {
+  if ! command -v just >/dev/null 2>&1; then skip "just not installed"; fi
+  cp "$BATS_TEST_DIRNAME/../justfile" justfile
+  ln -s "$BATS_TEST_DIRNAME/../scripts" scripts
+  run just ingest-git "$WORK/repo" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "PLAN|"
+}
+
 @test "ingest-git: --protect-edits stages conflict to checkpoint" {
   if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
   mkdir -p raw/inbox/checkpoint/.staged

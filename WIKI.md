@@ -232,6 +232,28 @@ All three tools enforce strict argument validation:
 All justfile recipes use `--` to terminate flag parsing before positional
 args.
 
+### 4.7 Ingest from git repo
+
+1. Decide source: local path (`/abs/path/to/repo`), remote URL
+   (`https://github.com/foo/bar.git` or `git@github.com:foo/bar.git`),
+   or a named entry in `.awiki/git-sources.yml`.
+2. Run `just ingest-git <spec>` — supports flags: `--paths=docs/,rfcs/`,
+   `--private`, `--protect-edits`, `--summarize` (reserved),
+   `--dry-run`, `--repo-name=<override>`. SSH URLs auto-route to
+   `content/private/sources/`.
+3. The script clones (or pulls) under `raw/_git-cache/<repo_key>/`,
+   diffs the working tree against prior state in
+   `.awiki/git-state/<repo_key>.json`, transforms each added/modified
+   markdown file to `content/[private/]sources/git-<repo>-<flatpath>.md`,
+   updates `content/[private/]entities/repo-<repo>.md`, graveyards
+   removed files to `raw/_originals/git/<repo_key>/`, and runs one
+   batched `log-append.sh` + `update-catalog.sh` + `qmd reindex`.
+4. Subsequent runs are incremental: unchanged blobs are skipped, removed
+   files are graveyarded.
+5. **Out of scope here:** commit history mining, code symbol extraction,
+   issues/PRs, cross-repo wikilinks. See spec at
+   `docs/superpowers/specs/2026-04-27-git-docs-ingest-design.md`.
+
 ## 5. Inbox Queues
 
 - `raw/inbox/interactive/` — single source, supervised.

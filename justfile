@@ -10,6 +10,13 @@ ingest path:
 ingest-batch-list:
     @find raw/inbox/batch -type f | sort
 
+# === git-docs ingest (phase 20) ===
+ingest-git spec *flags:
+    bash scripts/ingest-git.sh {{spec}} {{flags}}
+
+ingest-git-list:
+    @ls -1 .awiki/git-state/ 2>/dev/null | sed 's/\.json$//'
+
 # === maintenance ===
 lint:
     bash scripts/lint.sh

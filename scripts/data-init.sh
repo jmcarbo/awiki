@@ -22,6 +22,7 @@ step_config() {
   _ensure_kv "AWIKI_DATA_LAYER" "on"
   _ensure_kv "AWIKI_DATASET_INLINE_MAX_ROWS" "500"
   _ensure_kv "AWIKI_DATASET_INLINE_MAX_BYTES" "51200"
+  _ensure_kv "AWIKI_CHART_OBSIDIAN_PREVIEW" "on"
 }
 
 _ensure_kv() {
@@ -35,7 +36,7 @@ _ensure_kv() {
 }
 
 step_dirs() {
-  for d in content/datasets data; do
+  for d in content/datasets content/charts data assets/charts static/vendor/vega; do
     if [[ ! -d "$d" ]]; then
       mkdir -p "$d"
       touch "$d/.gitkeep"
@@ -45,6 +46,34 @@ step_dirs() {
     fi
     [[ -f "$d/.gitkeep" ]] || { touch "$d/.gitkeep"; note "restored $d/.gitkeep"; }
   done
+}
+
+step_encryption() {
+  local ga=".gitattributes"
+  if [[ ! -f "$ga" ]]; then
+    note "skip encryption (no .gitattributes)"
+    return 0
+  fi
+  if ! grep -q 'filter=git-crypt diff=git-crypt' "$ga"; then
+    note "skip encryption (no git-crypt section)"
+    return 0
+  fi
+  local need_data=0 need_charts=0
+  grep -q -F 'data/private/** filter=git-crypt diff=git-crypt' "$ga" || need_data=1
+  grep -q -F 'assets/charts/private/** filter=git-crypt diff=git-crypt' "$ga" || need_charts=1
+  if [[ $need_data -eq 0 && $need_charts -eq 0 ]]; then
+    note "skip encryption (already covered)"
+    return 0
+  fi
+  echo "Add 'data/private/**' and 'assets/charts/private/**' to git-crypt patterns? (Y/n) "
+  local reply
+  read -r reply || reply=""
+  case "$reply" in
+    n|N|no|NO) note "user declined git-crypt extension"; return 0 ;;
+  esac
+  [[ $need_data -eq 1 ]]   && printf -- '\ndata/private/** filter=git-crypt diff=git-crypt\n' >> "$ga"
+  [[ $need_charts -eq 1 ]] && printf -- 'assets/charts/private/** filter=git-crypt diff=git-crypt\n' >> "$ga"
+  note "added git-crypt patterns for data + charts"
 }
 
 WIKI_MD="WIKI.md"
@@ -87,6 +116,7 @@ main() {
   note "start"
   step_dirs
   step_wiki_md
+  step_encryption
   step_config
   note "done"
 }

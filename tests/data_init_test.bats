@@ -91,7 +91,7 @@ teardown() {
   [ "$status" -eq 0 ]
   run grep -F '<!-- END data-layer -->' WIKI.md
   [ "$status" -eq 0 ]
-  run grep -F 'Page kind: `dataset`' WIKI.md
+  run grep -F 'Page kinds' WIKI.md
   [ "$status" -eq 0 ]
 }
 
@@ -105,12 +105,12 @@ teardown() {
 @test "data-init refreshes data-layer block on re-run when template changes" {
   bash scripts/data-init.sh
   # Mutate the inserted block; re-run must restore from template.
-  sed -i.bak 's/Page kind: `dataset`/Page kind: `mutated`/' WIKI.md
+  sed -i.bak 's/Page kinds/Page kinds: MUTATED/' WIKI.md
   run bash scripts/data-init.sh
   [ "$status" -eq 0 ]
-  run grep -F 'Page kind: `dataset`' WIKI.md
+  run grep -F 'Page kinds' WIKI.md
   [ "$status" -eq 0 ]
-  run grep -c -F 'Page kind: `mutated`' WIKI.md
+  run grep -c -F 'Page kinds: MUTATED' WIKI.md
   [[ "$output" == "0" ]]
 }
 
@@ -146,4 +146,42 @@ teardown() {
   [ -d data ]
   run grep -E '^AWIKI_DATA_LAYER=on$' .awiki/config
   [ "$status" -eq 0 ]
+}
+
+@test "data-init creates content/charts/ and assets/charts/ and static/vendor/vega/" {
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  [ -d content/charts ]
+  [ -d assets/charts ]
+  [ -d static/vendor/vega ]
+}
+
+@test "data-init appends AWIKI_CHART_OBSIDIAN_PREVIEW=on default" {
+  run bash scripts/data-init.sh
+  run grep -E '^AWIKI_CHART_OBSIDIAN_PREVIEW=on$' .awiki/config
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init extends git-crypt patterns when .gitattributes has git-crypt section" {
+  printf '*.secret filter=git-crypt diff=git-crypt\n' > .gitattributes
+  run bash scripts/data-init.sh <<<"y"
+  run grep -F 'data/private/** filter=git-crypt diff=git-crypt' .gitattributes
+  [ "$status" -eq 0 ]
+  run grep -F 'assets/charts/private/** filter=git-crypt diff=git-crypt' .gitattributes
+  [ "$status" -eq 0 ]
+}
+
+@test "data-init does not duplicate git-crypt patterns on re-run" {
+  printf '*.secret filter=git-crypt diff=git-crypt\n' > .gitattributes
+  bash scripts/data-init.sh <<<"y"
+  bash scripts/data-init.sh <<<"y"
+  run grep -c -F 'data/private/** filter=git-crypt diff=git-crypt' .gitattributes
+  [[ "$output" == "1" ]]
+}
+
+@test "data-init skips git-crypt extension when no git-crypt section" {
+  printf '*.txt text\n' > .gitattributes
+  run bash scripts/data-init.sh
+  run grep -F 'data/private/**' .gitattributes
+  [ "$status" -ne 0 ]
 }

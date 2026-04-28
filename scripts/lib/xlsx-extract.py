@@ -9,7 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
+import math
+import os  # noqa: F401  # used in Task 7 (atomicity: os.replace, os.environ)
 import re
 import sys
 from datetime import date
@@ -63,11 +64,18 @@ def infer_type(samples: list) -> str:
 
 
 def _stringify_cell(v) -> str:
+    """Render a calamine cell value as a CSV/markdown-safe string.
+
+    Excel integers come back as float (calamine's default), so finite
+    floats whose value is an exact integer are normalised back to int
+    rendering: 100.0 -> "100". NaN / +-inf retain their float repr
+    rather than raising in the int(v) conversion.
+    """
     if v is None:
         return ""
     if isinstance(v, bool):
         return "true" if v else "false"
-    if isinstance(v, float) and v == int(v):
+    if isinstance(v, float) and math.isfinite(v) and v == int(v):
         return str(int(v))
     return str(v)
 
@@ -88,18 +96,21 @@ def _frontmatter(
     rows_total: int, rows_preview: int, columns: list[str],
     csv_rel: str, original_rel: str,
 ) -> str:
+    # Free-form user strings (title, workbook filename, sheet name) go through
+    # json.dumps so embedded quotes / colons / control chars do not produce
+    # invalid YAML. JSON strings are valid YAML scalars.
     cols_json = json.dumps(columns)
     return (
         "---\n"
-        f"title: \"{title}\"\n"
+        f"title: {json.dumps(title)}\n"
         f"date: {today}\n"
         f"last_updated: {today}\n"
         "type: source\n"
         "tags: [xlsx]\n"
         "aliases: []\n"
         "sources: []\n"
-        f"workbook: {workbook}\n"
-        f"sheet: \"{sheet_name}\"\n"
+        f"workbook: {json.dumps(workbook)}\n"
+        f"sheet: {json.dumps(sheet_name)}\n"
         f"rows_total: {rows_total}\n"
         f"rows_preview: {rows_preview}\n"
         f"columns: {cols_json}\n"

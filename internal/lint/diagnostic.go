@@ -62,9 +62,12 @@ func (c Collector) Summary() string {
 }
 
 func (c Collector) ExitCode() int {
-	errors, _, _ := c.Counts()
+	errors, warnings, _ := c.Counts()
 	if errors > 0 {
 		return 2
+	}
+	if warnings > 0 {
+		return 1
 	}
 	return 0
 }

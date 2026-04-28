@@ -25,6 +25,14 @@ func TestSummaryAndExitCode(t *testing.T) {
 	}
 }
 
+func TestWarningOnlyExitCode(t *testing.T) {
+	var c Collector
+	c.Add(Diagnostic{Level: Warn, File: "b.md", Message: "warn"})
+	if got := c.ExitCode(); got != 1 {
+		t.Fatalf("ExitCode() = %d, want 1", got)
+	}
+}
+
 func TestFixRecordFormat(t *testing.T) {
 	r := FixRecord{File: "content/entities/foo.md", Message: "added last_updated: 2026-04-28"}
 	if got := r.Record(); !strings.HasPrefix(got, "FIX|content/entities/foo.md|added last_updated:") {

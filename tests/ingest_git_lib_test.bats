@@ -123,3 +123,46 @@ teardown() {
   run awiki_git_config_validate_paths '["README.md","docs/","rfcs/"]'
   [ "$status" -eq 0 ]
 }
+
+@test "git-clone: repo_key from https github URL" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  run awiki_git_clone_repo_key "https://github.com/foo/bar.git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github-com-foo-bar" ]
+}
+
+@test "git-clone: repo_key from ssh URL" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  run awiki_git_clone_repo_key "git@github.com:foo/bar.git"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github-com-foo-bar" ]
+}
+
+@test "git-clone: repo_key from local path" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  d="$(mktemp -d)/myrepo"
+  mkdir -p "$d"
+  run awiki_git_clone_repo_key "$d"
+  [ "$status" -eq 0 ]
+  [ "$output" = "local-myrepo" ]
+}
+
+@test "git-clone: is_ssh detects git@" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  run awiki_git_clone_is_ssh "git@github.com:foo/bar.git"
+  [ "$status" -eq 0 ]
+  run awiki_git_clone_is_ssh "https://github.com/foo/bar.git"
+  [ "$status" -ne 0 ]
+}
+
+@test "git-clone: resolve returns path|sha|branch for local fixture" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-clone.sh"
+  seed="$(mktemp -d)/seed"
+  mkdir -p "$seed"
+  echo "hi" > "$seed/README.md"
+  fixture="$(mktemp -d)/repo"
+  bash "$BATS_TEST_DIRNAME/util/build-git-fixture.sh" "$seed" "$fixture"
+  run awiki_git_clone_resolve "$fixture" "local-repo"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^${fixture}\|[0-9a-f]{40}\|main$"
+}

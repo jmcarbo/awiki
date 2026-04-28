@@ -23,7 +23,7 @@ func BuildIndex(pages []Page) Index {
 	seenSlugs := make(map[string][]Page)
 	aliasOwners := make(map[string][]Page)
 	for _, page := range pages {
-		if page.Slug == "catalog" {
+		if page.RelPath == "catalog.md" {
 			idx.CatalogBody = page.Body
 		}
 

@@ -86,6 +86,18 @@ func TestBuildIndexCapturesCatalogBody(t *testing.T) {
 	}
 }
 
+func TestBuildIndexCapturesOnlyRootCatalogBody(t *testing.T) {
+	privateCatalog := pageForIndex("catalog")
+	privateCatalog.RelPath = "private/catalog.md"
+	privateCatalog.Body = "Private catalog contents.\n"
+
+	idx := BuildIndex([]Page{pageForIndex("alpha"), privateCatalog})
+
+	if idx.CatalogBody != "" {
+		t.Fatalf("CatalogBody = %q, want empty without root catalog.md", idx.CatalogBody)
+	}
+}
+
 func pageForIndex(slug string, aliases ...string) Page {
 	return Page{
 		Path:    slug + ".md",

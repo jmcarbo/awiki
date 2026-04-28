@@ -57,7 +57,7 @@ func addEmptyPageDiagnostic(c *Collector, page wiki.Page) {
 	if page.Slug == "_index" {
 		return
 	}
-	if len(strings.TrimSpace(page.Body)) >= 50 {
+	if len(page.Body) >= 50 {
 		return
 	}
 	c.Add(Diagnostic{
@@ -79,14 +79,14 @@ func addPrivateTagDiagnostic(c *Collector, page wiki.Page) {
 }
 
 func addBrokenWikilinkDiagnostics(c *Collector, idx wiki.Index, page wiki.Page) {
-	for _, link := range page.Links {
-		if _, ok := idx.Resolve(link.Target); ok {
+	for _, target := range linkTargetsForBrokenCheck(page) {
+		if _, ok := idx.Resolve(target); ok {
 			continue
 		}
 		c.Add(Diagnostic{
 			Level:   Error,
 			File:    page.Path,
-			Message: fmt.Sprintf("broken wikilink: [[%s]]", link.Target),
+			Message: fmt.Sprintf("broken wikilink: [[%s]]", target),
 		})
 	}
 }
@@ -156,11 +156,33 @@ func isSystemPage(page wiki.Page) bool {
 
 func catalogPage(pages []wiki.Page) (wiki.Page, bool) {
 	for _, page := range pages {
-		if page.Slug == "catalog" {
+		if page.RelPath == "catalog.md" {
 			return page, true
 		}
 	}
 	return wiki.Page{}, false
+}
+
+func linkTargetsForBrokenCheck(page wiki.Page) []string {
+	seen := make(map[string]bool)
+	var targets []string
+	for _, link := range page.Links {
+		if seen[link.Target] {
+			continue
+		}
+		seen[link.Target] = true
+		targets = append(targets, link.Target)
+	}
+	for _, source := range page.Sources {
+		for _, link := range wiki.ExtractLinks(source) {
+			if seen[link.Target] {
+				continue
+			}
+			seen[link.Target] = true
+			targets = append(targets, link.Target)
+		}
+	}
+	return targets
 }
 
 func sortedKeys[V any](m map[string]V) []string {

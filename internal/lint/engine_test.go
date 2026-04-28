@@ -19,6 +19,19 @@ func TestRunBrokenWikilinkEmitsErrorAndExitTwo(t *testing.T) {
 	assertDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-target]]")
 }
 
+func TestRunBrokenWikilinkIncludesFrontmatterSources(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContentWithSources("Source", "entity", nil, nil, []string{"[[missing-source]]"}, longBody("Source has enough body text without body wikilinks.")))
+
+	collector, code := Run(Options{ContentDir: contentDir})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertDiagnosticContains(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-source]]")
+	assertDiagnosticCount(t, collector, Error, "entities/source.md", "broken wikilink: [[missing-source]]", 1)
+}
+
 func TestRunDuplicateSlugEmitsErrorAndIgnoresDuplicateIndexSlug(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/dup.md", pageContent("Dup A", "entity", nil, nil, longBody("Duplicate slug source A.")))
@@ -73,6 +86,18 @@ func TestRunEmptyPageEmitsWarnForShortBody(t *testing.T) {
 	assertDiagnosticContains(t, collector, Warn, "entities/empty.md", "empty page")
 }
 
+func TestRunWhitespaceOnlyBodyOverFiftyCharsDoesNotEmitEmptyPageWarn(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/spaces.md", pageContent("Spaces", "entity", nil, nil, strings.Repeat(" ", 60)))
+
+	collector, code := Run(Options{ContentDir: contentDir})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Warn, "entities/spaces.md", "empty page")
+}
+
 func TestRunOrphanPageEmitsInfoAndSectionIndexIsExempt(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/orphan.md", pageContent("Orphan", "entity", nil, nil, longBody("This page has no inbound links.")))
@@ -85,6 +110,19 @@ func TestRunOrphanPageEmitsInfoAndSectionIndexIsExempt(t *testing.T) {
 	}
 	assertDiagnosticContains(t, collector, Info, "entities/orphan.md", "orphan")
 	assertNoDiagnosticContains(t, collector, Info, "entities/_index.md", "orphan")
+}
+
+func TestRunPrivateCatalogDoesNotEnableCatalogCoverage(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "private/catalog.md", pageContent("Private Catalog", "catalog", nil, nil, longBody("Private catalog should not activate root catalog coverage.")))
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha has enough body text and no root catalog exists.")))
+
+	collector, code := Run(Options{ContentDir: contentDir})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Warn, "entities/alpha.md", "missing from catalog")
 }
 
 func TestRunCleanTwoPageLinkedWikiExitsZero(t *testing.T) {
@@ -114,6 +152,10 @@ func writeLintPage(t *testing.T, root, relPath, content string) {
 }
 
 func pageContent(title, typ string, tags, aliases []string, body string) string {
+	return pageContentWithSources(title, typ, tags, aliases, nil, body)
+}
+
+func pageContentWithSources(title, typ string, tags, aliases, sources []string, body string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("title: \"" + title + "\"\n")
@@ -122,7 +164,7 @@ func pageContent(title, typ string, tags, aliases []string, body string) string 
 	b.WriteString("type: " + typ + "\n")
 	b.WriteString("tags: [" + strings.Join(tags, ", ") + "]\n")
 	b.WriteString("aliases: [" + strings.Join(aliases, ", ") + "]\n")
-	b.WriteString("sources: []\n")
+	b.WriteString("sources: [" + quotedList(sources) + "]\n")
 	b.WriteString("draft: false\n")
 	b.WriteString("---\n")
 	b.WriteString(body)
@@ -132,6 +174,14 @@ func pageContent(title, typ string, tags, aliases []string, body string) string 
 
 func longBody(seed string) string {
 	return seed + " This body is intentionally longer than fifty trimmed characters."
+}
+
+func quotedList(values []string) string {
+	var quoted []string
+	for _, value := range values {
+		quoted = append(quoted, `"`+value+`"`)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func assertDiagnosticContains(t *testing.T, collector Collector, level Level, relPath, messagePart string) {
@@ -148,6 +198,19 @@ func assertDiagnosticContains(t *testing.T, collector Collector, level Level, re
 		}
 	}
 	t.Fatalf("missing %s diagnostic for %q containing %q; got %#v", level, relPath, messagePart, collector.Diagnostics)
+}
+
+func assertDiagnosticCount(t *testing.T, collector Collector, level Level, relPath, messagePart string, want int) {
+	t.Helper()
+	got := 0
+	for _, d := range collector.Diagnostics {
+		if d.Level == level && strings.HasSuffix(filepath.ToSlash(d.File), relPath) && strings.Contains(d.Message, messagePart) {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("diagnostic count for %s %q containing %q = %d, want %d; got %#v", level, relPath, messagePart, got, want, collector.Diagnostics)
+	}
 }
 
 func assertNoDiagnosticContains(t *testing.T, collector Collector, level Level, filePart, messagePart string) {

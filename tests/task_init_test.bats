@@ -209,7 +209,8 @@ EOF2
   run bash scripts/task-init.sh
   [ "$status" -eq 0 ]
   [[ "$output" == *"just capture"* ]]
-  [[ "$output" == *"phase 17"* || "$output" == *"scanner"* ]]
+  [[ "$output" == *"just scan"* ]]
+  [[ "$output" == *"just review"* ]]
 }
 
 @test "task-init reports first-run vs noop on rerun (when log-append present)" {

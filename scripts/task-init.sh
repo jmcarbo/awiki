@@ -333,10 +333,11 @@ Smoke test:
   just capture "pick up groceries"
   cat content/inbox.md   # should show your line below the frontmatter
 
-Scanner + agenda generation arrives in phase 17. Triage + recurrence
-arrive in phase 18.
-
-Pre-commit hook installer is deferred to phase 19 (encrypt-init coupling).
+Next:
+  just scan       # rebuild .awiki/maps/actions.tsv
+  just agenda     # regenerate content/agenda/* views
+  just triage     # walk inbox.md + raw/inbox/interactive/
+  just review     # weekly review chain
 HINTS
 }
 

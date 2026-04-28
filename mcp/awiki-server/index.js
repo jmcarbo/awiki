@@ -15,6 +15,7 @@ import { PathGuardError } from "./lib/path-guard.js";
 import { loadActionsTsv, applyFilter, isTsvStale } from "./lib/list-actions.js";
 import { listDatasets } from "./lib/list-datasets.js";
 import { getDataset } from "./lib/get-dataset.js";
+import { listCharts } from "./lib/list-charts.js";
 
 const FILTER_SCHEMA = {
   type: "object",
@@ -167,6 +168,11 @@ const TOOLS = [
       required: ["slug"],
       additionalProperties: false,
     },
+  },
+  {
+    name: "list_charts",
+    description: "Enumerate every vega-lite fence + every type:chart page.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
@@ -485,6 +491,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: "missing_slug" }) }] };
         }
         const result = getDataset(REPO_ROOT, slug);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+      case "list_charts": {
+        const result = listCharts(REPO_ROOT);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
       default:

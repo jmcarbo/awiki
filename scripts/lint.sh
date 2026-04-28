@@ -1,6 +1,70 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+AWIKI_LINT_SCRIPT_DIR_FOR_SHIM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_LINT_REPO_ROOT_FOR_SHIM="$(cd "$AWIKI_LINT_SCRIPT_DIR_FOR_SHIM/.." && pwd)"
+AWIKI_LINT_GO_BIN_FOR_SHIM="$AWIKI_LINT_REPO_ROOT_FOR_SHIM/bin/awiki"
+if [[ "${AWIKI_LINT_LEGACY:-0}" != "1" && -x "$AWIKI_LINT_GO_BIN_FOR_SHIM" ]]; then
+  AWIKI_LINT_CALLER_DIR_FOR_SHIM="$(pwd)"
+  AWIKI_LINT_ARGS_FOR_SHIM=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file=/*)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        ;;
+      --file=*)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("--file=$AWIKI_LINT_CALLER_DIR_FOR_SHIM/${1#--file=}")
+        shift
+        ;;
+      --file|-file)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        if [[ $# -gt 0 && "$1" != /* ]]; then
+          AWIKI_LINT_ARGS_FOR_SHIM+=("$AWIKI_LINT_CALLER_DIR_FOR_SHIM/$1")
+        elif [[ $# -gt 0 ]]; then
+          AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        fi
+        [[ $# -gt 0 ]] && shift
+        ;;
+      --only|-only)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        if [[ $# -gt 0 ]]; then
+          AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+          shift
+        fi
+        ;;
+      --)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        while [[ $# -gt 0 ]]; do
+          if [[ "$1" != /* ]]; then
+            AWIKI_LINT_ARGS_FOR_SHIM+=("$AWIKI_LINT_CALLER_DIR_FOR_SHIM/$1")
+          else
+            AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+          fi
+          shift
+        done
+        ;;
+      -*)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        ;;
+      /*)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$1")
+        shift
+        ;;
+      *)
+        AWIKI_LINT_ARGS_FOR_SHIM+=("$AWIKI_LINT_CALLER_DIR_FOR_SHIM/$1")
+        shift
+        ;;
+    esac
+  done
+  cd "$AWIKI_LINT_REPO_ROOT_FOR_SHIM" || exit 1
+  exec "$AWIKI_LINT_GO_BIN_FOR_SHIM" lint "${AWIKI_LINT_ARGS_FOR_SHIM[@]}"
+fi
+
 FIX=0
 ONLY=""
 ONLY_FILE=""

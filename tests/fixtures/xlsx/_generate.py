@@ -4,7 +4,13 @@ Materialize xlsx fixtures used by tests/ingest_xlsx_test.bats and
 tests/watchdog_xlsx_test.bats. Run manually after editing — fixtures
 are committed binaries; CI does not regenerate them.
 
-Requires: pip3 install openpyxl
+Baseline generated with: pip3 install "openpyxl==3.1.5"
+Regenerate: python3 tests/fixtures/xlsx/_generate.py
+
+openpyxl writes a fresh timestamp + zip-entry order on every run, so
+each regeneration produces byte-different (but semantically identical)
+files. Only re-commit the regenerated binaries when you have actually
+changed fixture content; otherwise the diff is noise.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -42,8 +48,14 @@ def write_multi_with_hidden() -> None:
 
 
 def write_empty_and_hidden() -> None:
+    # "Empty" sheet is intentionally never populated — exercises the
+    # empty-skip path in xlsx-extract.py. "AlsoHidden" exercises the
+    # hidden-skip path.
     wb = Workbook()
     wb.active.title = "Empty"
+    assert wb.active.max_row == 1 and wb.active.max_column == 1, (
+        "Empty sheet must remain row-free; openpyxl reports 1x1 by default for an unpopulated sheet"
+    )
     extra = wb.create_sheet("AlsoHidden")
     extra.append(["only", "header"])
     extra.sheet_state = "hidden"
@@ -51,7 +63,10 @@ def write_empty_and_hidden() -> None:
 
 
 def write_collision() -> None:
-    # Two sheets that kebab-slugify to the same string within the workbook.
+    # Two sheets that kebab-slugify to the same string within the workbook:
+    #   "Sales Data" -> slugify -> "sales-data"
+    #   "sales-data" -> slugify -> "sales-data"
+    # Both map to the same slug, exercising _resolve_collision in xlsx-extract.py.
     wb = Workbook()
     ws1 = wb.active
     ws1.title = "Sales Data"
@@ -73,8 +88,9 @@ def main() -> None:
     write_multi_with_hidden()
     write_empty_and_hidden()
     write_collision()
+    # Not openpyxl-generated — handcrafted invalid bytes for the parse-error path.
     write_corrupt()
-    print("OK|fixtures regenerated under", FIXTURES)
+    print(f"OK|path={FIXTURES}")
 
 
 if __name__ == "__main__":

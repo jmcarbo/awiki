@@ -91,3 +91,25 @@ teardown() {
   ! [ -f content/sources/git-repo-docs-d2.md ]
   [ -f raw/_originals/git/local-repo/git-repo-docs-d2.md ]
 }
+
+@test "ingest-git: writes state JSON with file map after run" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ -f .awiki/git-state/local-repo.json ]
+  python3 -c "
+import json, sys
+o = json.load(open('.awiki/git-state/local-repo.json'))
+assert o['schema'] == 1
+assert o['repo_key'] == 'local-repo'
+assert 'README.md' in o['files']
+"
+}
+
+@test "ingest-git: rerun with no changes is no-op (state head_sha unchanged)" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  before_sha="$(python3 -c "import json; print(json.load(open('.awiki/git-state/local-repo.json'))['head_sha'])")"
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  after_sha="$(python3 -c "import json; print(json.load(open('.awiki/git-state/local-repo.json'))['head_sha'])")"
+  [ "$before_sha" = "$after_sha" ]
+}

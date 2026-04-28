@@ -131,6 +131,10 @@ dataset-compact slug:
 dataset-validate slug:
     bash scripts/dataset.sh validate {{slug}}
 
+# Show per-recipe data-layer help.
+data-help:
+    cat docs/data-help.txt
+
 capture *text:
     bash scripts/capture.sh -- {{text}}
 

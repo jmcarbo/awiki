@@ -5,7 +5,7 @@ setup() {
   WORK="$(mktemp -d)"
   cp -r "$REPO_ROOT/scripts" "$WORK/scripts"
   mkdir -p "$WORK/.awiki"
-  printf -- "AWIKI_DATA_LAYER=on\nAWIKI_QUERY_LAYER=on\n" > "$WORK/.awiki/config"
+  printf -- "AWIKI_DATA_LAYER=on\n" > "$WORK/.awiki/config"
   pushd "$WORK" >/dev/null
 }
 teardown() { popd >/dev/null; rm -rf "$WORK"; }

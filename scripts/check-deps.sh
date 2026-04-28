@@ -97,7 +97,7 @@ if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
   fi
   if [[ "${AWIKI_FAKE_MISSING:-}" == "duckdb" ]] || ! command -v duckdb >/dev/null 2>&1; then
     echo "WARN: data layer is on but duckdb is missing — query layer won't run"
-    echo "      install: brew install duckdb (macOS) OR https://duckdb.org/docs/installation/" >&2
+    echo "      install: brew install duckdb (macOS) OR https://duckdb.org/docs/installation/"
   fi
 fi
 

@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import date
 from pathlib import Path
@@ -104,6 +105,52 @@ def _compute_fence_ranges(body: str) -> list:
 LINK_RE = re.compile(r"(?<!`)\[([^\]]+)\]\(([^)]+)\)")
 REF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)\s*$")
 REFLINK_RE = re.compile(r"\[([^\]]+)\]\[([^\]]+)\]")
+IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+
+
+def rewrite_images(body: str, current_relpath: str, upstream_root: str,
+                   asset_out_dir: str, fence_ranges: list) -> tuple:
+    """Find ![alt](path) refs outside code fences. Copy referenced files
+    from upstream_root → asset_out_dir/<repo-relpath-of-image>, rewrite the
+    path in the body. Missing files → leave the link, emit warning."""
+    warnings = []
+
+    def _line_in_fence(idx):
+        for s, e in fence_ranges:
+            if s <= idx < e:
+                return True
+        return False
+
+    new_lines = []
+    for i, line in enumerate(body.splitlines()):
+        if _line_in_fence(i):
+            new_lines.append(line); continue
+
+        def _sub(m):
+            alt, href = m.group(1), m.group(2)
+            href_path = href.split()[0]
+            if "://" in href_path or href_path.startswith("/"):
+                return m.group(0)
+            target = _normalize_relpath(current_relpath, href_path)
+            if not target:
+                return m.group(0)
+            src = Path(upstream_root) / target
+            if not src.is_file():
+                warnings.append(f"missing image: {target}")
+                return m.group(0)
+            dest = Path(asset_out_dir) / target
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            rel_from_content = str(dest)
+            if rel_from_content.startswith("content/"):
+                rel_from_content = rel_from_content[len("content/"):]
+            return f"![{alt}]({rel_from_content})"
+
+        new_lines.append(IMG_RE.sub(_sub, line))
+    out = "\n".join(new_lines)
+    if body.endswith("\n"):
+        out += "\n"
+    return out, warnings
 
 
 def rewrite_wikilinks(body: str, current_relpath: str, slug_map: dict, fence_ranges: list) -> tuple:
@@ -197,6 +244,11 @@ def main(argv: list[str]) -> int:
     title = derive_title(upstream_meta, body, fallback_title)
 
     fence_ranges = _compute_fence_ranges(body)
+    if args.upstream_root:
+        body, img_warnings = rewrite_images(body, args.repo_relpath, args.upstream_root,
+                                             args.asset_out_dir, fence_ranges)
+        for w in img_warnings:
+            print(f"WARN|{w}")
     body, link_warnings = rewrite_wikilinks(body, args.repo_relpath, slug_map, fence_ranges)
     for w in link_warnings:
         print(f"WARN|{w}")

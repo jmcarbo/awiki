@@ -77,3 +77,29 @@ teardown() {
     --asset-out-dir "$WORK/_assets/git-x"
   grep -q "\[foo\](./foo.md)" out.md
 }
+
+@test "transform: copies referenced image to asset dir + rewrites path" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  upstream_root="$BATS_TEST_DIRNAME/fixtures/git-docs-good/seed"
+  cp "$upstream_root/docs/intro.md" upstream.md
+  echo '{}' | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath docs/intro.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x" \
+    --upstream-root "$upstream_root"
+  [ -f "$WORK/_assets/git-x/docs/img/arch.png" ]
+  grep -q "_assets/git-x/docs/img/arch.png" out.md
+}
+
+@test "transform: warns on missing image ref but exits 0" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  printf -- '---\ntitle: T\n---\n\n# T\n\n![missing](./nope.png)\n' > upstream.md
+  echo '{}' | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath README.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x" \
+    --upstream-root "$WORK"
+  grep -q "missing" out.md
+}

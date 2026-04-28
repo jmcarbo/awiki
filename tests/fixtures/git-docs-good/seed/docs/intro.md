@@ -9,3 +9,5 @@ See [foo](./foo.md). Also see [README](../README.md).
 Reference style: see [bar][1].
 
 [1]: ./foo.md
+
+![arch diagram](./img/arch.png)

@@ -10,6 +10,7 @@ type Options struct {
 	AliasBuildOnly bool
 	ContentDir     string
 	RepoRoot       string
+	ToolRoot       string
 	Today          string
 	Runner         adapters.Runner
 }

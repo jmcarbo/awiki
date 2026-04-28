@@ -43,7 +43,11 @@ func runLint(args []string, stdout io.Writer, stderr io.Writer) int {
 func parseLintOptions(args []string, stderr io.Writer) (lint.Options, error) {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	opts := lint.Options{ContentDir: "content", RepoRoot: "."}
+	opts := lint.Options{ContentDir: "content", RepoRoot: ".", ToolRoot: inferLintToolRoot(".")}
+	if envRoot := os.Getenv("AWIKI_REPO_ROOT"); envRoot != "" {
+		opts.RepoRoot = envRoot
+		opts.ContentDir = filepath.Join(envRoot, "content")
+	}
 	fs.BoolVar(&opts.Fix, "fix", false, "apply mechanical fixes")
 	fs.StringVar(&opts.Only, "only", "", "run only a lint namespace")
 	fs.StringVar(&opts.OnlyFile, "file", "", "run against one file")
@@ -81,10 +85,38 @@ func inferLintRepoRoot(contentDir string, fallback string) string {
 		return fallback
 	}
 	parent := filepath.Dir(cleanContent)
-	if _, err := os.Stat(filepath.Join(parent, "scripts", "lint.sh")); err != nil {
+	if !hasLintScript(parent) {
 		return fallback
 	}
+	if abs, err := filepath.Abs(parent); err == nil {
+		return abs
+	}
 	return parent
+}
+
+func inferLintToolRoot(fallback string) string {
+	if hasLintScript(fallback) {
+		if abs, err := filepath.Abs(fallback); err == nil {
+			return abs
+		}
+		return fallback
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Dir(filepath.Dir(exe))
+		if hasLintScript(candidate) {
+			if abs, err := filepath.Abs(candidate); err == nil {
+				return abs
+			}
+			return candidate
+		}
+	}
+	return fallback
+}
+
+func hasLintScript(root string) bool {
+	_, err := os.Stat(filepath.Join(root, "scripts", "lint.sh"))
+	return err == nil
 }
 
 func isLintStringFlag(arg string) bool {

@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,9 +13,13 @@ import (
 
 func Run(opts Options) (Collector, int) {
 	var c Collector
+	hasCustomRunner := opts.Runner != nil
 	runner := opts.Runner
 	if runner == nil {
 		runner = adapters.ExecRunner{}
+	}
+	if opts.ToolRoot == "" {
+		opts.ToolRoot = opts.RepoRoot
 	}
 
 	if opts.AliasBuildOnly {
@@ -23,7 +28,7 @@ func Run(opts Options) (Collector, int) {
 			args = append(args, "AWIKI_REPO_ROOT="+opts.RepoRoot)
 		}
 		args = append(args, "bash", "scripts/lint.sh", "--alias-build-only", opts.ContentDir)
-		output, code, _ := runner.RunInDir(context.Background(), opts.RepoRoot, "env", args...)
+		output, code, _ := runner.RunInDir(context.Background(), opts.ToolRoot, "env", args...)
 		imported := importExternalRecords(&c, output)
 		addLegacyFailureDiagnostic(&c, "alias-build", code, imported)
 		return c, c.ExitCode()
@@ -62,13 +67,21 @@ func Run(opts Options) (Collector, int) {
 
 	idx := wiki.BuildIndex(pages)
 	runCoreRules(&c, idx)
-	if isRepoContentDir(opts.RepoRoot, opts.ContentDir) {
+	if hasCustomRunner || hasLegacyLintScript(opts.ToolRoot) {
 		runDeferredLegacyLint(&c, runner, opts)
 	}
 	if opts.HugoCheck {
-		runHugoCheck(&c, runner)
+		runHugoCheck(&c, runner, opts.RepoRoot)
 	}
 	return c, c.ExitCode()
+}
+
+func hasLegacyLintScript(toolRoot string) bool {
+	if toolRoot == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(toolRoot, "scripts", "lint.sh"))
+	return err == nil
 }
 
 func isDeferredNamespace(only string) bool {
@@ -91,7 +104,7 @@ func deferredNamespaces() []string {
 }
 
 func runLegacyNamespace(c *Collector, runner adapters.Runner, opts Options, namespace string) {
-	output, code, _ := adapters.LegacyLint(context.Background(), runner, opts.RepoRoot, namespace, opts.OnlyFile, opts.ContentDir, opts.Fix)
+	output, code, _ := adapters.LegacyLint(context.Background(), runner, opts.ToolRoot, opts.RepoRoot, namespace, opts.OnlyFile, opts.ContentDir, opts.Fix)
 	imported := importExternalRecords(c, output)
 	addLegacyFailureDiagnostic(c, namespace, code, imported)
 }
@@ -107,25 +120,8 @@ func addLegacyFailureDiagnostic(c *Collector, namespace string, code int, import
 	})
 }
 
-func isRepoContentDir(repoRoot string, contentDir string) bool {
-	if repoRoot == "" || contentDir == "" {
-		return false
-	}
-	repoContent, err := filepath.Abs(filepath.Join(repoRoot, "content"))
-	if err != nil {
-		return false
-	}
-	actualContent, err := filepath.Abs(contentDir)
-	if err != nil {
-		return false
-	}
-	repoContent = filepath.Clean(repoContent)
-	actualContent = filepath.Clean(actualContent)
-	return repoContent == actualContent
-}
-
-func runHugoCheck(c *Collector, runner adapters.Runner) {
-	_, code, err := adapters.HugoCheck(context.Background(), runner)
+func runHugoCheck(c *Collector, runner adapters.Runner, repoRoot string) {
+	_, code, err := adapters.HugoCheck(context.Background(), runner, repoRoot)
 	if err == nil && code == 0 {
 		return
 	}
@@ -169,7 +165,11 @@ func importDiagnostic(c *Collector, line string) bool {
 	if len(parts) != 4 {
 		return false
 	}
-	level := Level(parts[1])
+	levelText := strings.ToUpper(parts[1])
+	if levelText == "WARNING" {
+		levelText = string(Warn)
+	}
+	level := Level(levelText)
 	switch level {
 	case Error, Warn, Info:
 	default:

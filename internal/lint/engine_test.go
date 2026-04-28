@@ -12,6 +12,7 @@ import (
 type fakeRunner struct {
 	output       string
 	outputByOnly map[string]string
+	codeByName   map[string]int
 	code         int
 	err          error
 	name         string
@@ -33,10 +34,14 @@ func (r *fakeRunner) RunInDir(_ context.Context, dir string, name string, args .
 	r.name = name
 	r.args = append([]string(nil), args...)
 	r.calls = append(r.calls, fakeRunnerCall{dir: dir, name: name, args: append([]string(nil), args...)})
-	if output, ok := r.outputByOnly[onlyArgValue(args)]; ok {
-		return output, r.code, r.err
+	code := r.code
+	if nameCode, ok := r.codeByName[name]; ok {
+		code = nameCode
 	}
-	return r.output, r.code, r.err
+	if output, ok := r.outputByOnly[onlyArgValue(args)]; ok {
+		return output, code, r.err
+	}
+	return r.output, code, r.err
 }
 
 func TestRunBrokenWikilinkEmitsErrorAndExitTwo(t *testing.T) {
@@ -144,7 +149,7 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 	assertLegacyOnlyNotCalled(t, runner, "")
 }
 
-func TestRunDefaultAlternateContentDirSkipsLegacyNamespaces(t *testing.T) {
+func TestRunDefaultAlternateContentDirDelegatesLegacyNamespaces(t *testing.T) {
 	repoRoot := t.TempDir()
 	contentDir := filepath.Join(t.TempDir(), "content")
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
@@ -156,18 +161,38 @@ func TestRunDefaultAlternateContentDirSkipsLegacyNamespaces(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("runner calls = %#v, want none", runner.calls)
+	assertLegacyOnlyCalled(t, runner, "synth")
+	assertLegacyOnlyCalled(t, runner, "data")
+	assertLegacyOnlyCalled(t, runner, "chart")
+	assertLegacyOnlyCalled(t, runner, "task")
+	assertLegacyOnlyCalled(t, runner, "query")
+}
+
+func TestRunImportsLowercaseLegacyTemplateLevels(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{outputByOnly: map[string]string{
+		"synth": "LINT|error|template.manifest.toml|template failure\nLINT|warning|template.manifest.toml|template warning\n",
+	}}
+
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: filepath.Dir(contentDir), Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
 	}
+	assertDiagnosticContains(t, collector, Error, "template.manifest.toml", "template failure")
+	assertDiagnosticContains(t, collector, Warn, "template.manifest.toml", "template warning")
 }
 
 func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
 	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
-	runner := &fakeRunner{code: 1}
+	runner := &fakeRunner{codeByName: map[string]int{"hugo": 1}}
 
-	collector, code := Run(Options{ContentDir: contentDir, HugoCheck: true, Runner: runner})
+	repoRoot := filepath.Dir(contentDir)
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: repoRoot, Runner: runner, HugoCheck: true})
 
 	if code != 2 {
 		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
@@ -177,13 +202,16 @@ func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
 	if runner.name != "hugo" || !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("runner call = %q %#v, want hugo %#v", runner.name, runner.args, want)
 	}
+	if runner.calls[len(runner.calls)-1].dir != repoRoot {
+		t.Fatalf("hugo dir = %q, want %q", runner.calls[len(runner.calls)-1].dir, repoRoot)
+	}
 }
 
 func TestRunHugoCheckMissingBinaryAddsInfo(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
 	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
-	runner := &fakeRunner{code: 127}
+	runner := &fakeRunner{codeByName: map[string]int{"hugo": 127}}
 
 	collector, code := Run(Options{ContentDir: contentDir, HugoCheck: true, Runner: runner})
 

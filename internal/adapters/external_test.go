@@ -23,10 +23,10 @@ func (r *fakeRunner) RunInDir(_ context.Context, dir string, name string, args .
 	return "", 0, nil
 }
 
-func TestLegacyLintRunsFromRepoRootWithLegacyEnv(t *testing.T) {
+func TestLegacyLintRunsFromToolRootWithLegacyEnvAndWikiRoot(t *testing.T) {
 	runner := &fakeRunner{}
 
-	_, _, err := LegacyLint(context.Background(), runner, "/repo", "synth", "content/synthesis/demo.md", "content", true)
+	_, _, err := LegacyLint(context.Background(), runner, "/tool", "/wiki", "synth", "content/synthesis/demo.md", "content", true)
 	if err != nil {
 		t.Fatalf("LegacyLint() error = %v", err)
 	}
@@ -34,12 +34,12 @@ func TestLegacyLintRunsFromRepoRootWithLegacyEnv(t *testing.T) {
 	if runner.name != "env" {
 		t.Fatalf("command name = %q, want env", runner.name)
 	}
-	if runner.dir != "/repo" {
-		t.Fatalf("command dir = %q, want /repo", runner.dir)
+	if runner.dir != "/tool" {
+		t.Fatalf("command dir = %q, want /tool", runner.dir)
 	}
 	want := []string{
 		"AWIKI_LINT_LEGACY=1",
-		"AWIKI_REPO_ROOT=/repo",
+		"AWIKI_REPO_ROOT=/wiki",
 		"bash",
 		"scripts/lint.sh",
 		"--only=synth",
@@ -55,13 +55,16 @@ func TestLegacyLintRunsFromRepoRootWithLegacyEnv(t *testing.T) {
 func TestHugoCheckBuildsRenderToMemoryCommand(t *testing.T) {
 	runner := &fakeRunner{}
 
-	_, _, err := HugoCheck(context.Background(), runner)
+	_, _, err := HugoCheck(context.Background(), runner, "/wiki")
 	if err != nil {
 		t.Fatalf("HugoCheck() error = %v", err)
 	}
 
 	if runner.name != "hugo" {
 		t.Fatalf("command name = %q, want hugo", runner.name)
+	}
+	if runner.dir != "/wiki" {
+		t.Fatalf("command dir = %q, want /wiki", runner.dir)
 	}
 	want := []string{"--source", ".", "--renderToMemory", "--logLevel", "error"}
 	if !reflect.DeepEqual(runner.args, want) {

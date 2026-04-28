@@ -32,10 +32,10 @@ func (ExecRunner) RunInDir(ctx context.Context, dir string, name string, args ..
 	return string(out), 127, err
 }
 
-func LegacyLint(ctx context.Context, r Runner, repoRoot string, only string, onlyFile string, contentDir string, fix bool) (string, int, error) {
+func LegacyLint(ctx context.Context, r Runner, toolRoot string, wikiRoot string, only string, onlyFile string, contentDir string, fix bool) (string, int, error) {
 	args := []string{"AWIKI_LINT_LEGACY=1"}
-	if repoRoot != "" {
-		args = append(args, "AWIKI_REPO_ROOT="+repoRoot)
+	if wikiRoot != "" {
+		args = append(args, "AWIKI_REPO_ROOT="+wikiRoot)
 	}
 	args = append(args, "bash", "scripts/lint.sh")
 	if only != "" {
@@ -50,9 +50,9 @@ func LegacyLint(ctx context.Context, r Runner, repoRoot string, only string, onl
 	if contentDir != "" {
 		args = append(args, contentDir)
 	}
-	return r.RunInDir(ctx, repoRoot, "env", args...)
+	return r.RunInDir(ctx, toolRoot, "env", args...)
 }
 
-func HugoCheck(ctx context.Context, r Runner) (string, int, error) {
-	return r.Run(ctx, "hugo", "--source", ".", "--renderToMemory", "--logLevel", "error")
+func HugoCheck(ctx context.Context, r Runner, repoRoot string) (string, int, error) {
+	return r.RunInDir(ctx, repoRoot, "hugo", "--source", ".", "--renderToMemory", "--logLevel", "error")
 }

@@ -70,6 +70,7 @@ func Run(opts Options) (Collector, int) {
 
 	idx := wiki.BuildIndex(pages)
 	runCoreRules(&c, idx)
+	runRegisteredNamespaces(&c, opts, &idx)
 	if hasCustomRunner || hasLegacyLintScript(opts.ToolRoot) {
 		runDeferredLegacyLint(&c, runner, opts)
 	}
@@ -104,6 +105,21 @@ func runRegisteredNamespace(ruleSet RuleSet, opts Options) (Collector, int) {
 	return c, c.ExitCode()
 }
 
+func runRegisteredNamespaces(c *Collector, opts Options, idx *wiki.Index) {
+	for _, ruleSet := range defaultRuleRegistry.all() {
+		namespaceCollector, err := ruleSet.Run(context.Background(), opts, idx)
+		c.Diagnostics = append(c.Diagnostics, namespaceCollector.Diagnostics...)
+		c.Fixes = append(c.Fixes, namespaceCollector.Fixes...)
+		if err != nil {
+			c.Add(Diagnostic{
+				Level:   Error,
+				File:    ruleSet.Name(),
+				Message: err.Error(),
+			})
+		}
+	}
+}
+
 func hasLegacyLintScript(toolRoot string) bool {
 	if toolRoot == "" {
 		return false
@@ -128,7 +144,7 @@ func runDeferredLegacyLint(c *Collector, runner adapters.Runner, opts Options) {
 }
 
 func deferredNamespaces() []string {
-	return []string{"synth", "data", "chart", "task", "query"}
+	return []string{"data", "chart", "task", "query"}
 }
 
 func runLegacyNamespace(c *Collector, runner adapters.Runner, opts Options, namespace string) {

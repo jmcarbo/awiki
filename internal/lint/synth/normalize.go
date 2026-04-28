@@ -94,11 +94,15 @@ func LintS3(page wiki.Page, idx *wiki.Index) []Diagnostic {
 		if EvidenceQuoteMatchesSource(quote, source, idx) {
 			continue
 		}
+		message := "evidence quote not found in cited source: " + slug
+		if suggestion := FuzzySuggestion(source.Body, quote); suggestion != "" {
+			message += "; suggestion: " + NormalizeEvidenceText(suggestion)
+		}
 		diagnostics = append(diagnostics, Diagnostic{
 			Level:   "ERROR",
 			File:    page.Path,
 			Code:    "S3",
-			Message: "evidence quote not found in cited source: " + slug,
+			Message: message,
 		})
 	}
 	return diagnostics

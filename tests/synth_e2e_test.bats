@@ -17,6 +17,7 @@ setup() {
   cp -r "$REPO_TOP/synthesis-plugins" "$TMP/synthesis-plugins"
   cp "$REPO_TOP/justfile" "$TMP/justfile"
   cp "$REPO_TOP/WIKI.md" "$TMP/WIKI.md"
+  cp "$REPO_TOP/template.manifest.toml" "$TMP/template.manifest.toml"
   cp "$REPO_TOP/hugo.toml" "$TMP/hugo.toml" 2>/dev/null || true
   mkdir -p "$TMP/content/sources" "$TMP/content/synthesis" "$TMP/raw/inbox/interactive" "$TMP/.awiki"
   # log placeholder (log-append.sh appends to content/log.md).

@@ -119,6 +119,11 @@ bad = [f for f in fields(spec) if f not in cols]
 for f in bad:
     print(f"LINT|error|{rel}|C4|field '{f}' not in [[{m.group(1)}]] columns (chart={cid})")
 PY
+    # C7 — sidecar presence.
+    local sidecar="$REPO_ROOT/assets/charts/$chart_id.svg"
+    if [[ ! -f "$sidecar" ]]; then
+      _emit_c warn "$rel" C7 "sidecar missing for $chart_id (run charts-render)"
+    fi
     rm -f "$tmp"
   done < <(_extract_fences_for_lint "$page")
 }
@@ -161,6 +166,43 @@ PY
   done < <(find "$pages_dir" -type f -name '*.md' -print0)
 }
 
+lint_chart_aggregate() {
+  # C8 — count [[<slug>]] references in vega-lite fences across all pages.
+  python3 - "$REPO_ROOT" <<'PY' || true
+import re, sys, os
+root = sys.argv[1]
+counts = {}
+for dirpath, _, files in os.walk(os.path.join(root, "content")):
+    for fn in files:
+        if not fn.endswith(".md"): continue
+        path = os.path.join(dirpath, fn)
+        text = open(path).read()
+        for fence in re.finditer(r"```vega-lite\s*\n(.*?)\n```", text, re.S):
+            for m in re.finditer(r'"name"\s*:\s*"\[\[([a-z0-9][a-z0-9-]*)\]\]"', fence.group(1)):
+                counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+for slug, n in counts.items():
+    if n > 5:
+        print(f"LINT|info|content/datasets/{slug}.md|C8|referenced {n} times across charts (consider type:chart page)")
+PY
+  # C9 — hand-edit inside chart-preview region.
+  while IFS= read -r -d '' page; do
+    local rel="${page#$REPO_ROOT/}"
+    python3 - "$page" "$rel" "$REPO_ROOT" <<'PY' || true
+import re, sys, os
+page, rel, repo_root = sys.argv[1:4]
+text = open(page).read()
+for m in re.finditer(r"<!-- BEGIN chart-preview:([a-z0-9][a-z0-9-]*) -->\n(.*?)\n<!-- END chart-preview:\1 -->", text, re.S):
+    cid = m.group(1)
+    body = m.group(2).strip()
+    # Allowed body: empty, or `![<cid>](<path-to-svg>)`.
+    if body == "": continue
+    expected_re = re.compile(r"^!\[" + re.escape(cid) + r"\]\([^)]+\)$")
+    if expected_re.match(body): continue
+    print(f"LINT|warn|{rel}|C9|hand-edit detected inside chart-preview:{cid} (re-run charts-render)")
+PY
+  done < <(find "$REPO_ROOT/content" -type f -name '*.md' -print0)
+}
+
 lint_chart_all() {
   if [[ ! -d "$REPO_ROOT/content" ]]; then return 0; fi
   while IFS= read -r -d '' page; do
@@ -168,6 +210,7 @@ lint_chart_all() {
     lint_chart_one "$page"
   done < <(find "$REPO_ROOT/content" -type f -name '*.md' -print0)
   lint_chart_pages
+  lint_chart_aggregate
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

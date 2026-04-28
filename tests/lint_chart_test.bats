@@ -217,3 +217,94 @@ EOF
   run grep -F 'chart_data: "[[other]]"' content/charts/c.md
   [ "$status" -eq 0 ]
 }
+
+@test "C7 warns when sidecar missing" {
+  cat > content/datasets/demo.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{"x":{"field":"a"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C7|"* ]]
+}
+
+@test "C8 info when same dataset referenced >5 times" {
+  cat > content/datasets/demo.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  for i in 1 2 3 4 5 6; do
+    cat > content/concepts/p$i.md <<EOF
+---
+type: concept
+---
+
+\`\`\`vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{"x":{"field":"a"}}}
+\`\`\`
+EOF
+  done
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C8|"* ]]
+}
+
+@test "C9 warns on hand-edit inside chart-preview managed region" {
+  cat > content/datasets/demo.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{"x":{"field":"a"}}}
+```
+
+<!-- BEGIN chart-preview:p-fig0 -->
+hand-written content here
+extra line
+<!-- END chart-preview:p-fig0 -->
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C9|"* ]]
+}

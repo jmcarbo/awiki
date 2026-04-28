@@ -25,34 +25,28 @@ fm_get() {
 # fm_set <file> <key> <value> — update or insert before closing ---
 fm_set() {
   local file="$1" key="$2" value="$3"
-  if fm_get "$file" "$key" >/dev/null && [[ -n "$(fm_get "$file" "$key")" ]]; then
-    awk -v key="$key" -v value="$value" '
-      BEGIN { in_fm=0; opened=0 }
-      /^---[[:space:]]*$/ { if (!opened) { in_fm=1; opened=1; print; next } else { in_fm=0; print; next } }
-      in_fm {
-        n = index($0, ":")
-        if (n > 0) {
-          k = substr($0, 1, n-1)
-          if (k == key) { print key ": " value; next }
-        }
-      }
-      { print }
-    ' "$file" > "$file.tmp"
-    mv "$file.tmp" "$file"
-  else
-    awk -v key="$key" -v value="$value" '
-      BEGIN { in_fm=0; opened=0; inserted=0 }
-      /^---[[:space:]]*$/ {
-        if (!opened) { in_fm=1; opened=1; print; next }
-        if (in_fm && !inserted) { print key ": " value; inserted=1 }
+  awk -v key="$key" -v value="$value" '
+    BEGIN { in_fm=0; opened=0; replaced=0 }
+    /^---[[:space:]]*$/ {
+      if (!opened) { in_fm=1; opened=1; print; next }
+      if (in_fm) {
+        if (!replaced) { print key ": " value }
         in_fm=0
         print
         next
       }
-      { print }
-    ' "$file" > "$file.tmp"
-    mv "$file.tmp" "$file"
-  fi
+      print; next
+    }
+    in_fm {
+      n = index($0, ":")
+      if (n > 0) {
+        k = substr($0, 1, n-1)
+        if (k == key) { print key ": " value; replaced=1; next }
+      }
+    }
+    { print }
+  ' "$file" > "$file.tmp"
+  mv "$file.tmp" "$file"
 }
 
 # fm_remove <file> <key>

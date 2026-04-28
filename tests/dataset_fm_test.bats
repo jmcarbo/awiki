@@ -59,3 +59,27 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
   run fm_get sample.md rows
   [[ "$output" == "" ]]
 }
+
+@test "fm_get unwraps quoted scalar (title)" {
+  source "$REPO_ROOT/scripts/lib/dataset-fm.sh"
+  run fm_get sample.md title
+  [[ "$output" == "demo" ]]
+}
+
+@test "fm_set on existing empty-valued key updates without duplicating" {
+  cat > empty.md <<'EOF'
+---
+title: "demo"
+empty_key:
+storage: inline
+---
+
+Body.
+EOF
+  source "$REPO_ROOT/scripts/lib/dataset-fm.sh"
+  fm_set empty.md empty_key now-set
+  run grep -c '^empty_key:' empty.md
+  [[ "$output" == "1" ]]
+  run fm_get empty.md empty_key
+  [[ "$output" == "now-set" ]]
+}

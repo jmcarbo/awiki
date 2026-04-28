@@ -1,0 +1,19 @@
+{{- $slug := .Get 0 -}}
+{{- $cachePath := printf "assets/charts/%s.json" $slug -}}
+{{- $resolved := "" -}}
+{{- if fileExists $cachePath -}}
+  {{- $resolved = readFile $cachePath -}}
+{{- else -}}
+  {{- /* Fall back to the source page's raw spec. */ -}}
+  {{- $page := site.GetPage (printf "/charts/%s" $slug) -}}
+  {{- with $page -}}
+    {{- $body := .RawContent -}}
+    {{- $re := `(?s)\x60\x60\x60vega-lite\s*\n(.*?)\n\x60\x60\x60` -}}
+    {{- $matches := findRE $re $body 1 -}}
+    {{- if $matches -}}
+      {{- $resolved = index (findRESubmatch $re $body 1) 0 1 -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+<div class="vega-embed" id="{{ $slug }}" data-spec='{{ $resolved | safeJS }}'></div>
+{{- .Page.Scratch.Set "has-vega-chart" true -}}

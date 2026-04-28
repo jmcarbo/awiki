@@ -66,3 +66,33 @@ EOF
   run grep -F 'vega-embed.min.js' "$out"
   [ "$status" -ne 0 ]
 }
+
+@test "shortcode embeds chart-page spec on another page" {
+  cat > content/charts/demo-bar.md <<'EOF'
+---
+type: chart
+chart_engine: vega-lite
+chart_data: "[[demo]]"
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{"x":{"field":"year"}}}
+```
+EOF
+  cat > content/concepts/uses.md <<'EOF'
+---
+type: concept
+title: "uses"
+---
+
+# uses
+
+{{< vega-lite "demo-bar" >}}
+EOF
+  bash scripts/build.sh
+  out="$(find public -name 'uses*' -type f -name '*.html' | head -1)"
+  run grep -F 'class="vega-embed"' "$out"
+  [ "$status" -eq 0 ]
+  run grep -F 'id="demo-bar"' "$out"
+  [ "$status" -eq 0 ]
+}

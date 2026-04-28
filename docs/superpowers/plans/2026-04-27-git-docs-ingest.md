@@ -91,7 +91,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/check-deps.sh tests/check_deps_test.bats
-git commit -m "feat(deps): check markdown-it-py for git-docs ingest (phase 18)"
+git commit -m "feat(deps): check markdown-it-py for git-docs ingest (phase 20)"
 ```
 
 ---
@@ -114,13 +114,13 @@ Note existing `.awiki/lock` line — it currently treats lock as a single file. 
 Append to `.gitignore`:
 
 ```
-# git-docs ingest (phase 18)
+# git-docs ingest (phase 20)
 .awiki/git-state/
 .awiki/lock/
 raw/_git-cache/
 ```
 
-If a line `.awiki/lock` (file) already exists, leave it — `.awiki/lock/` (dir) entry is additional and matches a different path. We won't migrate the existing single-file lock; phase 18 introduces a `.awiki/lock/` directory of per-repo lock files used **only** by `ingest-git.sh`. The existing file lock used by `lib/lock.sh` is unchanged.
+If a line `.awiki/lock` (file) already exists, leave it — `.awiki/lock/` (dir) entry is additional and matches a different path. We won't migrate the existing single-file lock; phase 20 introduces a `.awiki/lock/` directory of per-repo lock files used **only** by `ingest-git.sh`. The existing file lock used by `lib/lock.sh` is unchanged.
 
 - [ ] **Step 3: Verify**
 
@@ -134,7 +134,7 @@ Expected: each path reported as ignored by the new lines.
 
 ```bash
 git add .gitignore
-git commit -m "chore(gitignore): ignore git-docs state, cache, per-repo lock dir (phase 18)"
+git commit -m "chore(gitignore): ignore git-docs state, cache, per-repo lock dir (phase 20)"
 ```
 
 ---
@@ -298,7 +298,7 @@ Expected: 4 of 4 PASS.
 
 ```bash
 git add scripts/lib/git-state.sh tests/ingest_git_lib_test.bats
-git commit -m "feat(git-docs): add lib/git-state.sh — atomic JSON state per repo (phase 18)"
+git commit -m "feat(git-docs): add lib/git-state.sh — atomic JSON state per repo (phase 20)"
 ```
 
 ---
@@ -524,7 +524,7 @@ Expected: PASS for the 6 sync tests; the 3 yaml-loading tests pass if pyyaml ins
 
 ```bash
 git add scripts/lib/git-config.sh tests/ingest_git_lib_test.bats tests/fixtures/git-sources-good.yml tests/fixtures/git-sources-bad.yml
-git commit -m "feat(git-docs): add lib/git-config.sh — yaml parse + name/paths validation (phase 18)"
+git commit -m "feat(git-docs): add lib/git-config.sh — yaml parse + name/paths validation (phase 20)"
 ```
 
 ---
@@ -738,7 +738,7 @@ Expected: 5 of 5 PASS.
 
 ```bash
 git add scripts/lib/git-clone.sh scripts/lib/.. tests/ingest_git_lib_test.bats tests/util/build-git-fixture.sh
-git commit -m "feat(git-docs): add lib/git-clone.sh + fixture builder (phase 18)"
+git commit -m "feat(git-docs): add lib/git-clone.sh + fixture builder (phase 20)"
 ```
 
 ---
@@ -963,7 +963,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/README.md
-git commit -m "feat(git-docs): add transform.py — frontmatter strip + emit (phase 18)"
+git commit -m "feat(git-docs): add transform.py — frontmatter strip + emit (phase 20)"
 ```
 
 ---
@@ -1202,7 +1202,7 @@ Expected: 5 of 5 PASS (including the 1 from task 6).
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/docs/intro.md tests/fixtures/git-docs-good/seed/docs/foo.md
-git commit -m "feat(git-docs): transform.py — rewrite md links to wikilinks (phase 18)"
+git commit -m "feat(git-docs): transform.py — rewrite md links to wikilinks (phase 20)"
 ```
 
 ---
@@ -1352,7 +1352,7 @@ Expected: 7 of 7 PASS.
 
 ```bash
 git add scripts/ingest-git-transform.py tests/ingest_git_transform_test.bats tests/fixtures/git-docs-good/seed/docs/img/arch.png tests/fixtures/git-docs-good/seed/docs/intro.md
-git commit -m "feat(git-docs): transform.py — copy images + rewrite path (phase 18)"
+git commit -m "feat(git-docs): transform.py — copy images + rewrite path (phase 20)"
 ```
 
 ---
@@ -1515,7 +1515,7 @@ Expected: 2 of 2 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh skeleton — argparse, lock, dry-run (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh skeleton — argparse, lock, dry-run (phase 20)"
 ```
 
 ---
@@ -1662,7 +1662,7 @@ Expected: 4 of 4 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — walk + diff (added/modified/removed) (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — walk + diff (added/modified/removed) (phase 20)"
 ```
 
 ---
@@ -1811,7 +1811,7 @@ Expected: 6 of 6 PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — slug map + transform invocation + write (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — slug map + transform invocation + write (phase 20)"
 ```
 
 ---
@@ -1890,7 +1890,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — generate repo entity page (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — generate repo entity page (phase 20)"
 ```
 
 ---
@@ -1960,7 +1960,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — graveyard removed files to raw/_originals/git/ (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — graveyard removed files to raw/_originals/git/ (phase 20)"
 ```
 
 ---
@@ -2058,7 +2058,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — persist .awiki/git-state/<key>.json (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — persist .awiki/git-state/<key>.json (phase 20)"
 ```
 
 ---
@@ -2125,7 +2125,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — batched log/catalog/qmd housekeeping (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — batched log/catalog/qmd housekeeping (phase 20)"
 ```
 
 ---
@@ -2207,7 +2207,7 @@ Expected: PASS.
 
 ```bash
 git add scripts/ingest-git.sh tests/ingest_git_test.bats
-git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflicts to checkpoint (phase 18)"
+git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflicts to checkpoint (phase 20)"
 ```
 
 ---
@@ -2224,7 +2224,7 @@ git commit -m "feat(git-docs): ingest-git.sh — --protect-edits stages conflict
 Insert in `justfile` after `ingest-batch-list:`:
 
 ```
-# === git-docs ingest (phase 18) ===
+# === git-docs ingest (phase 20) ===
 ingest-git spec *flags:
     bash scripts/ingest-git.sh {{spec}} {{flags}}
 
@@ -2283,7 +2283,7 @@ Expected: PASS.
 
 ```bash
 git add justfile WIKI.md tests/ingest_git_test.bats
-git commit -m "feat(git-docs): justfile recipe + WIKI.md §4.7 doc (phase 18)"
+git commit -m "feat(git-docs): justfile recipe + WIKI.md §4.7 doc (phase 20)"
 ```
 
 ---
@@ -2351,7 +2351,7 @@ Expected: 3 of 3 PASS. If FAIL, fix the orchestrator inline (likely a bug in the
 
 ```bash
 git add tests/ingest_git_test.bats
-git commit -m "test(git-docs): lock exit codes 14 + 15 + --repo-name override (phase 18)"
+git commit -m "test(git-docs): lock exit codes 14 + 15 + --repo-name override (phase 20)"
 ```
 
 ---
@@ -2388,7 +2388,7 @@ Expected: PASS. If FAIL, the transform's emitted frontmatter is missing a requir
 
 ```bash
 git add tests/ingest_git_test.bats scripts/ingest-git-transform.py
-git commit -m "test(git-docs): lock lint-clean invariant on derived pages (phase 18)"
+git commit -m "test(git-docs): lock lint-clean invariant on derived pages (phase 20)"
 ```
 
 ---
@@ -2426,7 +2426,7 @@ Expected: PASS.
 
 ```bash
 git add tests/ingest_git_test.bats
-git commit -m "test(git-docs): self-host smoke — ingest awiki's own docs/superpowers/ (phase 18)"
+git commit -m "test(git-docs): self-host smoke — ingest awiki's own docs/superpowers/ (phase 20)"
 ```
 
 ---
@@ -2461,19 +2461,19 @@ Optional: actually run `just ingest-git <some-real-repo>` once on a small real O
 - [ ] **Step 3: Append phase log entry**
 
 ```bash
-bash scripts/log-append.sh phase "phase 18 complete — git-docs ingest pipeline (ingest-git.sh + 3 libs + transform.py + 4 bats files)"
+bash scripts/log-append.sh phase "phase 20 complete — git-docs ingest pipeline (ingest-git.sh + 3 libs + transform.py + 4 bats files)"
 ```
 
 - [ ] **Step 4: Commit log entry**
 
 ```bash
 git add content/log.md
-git commit -m "chore(log): record phase 18 complete (git-docs ingest)"
+git commit -m "chore(log): record phase 20 complete (git-docs ingest)"
 ```
 
 ---
 
-## Open items deferred to phase 19+ (not blocking phase 18)
+## Open items deferred to phase 19+ (not blocking phase 20)
 
 - MCP tool surfacing of `ingest_git` (spec §10 #5).
 - Cross-repo wikilink resolution (spec §3 non-goal).

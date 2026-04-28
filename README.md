@@ -202,7 +202,7 @@ Per-step idempotent. Creates `content/datasets/`, `data/`, sets
    Expected: dirs created, config flag set, WIKI.md gains data-layer block.
 
 2. ```bash
-   echo "year,pop\n2020,331\n2021,333\n2022,335" > /tmp/demo.csv
+   printf 'year,pop\n2020,331\n2021,333\n2022,335\n' > /tmp/demo.csv
    just dataset-new demo --format=csv --from=/tmp/demo.csv
    ```
    Expected: `content/datasets/demo.md` exists, frontmatter shows `rows: 3`.

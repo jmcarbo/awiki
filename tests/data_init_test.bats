@@ -39,6 +39,14 @@ teardown() {
   [ -f data/.gitkeep ]
 }
 
+@test "data-init restores .gitkeep when dir pre-exists without it" {
+  mkdir -p content/datasets data
+  run bash scripts/data-init.sh
+  [ "$status" -eq 0 ]
+  [ -f content/datasets/.gitkeep ]
+  [ -f data/.gitkeep ]
+}
+
 @test "data-init appends AWIKI_DATA_LAYER=on if absent" {
   run bash scripts/data-init.sh
   [ "$status" -eq 0 ]

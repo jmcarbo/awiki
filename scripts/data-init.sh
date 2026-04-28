@@ -43,6 +43,7 @@ step_dirs() {
     else
       note "skip $d (exists)"
     fi
+    [[ -f "$d/.gitkeep" ]] || { touch "$d/.gitkeep"; note "restored $d/.gitkeep"; }
   done
 }
 

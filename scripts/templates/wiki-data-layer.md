@@ -45,7 +45,7 @@ Body sections: lead paragraph, `## Schema`, `## Data` (only when
 | D6 | warn | Inline dataset over `AWIKI_DATASET_INLINE_MAX_ROWS` / `_MAX_BYTES`. |
 | D7 | warn | Cached `rows:` ≠ actual count. Auto-fixable. |
 | D8 | warn | `data_path:` outside `data/`. |
-| D9 | info | Dataset page has zero `## Sources` entries. |
+| D9 | info | Dataset page has empty or absent `sources:` frontmatter. |
 
 Chart subsystem ships in Plan 2 — `type: chart` and `vega-lite` rendering arrive there.
 <!-- END data-layer -->

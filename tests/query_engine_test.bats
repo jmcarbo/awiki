@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 
 setup() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -27,10 +28,10 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
 }
 
 @test "query-extract fails on missing dataset" {
-  run python3 scripts/lib/query-extract.py \
+  run --separate-stderr python3 scripts/lib/query-extract.py \
     --slug=ghost --datasets-dir=content/datasets --out=.cache/duckdb/ghost.csv
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"dataset not found"* ]] || [[ "$stderr" == *"dataset not found"* ]] || true
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"dataset not found"* ]]
 }
 
 @test "query-extract fails on absent fence" {
@@ -43,7 +44,27 @@ rows: 0
 ---
 # empty
 MD
-  run python3 scripts/lib/query-extract.py \
+  run --separate-stderr python3 scripts/lib/query-extract.py \
     --slug=empty --datasets-dir=content/datasets --out=.cache/duckdb/empty.csv
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 4 ]
+  [[ "$stderr" == *"no \`\`\`csv fence"* ]]
+}
+
+@test "query-extract follows storage:file -> data_path" {
+  mkdir -p data
+  printf 'id,name\n1,alpha\n2,beta\n' > data/big.csv
+  cat > content/datasets/big.md <<'MD'
+---
+type: dataset
+storage: file
+format: csv
+rows: 2
+data_path: data/big.csv
+---
+# big
+MD
+  run python3 scripts/lib/query-extract.py \
+    --slug=big --datasets-dir=content/datasets --out=.cache/duckdb/big.csv
+  [ "$status" -eq 0 ]
+  diff data/big.csv .cache/duckdb/big.csv
 }

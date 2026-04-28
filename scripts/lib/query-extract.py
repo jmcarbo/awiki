@@ -47,13 +47,26 @@ def main() -> int:
         print(f"QUERY|ERROR|no format in frontmatter: {page}", file=sys.stderr)
         return 4
 
-    body = _fence_body(text, fmt)
-    if body is None:
-        print(f"QUERY|ERROR|no ```{fmt} fence in {page}", file=sys.stderr)
-        return 4
-
+    storage = fm.get("storage", "inline")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    if storage == "file":
+        data_path = fm.get("data_path", "")
+        if not data_path:
+            print(f"QUERY|ERROR|storage=file but no data_path: {page}", file=sys.stderr)
+            return 4
+        src = Path(data_path)
+        if not src.is_file():
+            print(f"QUERY|ERROR|data file not found: {src}", file=sys.stderr)
+            return 4
+        body = src.read_text(encoding="utf-8")
+    else:
+        body = _fence_body(text, fmt)
+        if body is None:
+            print(f"QUERY|ERROR|no ```{fmt} fence in {page}", file=sys.stderr)
+            return 4
+
     if not body.endswith("\n"):
         body += "\n"
     out.write_text(body, encoding="utf-8")

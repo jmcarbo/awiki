@@ -199,3 +199,11 @@ EOF
   [ "$status" -eq 0 ]
   [ -f content/entities/repo-alt.md ]
 }
+
+@test "ingest-git: lint clean after good ingest" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  printf -- '---\ntitle: Catalog\ntype: catalog\n---\n\n## Sources\n\n## Entities\n' > content/catalog.md
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  run bash "$BATS_TEST_DIRNAME/../scripts/lint.sh"
+  ! echo "$output" | grep -E "^LINT\\|error\\|" >/dev/null
+}

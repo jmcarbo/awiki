@@ -7,7 +7,7 @@ awiki is an implementation of the LLM Wiki pattern described by Andrej Karpathy:
 ## Quick start
 
 ```bash
-git clone --recurse-submodules <this-repo> mywiki
+git clone --recurse-submodules https://github.com/jmcarbo/awiki mywiki
 cd mywiki
 just                          # see available commands
 ```

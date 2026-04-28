@@ -369,3 +369,31 @@ EOF
   run bash scripts/lint-chart.sh
   [[ "$output" != *"|C-PRIV|"* ]]
 }
+
+@test "lint.sh --only=chart routes to lint-chart" {
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{ broken
+```
+EOF
+  run bash scripts/lint.sh --only=chart
+  [[ "$output" == *"|C1|"* ]]
+}
+
+@test "lint.sh default mode includes C-codes" {
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{ broken
+```
+EOF
+  run bash scripts/lint.sh
+  [[ "$output" == *"|C"*"|"* ]]
+}

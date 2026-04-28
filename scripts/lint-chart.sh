@@ -17,7 +17,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   done
 fi
 
-_emit_c() { printf 'LINT|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4"; }
+_emit_c() {
+  local level="$1"
+  level="$(printf '%s' "$level" | tr '[:lower:]' '[:upper:]')"
+  printf 'LINT|%s|%s|%s|%s\n' "$level" "$2" "$3" "$4"
+}
 
 _extract_fences_for_lint() { # <page> -> emits TSV: <chart-id>\t<base64-spec>
   python3 - "$1" <<'PY'
@@ -117,7 +121,7 @@ def fields(node):
 
 bad = [f for f in fields(spec) if f not in cols]
 for f in bad:
-    print(f"LINT|error|{rel}|C4|field '{f}' not in [[{m.group(1)}]] columns (chart={cid})")
+    print(f"LINT|ERROR|{rel}|C4|field '{f}' not in [[{m.group(1)}]] columns (chart={cid})")
 PY
     # C7 — sidecar presence.
     local sidecar="$REPO_ROOT/assets/charts/$chart_id.svg"
@@ -164,7 +168,7 @@ for slug in names:
     ds_text = open(ds_path).read()
     if is_private(ds_text) or "/private/" in ds_path:
         if not host_private:
-            print(f"LINT|error|{rel}|C-PRIV|chart references private dataset [[{slug}]] from non-private page (chart={cid})")
+            print(f"LINT|ERROR|{rel}|C-PRIV|chart references private dataset [[{slug}]] from non-private page (chart={cid})")
 PY
     rm -f "$tmp"
   done < <(_extract_fences_for_lint "$page")
@@ -224,7 +228,7 @@ for dirpath, _, files in os.walk(os.path.join(root, "content")):
                 counts[m.group(1)] = counts.get(m.group(1), 0) + 1
 for slug, n in counts.items():
     if n > 5:
-        print(f"LINT|info|content/datasets/{slug}.md|C8|referenced {n} times across charts (consider type:chart page)")
+        print(f"LINT|INFO|content/datasets/{slug}.md|C8|referenced {n} times across charts (consider type:chart page)")
 PY
   # C9 — hand-edit inside chart-preview region.
   while IFS= read -r -d '' page; do
@@ -240,7 +244,7 @@ for m in re.finditer(r"<!-- BEGIN chart-preview:([a-z0-9][a-z0-9-]*) -->\n(.*?)\
     if body == "": continue
     expected_re = re.compile(r"^!\[" + re.escape(cid) + r"\]\([^)]+\)$")
     if expected_re.match(body): continue
-    print(f"LINT|warn|{rel}|C9|hand-edit detected inside chart-preview:{cid} (re-run charts-render)")
+    print(f"LINT|WARN|{rel}|C9|hand-edit detected inside chart-preview:{cid} (re-run charts-render)")
 PY
   done < <(find "$REPO_ROOT/content" -type f -name '*.md' -print0)
 }

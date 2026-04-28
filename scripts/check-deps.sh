@@ -86,6 +86,17 @@ else
   echo "  install: pip3 install markdown-it-py" >&2
 fi
 
+# Optional Python module: python-calamine (used by scripts/ingest-xlsx.sh).
+if [[ -n "${AWIKI_FAKE_MISSING:-}" && "$AWIKI_FAKE_MISSING" == "python_calamine" ]]; then
+  echo "OPTIONAL-MISSING|python-calamine"
+  echo "  install: pip3 install python-calamine" >&2
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import python_calamine" >/dev/null 2>&1; then
+  echo "OK|python-calamine (optional)"
+else
+  echo "OPTIONAL-MISSING|python-calamine"
+  echo "  install: pip3 install python-calamine" >&2
+fi
+
 # Data-layer dependency advisory.
 if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
   if ! command -v python3 >/dev/null 2>&1; then

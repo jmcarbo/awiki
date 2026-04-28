@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	chartlint "awiki/internal/lint/chart"
 	datalint "awiki/internal/lint/data"
 	synthlint "awiki/internal/lint/synth"
 	tasklint "awiki/internal/lint/task"
@@ -19,7 +20,7 @@ type ruleRegistry struct {
 	ruleSets map[string]RuleSet
 }
 
-var defaultRuleRegistry = newRuleRegistry(synthRuleSet{}, taskRuleSet{}, dataRuleSet{})
+var defaultRuleRegistry = newRuleRegistry(synthRuleSet{}, taskRuleSet{}, dataRuleSet{}, chartRuleSet{})
 
 func newRuleRegistry(ruleSets ...RuleSet) *ruleRegistry {
 	r := &ruleRegistry{ruleSets: make(map[string]RuleSet)}
@@ -157,6 +158,32 @@ func (dataRuleSet) Name() string { return "data" }
 func (dataRuleSet) Run(_ context.Context, opts Options, _ *wiki.Index) (Collector, error) {
 	var c Collector
 	diagnostics, fixes, err := datalint.Run(datalint.Options{
+		RepoRoot:   opts.RepoRoot,
+		ContentDir: opts.ContentDir,
+		OnlyFile:   opts.OnlyFile,
+		Fix:        opts.Fix,
+	})
+	for _, fix := range fixes {
+		c.AddFix(FixRecord{File: fix.File, Message: fix.Message})
+	}
+	for _, diagnostic := range diagnostics {
+		c.Add(Diagnostic{
+			Level:   Level(diagnostic.Level),
+			File:    diagnostic.File,
+			Code:    diagnostic.Code,
+			Message: diagnostic.Message,
+		})
+	}
+	return c, err
+}
+
+type chartRuleSet struct{}
+
+func (chartRuleSet) Name() string { return "chart" }
+
+func (chartRuleSet) Run(_ context.Context, opts Options, _ *wiki.Index) (Collector, error) {
+	var c Collector
+	diagnostics, fixes, err := chartlint.Run(chartlint.Options{
 		RepoRoot:   opts.RepoRoot,
 		ContentDir: opts.ContentDir,
 		OnlyFile:   opts.OnlyFile,

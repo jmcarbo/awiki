@@ -144,7 +144,7 @@ func runDeferredLegacyLint(c *Collector, runner adapters.Runner, opts Options) {
 }
 
 func deferredNamespaces() []string {
-	return []string{"chart", "query"}
+	return []string{"query"}
 }
 
 func runLegacyNamespace(c *Collector, runner adapters.Runner, opts Options, namespace string) {

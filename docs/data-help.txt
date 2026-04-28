@@ -1,0 +1,58 @@
+=== awiki data layer — recipe reference ===
+
+just data-init
+  Per-step idempotent enabler. Creates content/datasets/, data/, sets
+  AWIKI_DATA_LAYER=on + threshold defaults in .awiki/config, patches
+  WIKI.md with the data-layer block.
+  Re-runs are safe: each step skips work that is already done.
+
+just dataset-new <slug> [--format=csv] [--from=<path>]
+  Scaffolds content/datasets/<slug>.md. With --from, seeds the inline
+  ## Data block from a local file. Refuses if slug exists.
+  Slug rule: ^[a-z0-9][a-z0-9-]*$.
+  Formats: csv | tsv | json | dsv | topojson.
+
+just dataset-compact <slug>
+  Flips storage between inline and file based on
+  AWIKI_DATASET_INLINE_MAX_ROWS / _MAX_BYTES (.awiki/config). Idempotent.
+  Refuses to inline a file dataset that exceeds the threshold.
+
+just dataset-validate <slug>
+  Recounts rows and rewrites the cached `rows:` frontmatter. If the
+  page declares `columns:`, runs full schema check (every row, every
+  column). Lint runs only a sampled subset (first 50 + last 10).
+
+just lint --only=data       # run D-codes only
+just lint --only=data --fix # auto-fix D7 (cached rows mismatch)
+
+MCP tools:
+  list_datasets()        -> { datasets, errors }
+  get_dataset(slug)      -> { slug, frontmatter, sample_rows[20], total_rows, ... }
+
+=== charts ===
+
+just chart-new <slug> --data=<dataset-slug>
+  Scaffold a content/charts/<slug>.md (type: chart) with a skeleton
+  vega-lite spec referencing the named dataset.
+
+just charts-render
+  Walk every ```vega-lite``` fence + every type:chart page. For each:
+    - resolve [[slug]] data references (scripts/lib/vl-resolve.py)
+    - hash the resolved spec
+    - skip if assets/charts/<id>.svg + .hash match
+    - else call vl-convert vl2svg, write SVG + hash + cached resolved JSON
+    - update Obsidian managed-region preview block in source page
+  Cleans orphan sidecars + managed regions.
+
+just charts-render-one <chart-id>
+  Single-chart regen. <chart-id> is `<page-slug>-fig<N>` for inline charts
+  or just `<slug>` for type:chart pages.
+
+Hugo render-hook: ```vega-lite``` blocks render as <div class="vega-embed">,
+hydrated by lazy-loaded vendored vega-embed.min.js.
+
+Obsidian: install obsidian-vega-lite (or Obsidian Charts) to render live.
+Without a plugin, the managed-region SVG sidecar shows in reading view.
+Suppress sidecar injection: AWIKI_CHART_OBSIDIAN_PREVIEW=off in .awiki/config.
+
+MCP tool: list_charts() -> { charts, errors }

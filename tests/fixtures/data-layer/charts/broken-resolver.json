@@ -1,0 +1,5 @@
+{
+  "mark": "bar",
+  "data": {"name": "[[no-such-slug]]"},
+  "encoding": {"x": {"field": "year"}}
+}

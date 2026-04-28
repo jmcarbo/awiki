@@ -1,0 +1,8 @@
+{
+  "mark": "bar",
+  "data": {"name": "[[demo]]"},
+  "encoding": {
+    "x": {"field": "year", "type": "ordinal"},
+    "y": {"field": "pop", "type": "quantitative"}
+  }
+}

@@ -375,6 +375,11 @@ rm -rf "$BUILD_OLD" 2>/dev/null || true
 echo "BUILD-OK|content=$CONTENT_DIR|build=$BUILD_DIR"
 
 if [[ "$FULL" -eq 1 ]]; then
+  # Render Vega-Lite chart sidecars before Hugo runs (no-op if data layer off
+  # or vl-convert missing).
+  if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
+    bash scripts/chart.sh render || echo "BUILD|WARN|charts-render returned non-zero"
+  fi
   hugo --minify --destination public
   echo "HUGO-OK|out=public"
 fi

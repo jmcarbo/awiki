@@ -41,6 +41,24 @@ elif [[ -f scripts/lint-synth.sh ]]; then
   source scripts/lint-synth.sh
 fi
 
+# Source data lint extension (D-codes).
+if [[ -f "$(dirname "$0")/lint-data.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/lint-data.sh"
+elif [[ -f scripts/lint-data.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/lint-data.sh
+fi
+
+# Source chart lint extension (C-codes).
+if [[ -f "$(dirname "$0")/lint-chart.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/lint-chart.sh"
+elif [[ -f scripts/lint-chart.sh ]]; then
+  # shellcheck disable=SC1091
+  source scripts/lint-chart.sh
+fi
+
 apply_fixes() {
   local page="$1"
   if ! grep -q '^last_updated:' "$page"; then
@@ -960,6 +978,53 @@ if [[ -z "$ONLY" || "$ONLY" = "synth" || "$ONLY" = "all" ]]; then
       synth_lint_dir "$CONTENT_DIR"
     fi
   fi
+fi
+
+# --- Data lint dispatch -----------------------------------------------------
+if [[ "$ONLY" == "data" ]]; then
+  data_out="$(lint_data_all)"
+  printf '%s\n' "$data_out"
+  data_errors="$(printf '%s\n' "$data_out" | grep -c '^LINT|ERROR|' || true)"
+  data_errors="${data_errors:-0}"
+  if (( data_errors > 0 )); then
+    exit 2
+  fi
+  exit 0
+fi
+if [[ "$ONLY" == "chart" ]]; then
+  chart_out="$(lint_chart_all)"
+  printf '%s\n' "$chart_out"
+  chart_errors="$(printf '%s\n' "$chart_out" | grep -c '^LINT|ERROR|' || true)"
+  chart_errors="${chart_errors:-0}"
+  if (( chart_errors > 0 )); then
+    exit 2
+  fi
+  exit 0
+fi
+if [[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR/datasets" ]]; then
+  data_out="$(lint_data_all)"
+  if [[ -n "$data_out" ]]; then
+    printf '%s\n' "$data_out"
+    while IFS= read -r dline; do
+      [[ -z "$dline" ]] && continue
+      case "$dline" in
+        LINT\|ERROR\|*) ERRORS=$((ERRORS + 1)) ;;
+        LINT\|WARN\|*)  WARNS=$((WARNS + 1)) ;;
+        LINT\|INFO\|*)  INFOS=$((INFOS + 1)) ;;
+      esac
+    done <<< "$data_out"
+  fi
+fi
+if [[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR" ]]; then
+  chart_out="$(lint_chart_all)"
+  printf '%s\n' "$chart_out"
+  while IFS= read -r line; do
+    case "$line" in
+      'LINT|ERROR|'*) ERRORS=$((ERRORS + 1)) ;;
+      'LINT|WARN|'*) WARNS=$((WARNS + 1)) ;;
+      'LINT|INFO|'*) INFOS=$((INFOS + 1)) ;;
+    esac
+  done <<<"$chart_out"
 fi
 
 if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then

@@ -22,6 +22,14 @@ jobs:
         run: |
           curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.10.0.tar.gz | tar xz -C /tmp
           sudo /tmp/bats-core-1.10.0/install.sh /usr/local
+      - name: Install vl-convert
+        run: |
+          set -e
+          VERSION=v1.7.0
+          curl -L "https://github.com/vega/vl-convert/releases/download/${VERSION}/vl-convert-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C /usr/local/bin --strip-components=1 vl-convert-x86_64-unknown-linux-gnu/vl-convert
+          chmod +x /usr/local/bin/vl-convert
+          vl-convert --version
       - name: Optional unlock for encrypted wikis
         if: ${{ env.GIT_CRYPT_KEY != '' }}
         env:

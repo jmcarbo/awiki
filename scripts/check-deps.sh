@@ -86,6 +86,17 @@ else
   echo "  install: pip3 install markdown-it-py" >&2
 fi
 
+# Data-layer dependency advisory.
+if [[ -f .awiki/config ]] && grep -q '^AWIKI_DATA_LAYER=on' .awiki/config; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "WARN: data layer is on but python3 is missing — dataset-rows.py won't run"
+  fi
+  if ! command -v vl-convert >/dev/null 2>&1; then
+    echo "WARN: data layer is on but vl-convert is missing — chart sidecars won't render"
+    echo "      install: cargo install vl-convert OR download from https://github.com/vega/vl-convert/releases"
+  fi
+fi
+
 if [[ "$ERRORS" -gt 0 ]]; then
   echo "DEPS-SUMMARY|errors=$ERRORS" >&2
   exit 1

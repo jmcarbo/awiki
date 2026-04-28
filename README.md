@@ -179,6 +179,64 @@ Full per-recipe usage / output / when notes live in `docs/just-help.txt`.
 
 The five-step flow — capture every open loop without judgment, clarify each capture into a concrete next action or non-action, organize by project and context, reflect on the system on a fixed cadence, engage with the next action that fits your current context — predates awiki by decades. awiki's contribution is making each step a wiki-native primitive: captures are markdown lines, projects and contexts are pages with frontmatter, agenda views are managed-region renderings, and the weekly review is a structured shell report plus an MCP tool. No app, no daemon, no cloud sync; everything is git-committed text the agent can read and write.
 
+## Data layer
+
+awiki ships an opt-in **data layer** for tracking structured datasets as
+first-class wiki pages. Plan 1 ships datasets only; charts (Vega-Lite
+rendering in Hugo + Obsidian) arrive in Plan 2.
+
+### Enable
+
+```bash
+just data-init
+```
+
+Per-step idempotent. Creates `content/datasets/`, `data/`, sets
+`AWIKI_DATA_LAYER=on` in `.awiki/config`, patches `WIKI.md`.
+
+### 4-step manual smoke test
+
+1. ```bash
+   just data-init
+   ```
+   Expected: dirs created, config flag set, WIKI.md gains data-layer block.
+
+2. ```bash
+   printf 'year,pop\n2020,331\n2021,333\n2022,335\n' > /tmp/demo.csv
+   just dataset-new demo --format=csv --from=/tmp/demo.csv
+   ```
+   Expected: `content/datasets/demo.md` exists, frontmatter shows `rows: 3`.
+
+3. ```bash
+   just lint --only=data
+   ```
+   Expected: clean output (no `LINT|error|...|D*|...` lines).
+
+4. ```bash
+   just dataset-validate demo
+   ```
+   Expected: `DATASET|validated demo (rows=3)`.
+
+Per-recipe usage: see `docs/data-help.txt`.
+
+### Charts (Plan 2)
+
+Embed Vega-Lite charts in any page:
+
+````markdown
+```vega-lite
+{"mark":"bar","data":{"name":"[[demo]]"},"encoding":{...}}
+```
+````
+
+The `[[demo]]` reference is resolved at build time to a URL (file storage)
+or inline values (inline storage). Hugo renders interactive charts via
+vendored vega-embed; Obsidian renders live with `obsidian-vega-lite` (or
+Obsidian Charts) installed, otherwise via SVG sidecar previews.
+
+Run `just charts-render` to regenerate sidecars; `just build` invokes it
+automatically. Per-recipe usage: `just data-help`.
+
 ## Example
 
 Browse `examples/sample-wiki/` for a tiny reference wiki with full frontmatter, wikilinks, and catalog. The synthesis demo lives at `examples/sample-wiki/content/synthesis/memex-briefing.md`.

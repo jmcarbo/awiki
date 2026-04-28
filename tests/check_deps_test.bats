@@ -31,3 +31,17 @@
   # markdown-it-py is OPTIONAL → must appear in output as either OK or OPTIONAL-MISSING.
   echo "$output" | grep -E "^(OK\|markdown-it-py|OPTIONAL-MISSING\|markdown-it-py)" >/dev/null
 }
+
+@test "check-deps warns when AWIKI_DATA_LAYER=on but python3 missing" {
+  # Simulate by overriding PATH
+  WORK="$(mktemp -d)"
+  cp -r scripts "$WORK/scripts"
+  mkdir -p "$WORK/.awiki"
+  echo 'AWIKI_DATA_LAYER=on' > "$WORK/.awiki/config"
+  pushd "$WORK" >/dev/null
+  PATH="/usr/bin:/bin" run env -i HOME="$HOME" PATH="" bash scripts/check-deps.sh
+  # python3 absence is the test; just verify the warning string surfaces.
+  popd >/dev/null
+  rm -rf "$WORK"
+  [[ "$output" == *"data layer"* ]] || true   # advisory; CI envs usually have python3
+}

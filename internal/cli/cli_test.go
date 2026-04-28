@@ -29,7 +29,8 @@ func TestRunUnknownCommand(t *testing.T) {
 
 func TestRunLintAcceptsFlagAfterContentDir(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"lint", "custom-content", "--fix"}, &stdout, &stderr)
+	contentDir := t.TempDir()
+	code := Run([]string{"lint", contentDir, "--fix"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run() code = %d, want 0; stderr = %q", code, stderr.String())
 	}

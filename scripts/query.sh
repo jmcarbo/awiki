@@ -7,6 +7,8 @@ REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd
 cd "$REPO_ROOT"
 
 ENGINE="$REPO_ROOT/scripts/lib/query-engine.sh"
+# shellcheck source=lib/managed-region.sh
+source "$REPO_ROOT/scripts/lib/managed-region.sh"
 
 note() { echo "QUERY|$*"; }
 die()  { echo "QUERY|ERROR|$*" >&2; exit 1; }
@@ -208,6 +210,54 @@ EOF
   note "NEW|$page"
 }
 
+_iter_fences() {
+  # Print TSV: <page>\t<id>\t<base64-sql>
+  python3 - <<'PY'
+import re, base64, pathlib
+for page in pathlib.Path("content").rglob("*.md"):
+    text = page.read_text(encoding="utf-8")
+    for m in re.finditer(
+        r'```sql\s+awiki-query\s+id="([a-z0-9][a-z0-9-]*)"\s*\n(.*?)\n```',
+        text, re.S,
+    ):
+        sql_b64 = base64.b64encode(m.group(2).encode()).decode()
+        print(f"{page}\t{m.group(1)}\t{sql_b64}")
+PY
+}
+
+cmd_fence_render() {
+  local rc=0
+  declare -A page_hashes
+  while IFS=$'\t' read -r page fid sql_b64; do
+    [[ -z "$page" ]] && continue
+    local sql; sql="$(printf '%s' "$sql_b64" | base64 --decode)"
+    local rows; rows="$(bash "$ENGINE" run "$sql")" || { rc=$?; continue; }
+    local body_md; body_md="$(printf '%s' "$rows" | python3 "$REPO_ROOT/scripts/lib/query-format.py" --format=md)"
+    local body_file; body_file="$(mktemp)"
+    printf '%s' "$body_md" > "$body_file"
+    managed_region_replace "$page" query-result "$fid" "$body_file"
+    rm -f "$body_file"
+    local h; h="$(bash "$ENGINE" hash "$sql")"
+    page_hashes["$page"]+="$fid:$h"$'\n'
+    note "FENCE-RENDER|$page|id=$fid|hash=sha256-$h"
+  done < <(_iter_fences)
+
+  for page in "${!page_hashes[@]}"; do
+    python3 - "$page" "${page_hashes[$page]}" <<'PY'
+import json, sys, pathlib
+page = pathlib.Path(sys.argv[1])
+side = page.with_suffix(".queries.json")
+entries = {}
+for line in sys.argv[2].splitlines():
+    if not line.strip(): continue
+    fid, h = line.split(":", 1)
+    entries[fid] = f"sha256-{h}"
+side.write_text(json.dumps(entries, sort_keys=True, indent=2) + "\n")
+PY
+  done
+  return $rc
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
@@ -216,6 +266,7 @@ main() {
     new)           cmd_new "$@" ;;
     render)        cmd_render "$@" ;;
     render-one)    cmd_render_one "$@" ;;
+    fence-render)  cmd_fence_render "$@" ;;
     "")            die "usage: query.sh <run|new|render|render-one|fence-render>" ;;
     *)             die "unknown subcommand: $cmd" ;;
   esac

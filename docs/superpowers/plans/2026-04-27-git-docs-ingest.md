@@ -194,17 +194,15 @@ Expected: FAIL — `lib/git-state.sh` not found.
 #!/usr/bin/env bash
 # Source-only helper. Read/write per-repo state JSON for git-docs ingest.
 # Functions:
-#   awiki_git_state_path <repo_key>       → echoes .awiki/git-state/<repo_key>.json
-#   awiki_git_state_load <repo_key>       → prints JSON; '{}' if missing
-#   awiki_git_state_save <repo_key> <json> → atomic write (tmp + rename)
-#   awiki_git_state_validate <json>       → exits 0 if schema=1 and required keys present
+#   awiki_git_state_path <repo_key>             → echoes .awiki/git-state/<repo_key>.json
+#   awiki_git_state_load <repo_key>             → prints JSON; '{}' if missing
+#   awiki_git_state_save <repo_key> <json>      → atomic write (tmp + rename)
+#   awiki_git_state_validate <json>             → exits 0 if schema=1 and required keys present
+#   awiki_git_state_validate_repo_key <repo_key> → exits 0 if repo_key is safe (no path traversal)
 
 awiki_git_state_path() {
   local repo_key="$1"
-  if [[ -z "$repo_key" ]]; then
-    echo "ERROR: awiki_git_state_path requires repo_key" >&2
-    return 1
-  fi
+  awiki_git_state_validate_repo_key "$repo_key" || return 1
   echo ".awiki/git-state/${repo_key}.json"
 }
 
@@ -220,6 +218,7 @@ awiki_git_state_load() {
 
 awiki_git_state_save() {
   local repo_key="$1" json="$2"
+  awiki_git_state_validate_repo_key "$repo_key" || return 1
   local path
   path="$(awiki_git_state_path "$repo_key")" || return 1
   mkdir -p "$(dirname "$path")"

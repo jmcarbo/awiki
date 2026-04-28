@@ -54,7 +54,12 @@ scripts/lint-chart.sh               # C-codes
 scripts/lib/vl-resolve.py           # spec wikilink → URL rewriter
 layouts/shortcodes/vega-lite.html   # for `type: chart` page embeds
 layouts/_default/_markup/render-codeblock-vega-lite.html  # fence interceptor
-mcp/awiki-server/tools/data.py      # list_datasets / get_dataset / list_charts
+mcp/awiki-server/lib/list-datasets.js
+mcp/awiki-server/lib/get-dataset.js
+mcp/awiki-server/lib/list-charts.js
+mcp/awiki-server/test/list-datasets.test.mjs
+mcp/awiki-server/test/get-dataset.test.mjs
+mcp/awiki-server/test/list-charts.test.mjs
 ```
 
 ### 3.2 Render pipeline

@@ -21,6 +21,13 @@ ingest-with-agent path agent="claude":
 ingest-batch-list:
     @find raw/inbox/batch -type f | sort
 
+# Auto-ingest documents landing in raw/inbox/batch/. Foreground daemon —
+# Ctrl-C to stop. Uses fswatch (mac) / inotifywait (linux); falls back to
+# polling when neither is available. `--catchup` drains existing files at
+# startup. Failed ingests are quarantined to raw/inbox/batch/_failed/.
+watchdog *args:
+    bash scripts/watchdog.sh {{args}}
+
 # === maintenance ===
 lint:
     bash scripts/lint.sh

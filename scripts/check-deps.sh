@@ -50,7 +50,7 @@ check flock "n/a" "brew install util-linux  # then add the flock binary to PATH 
 check python3 "3.8" "brew install python" "apt install python3"
 
 # Optional tools — warn but do not fail.
-for opt in qmd git-crypt age entr fswatch pdftotext; do
+for opt in qmd git-crypt age entr fswatch inotifywait pdftotext; do
   if command -v "$opt" >/dev/null 2>&1; then
     echo "OK|$opt (optional)"
   else

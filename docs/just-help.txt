@@ -5,6 +5,11 @@ INGEST
                                 Path must be under raw/inbox/{interactive,batch,checkpoint}/.
                                 Example: just ingest raw/inbox/interactive/article.md
   just ingest-batch-list        List files queued in raw/inbox/batch/ for agent iteration.
+  just watchdog [--catchup]     Auto-ingest files arriving in raw/inbox/batch/.
+                                Foreground daemon — Ctrl-C to stop.
+                                Backends: fswatch (mac) / inotifywait (linux),
+                                polling fallback. Failed ingests quarantine to
+                                raw/inbox/batch/_failed/.
 
 MAINTENANCE
   just lint                     Validate wiki integrity. Output: LINT|<level>|<file>|<msg>.

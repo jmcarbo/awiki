@@ -46,6 +46,7 @@ Full architecture: see `docs/superpowers/specs/2026-04-27-llm-wiki-scaffold-desi
 | Recipe | Purpose |
 |--------|---------|
 | `just ingest <path>` | Process a source from inbox into wiki. |
+| `just watchdog` | Daemon: auto-ingest files arriving in `raw/inbox/batch/`. |
 | `just lint` | Validate wiki integrity. |
 | `just lint-fix` | Auto-fix mechanical lint issues. |
 | `just serve` | Local Hugo preview at http://localhost:1313. |

@@ -65,3 +65,13 @@ teardown() {
   ! [ -f content/sources/git-repo-readme.md ]
   grep -q "private" content/private/sources/git-repo-readme.md
 }
+
+@test "ingest-git: writes repo entity page with sources list" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  [ -f content/entities/repo-repo.md ]
+  grep -q "^type: entity" content/entities/repo-repo.md
+  grep -q "^git_url:" content/entities/repo-repo.md
+  grep -q "^git_sha:" content/entities/repo-repo.md
+  grep -q "\[\[git-repo-readme\]\]" content/entities/repo-repo.md
+}

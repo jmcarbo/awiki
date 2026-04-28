@@ -244,6 +244,36 @@ for rel in "${TO_WRITE[@]}"; do
   fi
 done
 
+TODAY="$(date -u +%F)"
+NOW_ISO="$(date -u +%FT%TZ)"
+{
+  echo "---"
+  echo "title: \"${REPO_NAME}\""
+  echo "date: ${TODAY}"
+  echo "last_updated: ${TODAY}"
+  echo "type: entity"
+  if [[ -n "${PRIVATE_FLAG:-}" ]]; then
+    echo "tags: [git, repo, private]"
+  else
+    echo "tags: [git, repo]"
+  fi
+  echo "aliases: [${REPO_NAME}]"
+  echo "git_url: ${SPEC}"
+  echo "git_default_branch: ${DEFAULT_BRANCH}"
+  echo "git_sha: ${HEAD_SHA}"
+  echo "last_ingested: ${NOW_ISO}"
+  echo "---"
+  echo
+  echo "Repository \`${REPO_NAME}\` ingested from \`${SPEC}\`."
+  echo
+  echo "## Sources"
+  echo
+  for rel in "${CURRENT_FILES[@]}"; do
+    echo "- [[${SLUG_MAP[$rel]}]]"
+  done
+} > "$ENTITY_PATH.tmp.$$"
+mv -f "$ENTITY_PATH.tmp.$$" "$ENTITY_PATH"
+
 echo "OK|repo_key=$REPO_KEY|added=${#ADDED[@]}|modified=${#MODIFIED[@]}|removed=${#REMOVED[@]}|written=$WRITE_OK|failed=$WRITE_FAIL"
 
 if [[ "$WRITE_FAIL" -gt 0 ]]; then exit 2; fi

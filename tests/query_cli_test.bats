@@ -30,3 +30,39 @@ teardown() { popd >/dev/null; rm -rf "$WORK"; }
   run bash scripts/query.sh run "SELEC bogus"
   [ "$status" -eq 5 ]
 }
+
+@test "query run --out=summary materializes dataset" {
+  run bash scripts/query.sh run \
+    "SELECT category, SUM(amount) AS total FROM trades GROUP BY 1 ORDER BY 1" \
+    --out=summary
+  [ "$status" -eq 0 ]
+  [ -f content/datasets/summary.md ]
+  run grep -E '^type: dataset$' content/datasets/summary.md
+  [ "$status" -eq 0 ]
+  run grep -E '^sources: \[trades\]' content/datasets/summary.md
+  [ "$status" -eq 0 ]
+  run grep -E '^query: sha256-' content/datasets/summary.md
+  [ "$status" -eq 0 ]
+  run grep -A3 '## Data' content/datasets/summary.md
+  [[ "$output" == *'```csv'* ]]
+  [[ "$output" == *'category,total'* ]]
+}
+
+@test "query run --out=existing rejects without --force" {
+  run bash scripts/query.sh run \
+    "SELECT 1 AS x" --out=trades
+  [ "$status" -eq 7 ]
+}
+
+@test "query run --out=existing overwrites with --force" {
+  run bash scripts/query.sh run \
+    "SELECT category, SUM(amount) AS total FROM trades GROUP BY 1 ORDER BY 1" \
+    --out=summary
+  [ "$status" -eq 0 ]
+  run bash scripts/query.sh run \
+    "SELECT category, COUNT(*) AS n FROM trades GROUP BY 1 ORDER BY 1" \
+    --out=summary --force
+  [ "$status" -eq 0 ]
+  run grep -F 'category,n' content/datasets/summary.md
+  [ "$status" -eq 0 ]
+}

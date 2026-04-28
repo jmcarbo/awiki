@@ -258,3 +258,13 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   # Source preserved so user can rename.
   [ -f 'raw/inbox/interactive/!!!.xlsx' ]
 }
+
+@test "just ingest-xlsx recipe wires up the wrapper" {
+  command -v just >/dev/null 2>&1 || skip "just not installed"
+  cp raw/inbox/batch/single-sheet.xlsx raw/inbox/interactive/single-sheet.xlsx
+  cp "$BATS_TEST_DIRNAME/../justfile" .
+  cp -r "$BATS_TEST_DIRNAME/../scripts" .
+  run just ingest-xlsx raw/inbox/interactive/single-sheet.xlsx
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"XLSX-CONVERTED|"* ]]
+}

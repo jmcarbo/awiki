@@ -113,3 +113,20 @@ assert 'README.md' in o['files']
   after_sha="$(python3 -c "import json; print(json.load(open('.awiki/git-state/local-repo.json'))['head_sha'])")"
   [ "$before_sha" = "$after_sha" ]
 }
+
+@test "ingest-git: appends one log entry per run" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  run grep -c "ingest-git | repo=local-repo" content/log.md
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "ingest-git: skips log entry on no-op rerun" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  run grep -c "ingest-git | repo=local-repo" content/log.md
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}

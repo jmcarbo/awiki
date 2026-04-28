@@ -299,6 +299,17 @@ print(json.dumps(out, indent=2))
 
 awiki_git_state_save "$REPO_KEY" "$STATE_JSON"
 
+TOTAL_CHANGES=$(( ${#ADDED[@]} + ${#MODIFIED[@]} + ${#REMOVED[@]} ))
+if [[ "$TOTAL_CHANGES" -gt 0 ]]; then
+  bash "$SCRIPT_DIR/log-append.sh" ingest-git "repo=$REPO_KEY +${#ADDED[@]} ~${#MODIFIED[@]} -${#REMOVED[@]} head=$HEAD_SHA"
+  if [[ -x "$SCRIPT_DIR/update-catalog.sh" ]]; then
+    bash "$SCRIPT_DIR/update-catalog.sh" >/dev/null 2>&1 || echo "WARN|update-catalog non-zero (continuing)" >&2
+  fi
+  if [[ "${AWIKI_QMD_STATUS:-}" != "missing" ]] && command -v qmd >/dev/null 2>&1; then
+    bash "$SCRIPT_DIR/qmd-index.sh" 2>/dev/null || echo "WARN|qmd reindex failed (continuing)" >&2
+  fi
+fi
+
 {
   echo "---"
   echo "title: \"${REPO_NAME}\""

@@ -130,3 +130,23 @@ assert 'README.md' in o['files']
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
 }
+
+@test "ingest-git: --protect-edits stages conflict to checkpoint" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  mkdir -p raw/inbox/checkpoint/.staged
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo"
+  python3 -c "
+import re, pathlib
+p = pathlib.Path('content/sources/git-repo-readme.md')
+s = p.read_text()
+s = re.sub(r'^last_updated: .*', 'last_updated: 2099-01-01', s, count=1, flags=re.M)
+s += '\n\nUSER EDIT MARKER\n'
+p.write_text(s)
+"
+  echo "# Hello (upstream change)" > "$WORK/repo/README.md"
+  echo "additional body content here" >> "$WORK/repo/README.md"
+  git -C "$WORK/repo" add -A && git -C "$WORK/repo" commit -q -m upstream
+  bash "$BATS_TEST_DIRNAME/../scripts/ingest-git.sh" "$WORK/repo" --protect-edits
+  grep -q "USER EDIT MARKER" content/sources/git-repo-readme.md
+  [ -f raw/inbox/checkpoint/.staged/git-repo-readme.md ]
+}

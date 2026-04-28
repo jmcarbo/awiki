@@ -230,6 +230,27 @@ PRIVATE_ARG=""
 for rel in "${TO_WRITE[@]}"; do
   slug="${SLUG_MAP[$rel]}"
   out="$OUT_SOURCES/${slug}.md"
+
+  # --protect-edits: redirect to staging if existing page diverged + last_updated bumped
+  if [[ -n "${PROTECT_EDITS:-}" && -f "$out" ]]; then
+    last_updated="$(awk -F': ' '/^last_updated: /{print $2; exit}' "$out" || true)"
+    last_ingested="$(python3 -c "
+import json
+try:
+    o = json.load(open('.awiki/git-state/$REPO_KEY.json'))
+    print(o.get('files', {}).get('$rel', {}).get('last_ingested', ''))
+except Exception:
+    print('')
+" || echo "")"
+    last_ingested_date="${last_ingested:0:10}"
+    if [[ -n "$last_updated" && -n "$last_ingested_date" && "$last_updated" > "$last_ingested_date" ]]; then
+      mkdir -p raw/inbox/checkpoint/.staged
+      proposal_target="raw/inbox/checkpoint/.staged/${slug}.md"
+      out="$proposal_target"
+      echo "PROTECT|$rel|→|$proposal_target"
+    fi
+  fi
+
   if printf '%s' "$SLUG_MAP_JSON" | python3 "$SCRIPT_DIR/ingest-git-transform.py" \
         --in "$CHECKOUT/$rel" --out "$out" \
         --repo-key "$REPO_KEY" --repo-name "$REPO_NAME" --repo-relpath "$rel" \

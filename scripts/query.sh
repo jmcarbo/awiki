@@ -97,6 +97,67 @@ PY
   note "MATERIALIZED|$target|rows=$rows_n"
 }
 
+_query_page_sql() {
+  python3 - "$1" <<'PY'
+import re, sys, pathlib
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"```sql\s*\n(.*?)\n```", text, re.S)
+print(m.group(1) if m else "", end="")
+PY
+}
+
+_query_page_out() {
+  python3 - "$1" <<'PY'
+import re, sys, pathlib
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"^out:\s*(\S+)", text, re.M)
+print(m.group(1) if m else "", end="")
+PY
+}
+
+cmd_render_one() {
+  local slug="${1:-}"
+  [[ -n "$slug" ]] || die "missing query slug"
+  local page="content/queries/$slug.md"
+  [[ -f "$page" ]] || die "no such query: $page"
+  local sql out
+  sql="$(_query_page_sql "$page")"
+  out="$(_query_page_out "$page")"
+  [[ -n "$sql" ]] || die "no \`\`\`sql fence in $page"
+  [[ -n "$out" ]] || die "no out: <slug> in frontmatter of $page"
+
+  # Determinism guard.
+  if ! printf '%s' "$sql" | python3 "$REPO_ROOT/scripts/lib/query-determinism.py" 2>&1; then
+    exit 6
+  fi
+
+  # Materialize via cmd_run --out --force.
+  cmd_run "$sql" --out="$out" --force
+
+  # Update sql_hash + sidecar.
+  local h; h="$(bash "$ENGINE" hash "$sql")"
+  python3 - "$page" "$h" <<'PY'
+import re, sys, pathlib
+page = pathlib.Path(sys.argv[1])
+h = sys.argv[2]
+text = page.read_text(encoding="utf-8")
+text2 = re.sub(r'^sql_hash:.*$', f'sql_hash: sha256-{h}', text, count=1, flags=re.M)
+page.write_text(text2, encoding="utf-8")
+PY
+  printf 'sha256-%s\n' "$h" > "content/queries/$slug.sql.hash"
+  note "RENDER|$slug|out=$out|hash=sha256-$h"
+}
+
+cmd_render() {
+  shopt -s nullglob
+  local rc=0
+  for page in content/queries/*.md; do
+    local slug; slug="$(basename "$page" .md)"
+    cmd_render_one "$slug" || rc=$?
+  done
+  return $rc
+}
+
 cmd_new() {
   local slug="" out=""
   while [[ $# -gt 0 ]]; do
@@ -153,6 +214,8 @@ main() {
   case "$cmd" in
     run)           cmd_run "$@" ;;
     new)           cmd_new "$@" ;;
+    render)        cmd_render "$@" ;;
+    render-one)    cmd_render_one "$@" ;;
     "")            die "usage: query.sh <run|new|render|render-one|fence-render>" ;;
     *)             die "unknown subcommand: $cmd" ;;
   esac

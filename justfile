@@ -157,6 +157,29 @@ charts-render:
 charts-render-one chart_id:
     bash scripts/chart.sh render-one {{chart_id}}
 
+# === Query layer ===
+
+# Run an ad-hoc SQL query against awiki datasets.
+# Use --out=<slug> to materialize the result as a dataset page.
+query SQL *args:
+    bash scripts/query.sh run "{{SQL}}" {{args}}
+
+# Scaffold a type:query page that materializes to a sibling dataset.
+query-new slug *args:
+    bash scripts/query.sh new {{slug}} {{args}}
+
+# Re-run every materialized query and refresh inline awiki-query fences.
+query-render:
+    bash scripts/query.sh render
+
+# Single-query regen for fast iteration.
+query-render-one slug:
+    bash scripts/query.sh render-one {{slug}}
+
+# Re-run every inline awiki-query fence in content/.
+query-fence-render:
+    bash scripts/query.sh fence-render
+
 capture *text:
     bash scripts/capture.sh -- {{text}}
 

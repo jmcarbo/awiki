@@ -72,7 +72,110 @@ EOF
   note "created $page"
 }
 
-cmd_render() { die "render not implemented yet (Task 5)"; }
+# Helper: extract every ```vega-lite``` fence body from a markdown page.
+# Emits TSV: <chart-id>\t<base64-spec> (base64 encoding preserves JSON
+# backslash escapes that printf %b would otherwise mangle).
+_extract_fences() {
+  local page="$1"
+  python3 - "$page" <<'PY'
+import sys, re, base64
+from pathlib import Path
+page = sys.argv[1]
+text = Path(page).read_text(encoding="utf-8")
+slug = Path(page).stem
+fences = list(re.finditer(r"```vega-lite\s*\n(.*?)\n```", text, re.S))
+fm_match = re.search(r"^---\s*\n(.*?)\n---\s*$", text, re.M | re.S)
+is_chart_page = fm_match and re.search(r"^type:\s*chart\s*$", fm_match.group(1), re.M)
+for idx, m in enumerate(fences):
+    cid = slug if (is_chart_page and len(fences) == 1) else f"{slug}-fig{idx}"
+    body_b64 = base64.b64encode(m.group(1).encode("utf-8")).decode("ascii")
+    print(cid + "\t" + body_b64)
+PY
+}
+
+_walk_charts() { # emit `<page>\t<chart-id>\t<spec-tmpfile>` per chart
+  local page chart_id body_b64
+  while IFS= read -r -d '' page; do
+    while IFS=$'\t' read -r chart_id body_b64; do
+      [[ -z "$chart_id" ]] && continue
+      local tmp
+      tmp="$(mktemp)"
+      printf '%s' "$body_b64" | base64 --decode > "$tmp"
+      printf '%s\t%s\t%s\n' "$page" "$chart_id" "$tmp"
+    done < <(_extract_fences "$page")
+  done < <(find content -type f -name '*.md' -print0)
+}
+
+_render_one() {
+  local page="$1" chart_id="$2" spec_tmp="$3"
+  local resolved hash existing_hash sidecar
+  sidecar="$ASSETS_DIR/$chart_id.svg"
+  resolved="$(python3 "$RESOLVE_PY" --spec="$spec_tmp" --base-url=/ --repo-root="$REPO_ROOT" --src="$page")"
+  if [[ $? -ne 0 ]]; then
+    return 2
+  fi
+  hash="$(printf '%s' "$resolved" | shasum -a 1 | awk '{print $1}')"
+  existing_hash=""
+  [[ -f "$sidecar.hash" ]] && existing_hash="$(cat "$sidecar.hash")"
+  if [[ -f "$sidecar" && "$hash" == "$existing_hash" ]]; then
+    note "skip $chart_id (hash match)"
+    return 0
+  fi
+  local resolved_tmp
+  resolved_tmp="$(mktemp)"
+  printf '%s' "$resolved" > "$resolved_tmp"
+  if vl-convert vl2svg --input "$resolved_tmp" --output "$sidecar" 2>/tmp/vlc.err; then
+    printf '%s' "$hash" > "$sidecar.hash"
+    rm -f "$sidecar.failed"
+    note "rendered $chart_id"
+  else
+    printf '%s\n' "$(cat /tmp/vlc.err)" > "$sidecar.failed"
+    note "RENDER|$chart_id|$(cat /tmp/vlc.err | head -c 200)"
+  fi
+  rm -f "$resolved_tmp"
+}
+
+cmd_render() {
+  local keep_orphans=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-orphans) keep_orphans=1; shift ;;
+      *) shift ;;
+    esac
+  done
+  if ! command -v vl-convert >/dev/null 2>&1; then
+    note "vl-convert missing — skipping sidecar render (install via cargo or pre-built release)"
+    return 0
+  fi
+  mkdir -p "$ASSETS_DIR"
+  local current_ids=()
+  local rc=0
+  while IFS=$'\t' read -r page chart_id spec_tmp; do
+    [[ -z "$chart_id" ]] && continue
+    if ! _render_one "$page" "$chart_id" "$spec_tmp"; then
+      rc=$?
+    fi
+    current_ids+=("$chart_id")
+    rm -f "$spec_tmp"
+  done < <(_walk_charts)
+
+  if [[ $keep_orphans -eq 0 ]]; then
+    while IFS= read -r -d '' f; do
+      local base
+      base="$(basename "$f")"
+      base="${base%.svg}"
+      base="${base%.hash}"
+      base="${base%.failed}"
+      local found=0
+      for id in "${current_ids[@]:-}"; do
+        [[ "$id" == "$base" ]] && { found=1; break; }
+      done
+      [[ $found -eq 0 ]] && rm -f "$f" && note "removed orphan $f"
+    done < <(find "$ASSETS_DIR" -type f \( -name '*.svg' -o -name '*.svg.hash' -o -name '*.svg.failed' \) -print0)
+  fi
+  return $rc
+}
+
 cmd_render_one() { die "render-one not implemented yet (Task 6)"; }
 
 main() {

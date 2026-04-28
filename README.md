@@ -56,6 +56,9 @@ Full architecture: see `docs/superpowers/specs/2026-04-27-llm-wiki-scaffold-desi
 | `just rename <old> <new>` | Rename a slug, updating all wikilinks. |
 | `just delete <slug>` | Remove a page, marking broken wikilinks. |
 | `just test` | Run BATS test suite. |
+| `just template-update` | Pull awiki template changes onto a review branch (dry-run by default). |
+| `just template-status` | Show current template pin, pending prompts, available updates. |
+| `just template-gc` | Prune orphaned template cache dirs. |
 | `just help` | Extended help. |
 
 ## Dependencies
@@ -209,14 +212,21 @@ After running the base smoke test:
 
 ## Pulling template updates
 
-Once your wiki is bootstrapped, you can pull awiki template updates with:
+Once your wiki is bootstrapped, you can pull awiki template updates (new scripts, MCP fixes, deploy templates, lint rules, schema changes, new bootstrap steps) without losing your per-domain content.
 
 ```bash
-just template-update          # dry-run plan
-just template-update --apply  # execute on dedicated review branch
+just template-status          # show pin + pending prompts + available updates
+just template-update          # dry-run plan (default)
+just template-update --apply  # write changes to a dedicated review branch
 ```
 
-See [docs/template-update.md](docs/template-update.md) for the full guide, trust model, and recovery flows.
+Apply lands on `awiki-template-update/<sha>` with one commit per phase (sync → migrations → bootstrap-steps → provenance). Review with `git diff main`, then `git switch main && git merge --no-ff awiki-template-update/<sha>`.
+
+After merge, check `.awiki/pending-prompts/` for any LLM-assisted migrations your agent should surface and apply (per `WIKI.md` §14). Lint warns on prompts older than 14 days.
+
+If an update goes bad, see [docs/template-update.md](docs/template-update.md) for soft-revert (`--skip-migration`) and hard re-pin (`--re-pin`) flows. Pre-v1 wikis: run `just template-retrofit` once before the first update.
+
+Full guide, trust model, flag reference: [docs/template-update.md](docs/template-update.md).
 
 ## License
 

@@ -144,7 +144,7 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 	assertLegacyOnlyNotCalled(t, runner, "synth")
 	assertLegacyOnlyCalled(t, runner, "data")
 	assertLegacyOnlyCalled(t, runner, "chart")
-	assertLegacyOnlyCalled(t, runner, "task")
+	assertLegacyOnlyNotCalled(t, runner, "task")
 	assertLegacyOnlyCalled(t, runner, "query")
 	assertLegacyOnlyNotCalled(t, runner, "")
 }
@@ -164,7 +164,7 @@ func TestRunDefaultAlternateContentDirDelegatesLegacyNamespaces(t *testing.T) {
 	assertLegacyOnlyNotCalled(t, runner, "synth")
 	assertLegacyOnlyCalled(t, runner, "data")
 	assertLegacyOnlyCalled(t, runner, "chart")
-	assertLegacyOnlyCalled(t, runner, "task")
+	assertLegacyOnlyNotCalled(t, runner, "task")
 	assertLegacyOnlyCalled(t, runner, "query")
 }
 

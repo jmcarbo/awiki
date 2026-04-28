@@ -3,6 +3,7 @@ package lint
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -57,12 +58,53 @@ func addLastUpdatedAfterDate(path, today string) (bool, error) {
 		insertAt := i + 2
 		insert := fmt.Sprintf("last_updated: %s\n", today)
 		lines = append(lines[:insertAt], append([]string{insert}, lines[insertAt:]...)...)
-		if err := os.WriteFile(path, []byte(strings.Join(lines, "")), 0o644); err != nil {
+		if err := atomicWriteFile(path, []byte(strings.Join(lines, ""))); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 	return false, nil
+}
+
+func atomicWriteFile(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	keepTemp := true
+	defer func() {
+		if keepTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return closeTempFile(tmp, err)
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		return closeTempFile(tmp, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	keepTemp = false
+	return nil
+}
+
+func closeTempFile(file *os.File, err error) error {
+	if closeErr := file.Close(); closeErr != nil && err == nil {
+		return closeErr
+	}
+	return err
 }
 
 func closingFrontmatterLine(lines []string) int {

@@ -185,6 +185,63 @@ func TestRunFixAddsLastUpdatedAfterDate(t *testing.T) {
 	assertFixContains(t, collector, "entities/source.md", "added last_updated: 2026-04-28")
 }
 
+func TestRunFixPreservesExistingFileMode(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContentWithoutField("Source", "entity", "last_updated", longBody("Source has enough body text for lint.")))
+	path := filepath.Join(contentDir, "entities", "source.md")
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	collector, code := Run(Options{ContentDir: contentDir, Fix: true, Today: "2026-04-28"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %v, want 0600", got)
+	}
+	assertFixContains(t, collector, "entities/source.md", "added last_updated: 2026-04-28")
+}
+
+func TestAtomicWriteFileReplacesContentAndCleansTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "source.md")
+	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := atomicWriteFile(path, []byte("after\n")); err != nil {
+		t.Fatalf("atomicWriteFile() error = %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(content) != "after\n" {
+		t.Fatalf("content = %q, want after", string(content))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %v, want 0600", got)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".source.md.*.tmp"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("leftover temp files = %#v, want none", matches)
+	}
+}
+
 func TestRunFixLeavesPageWithoutDateUnchanged(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/source.md", pageContentWithoutField("Source", "entity", "date", longBody("Source has enough body text for lint.")))

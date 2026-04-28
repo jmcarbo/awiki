@@ -33,11 +33,16 @@ def infer_headers(first_row: list) -> list[str]:
 
 
 def infer_type(samples: list) -> str:
-    """One of text|number|date|bool|mixed based on a column sample."""
-    if not samples:
-        return "text"
+    """One of text|number|date|bool|mixed based on a column sample.
+
+    None values are skipped so an all-None sample returns "text" rather
+    than "date" via the generic else-branch. Callers may also pre-filter,
+    but the helper is safe either way.
+    """
     seen: set[str] = set()
     for v in samples:
+        if v is None:
+            continue
         if isinstance(v, bool):
             seen.add("bool")
         elif isinstance(v, (int, float)):
@@ -48,6 +53,8 @@ def infer_type(samples: list) -> str:
             seen.add("date")
         if len(seen) > 1:
             return "mixed"
+    if not seen:
+        return "text"
     return next(iter(seen))
 
 

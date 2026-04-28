@@ -51,11 +51,24 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
 
 @test "xlsx-extract --infer-type classifies column samples" {
   run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[1,2,3]'
+  [ "$status" -eq 0 ]
   [ "$output" = "number" ]
   run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '["a","b"]'
+  [ "$status" -eq 0 ]
   [ "$output" = "text" ]
   run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[true,false]'
+  [ "$status" -eq 0 ]
   [ "$output" = "bool" ]
   run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[1,"a"]'
+  [ "$status" -eq 0 ]
   [ "$output" = "mixed" ]
+}
+
+@test "xlsx-extract --infer-type returns text for all-None and empty samples" {
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[null,null]'
+  [ "$status" -eq 0 ]
+  [ "$output" = "text" ]
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" --infer-type '[]'
+  [ "$status" -eq 0 ]
+  [ "$output" = "text" ]
 }

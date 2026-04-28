@@ -207,6 +207,29 @@ func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunHugoCheckSuccessAddsNoDiagnostics(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{codeByName: map[string]int{"hugo": 0}}
+
+	repoRoot := filepath.Dir(contentDir)
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: repoRoot, Runner: runner, HugoCheck: true})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertNoDiagnosticContains(t, collector, Error, "hugo", "template render failed")
+	assertNoDiagnosticContains(t, collector, Info, "hugo", "--hugo-check requested but hugo not on PATH")
+	want := []string{"--source", ".", "--renderToMemory", "--logLevel", "error"}
+	if runner.name != "hugo" || !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("runner call = %q %#v, want hugo %#v", runner.name, runner.args, want)
+	}
+	if runner.calls[len(runner.calls)-1].dir != repoRoot {
+		t.Fatalf("hugo dir = %q, want %q", runner.calls[len(runner.calls)-1].dir, repoRoot)
+	}
+}
+
 func TestRunHugoCheckMissingBinaryAddsInfo(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))

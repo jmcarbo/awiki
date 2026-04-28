@@ -184,7 +184,37 @@ E
   if ! command -v hugo >/dev/null 2>&1; then
     skip "hugo not installed"
   fi
-  run bash scripts/lint.sh --hugo-check content
+  CLEAN="$(mktemp -d)/content"
+  mkdir -p "$CLEAN/entities"
+  cat > "$CLEAN/entities/foo.md" <<EOF2
+---
+title: "Foo"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Foo references [[bar]] across the wiki for Hugo-check connectivity testing.
+EOF2
+  cat > "$CLEAN/entities/bar.md" <<EOF2
+---
+title: "Bar"
+date: 2026-04-27
+last_updated: 2026-04-27
+type: entity
+tags: []
+aliases: []
+sources: []
+draft: false
+---
+
+Bar references [[foo]] for Hugo-check connectivity testing coverage.
+EOF2
+  run bash scripts/lint.sh --hugo-check "$CLEAN"
   [ "$status" -eq 0 ]
   [[ "$output" != *"LINT|ERROR|hugo|"* ]]
 }

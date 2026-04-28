@@ -12,7 +12,12 @@ import sys
 
 
 def slugify(text: str) -> str:
-    """Lowercase, collapse non [a-z0-9-] to '-', strip leading/trailing '-'."""
+    """Lowercase, collapse non [a-z0-9-] to '-', strip leading/trailing '-'.
+
+    Returns '' for empty input or input containing only non-alphanumeric
+    characters (e.g. '!!!', '---', '中文'). Callers that turn the result
+    into a path or slug component must validate non-empty before use.
+    """
     s = text.lower()
     s = re.sub(r"[^a-z0-9-]+", "-", s)
     s = re.sub(r"-+", "-", s)
@@ -36,8 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    # Pre-process --slugify before argparse to handle values that start with '-'
+    # --slugify is intercepted before argparse because argparse rejects
+    # values that begin with '--' (e.g. "---abc---" -> "argument --slugify:
+    # expected one argument"). The build_parser() declaration of --slugify
+    # is kept only so it appears in --help output; the runtime never hits
+    # the argparse branch for --slugify.
     for i, arg in enumerate(argv):
+        if arg == "--":
+            break
         if arg == "--slugify" and i + 1 < len(argv):
             print(slugify(argv[i + 1]))
             return 0
@@ -46,9 +57,9 @@ def main(argv: list[str]) -> int:
             return 0
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.slugify is not None:
-        print(slugify(args.slugify))
-        return 0
+    # Future short-circuit branches (--infer-headers, --infer-type, --in,
+    # ...) are inserted here by later tasks and use `args.<name>`.
+    del args  # silences "unused" until those branches land
     parser.print_help(sys.stderr)
     return 2
 

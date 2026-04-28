@@ -305,19 +305,19 @@ Hand-edits inside the markers are flagged by lint rule Q5.
 
 | Code    | Level | Summary                                                          |
 |---------|-------|------------------------------------------------------------------|
-| `Q1`    | error | `type: query` page missing required frontmatter key.             |
-| `Q2`    | error | `out` dataset slug does not exist or is stale vs `sql_hash`.     |
-| `Q3`    | error | `sources` references a non-existent dataset slug.                |
-| `Q4`    | error | `deterministic: true` but SQL contains banned tokens.            |
-| `Q5`    | error | Hand-edit detected inside an `awiki-query` managed region.       |
-| `Q-PRIV`| warn  | Query page is `public` but reads a `private` source (stub; Stage 3 enforces floor). |
+| `Q1`    | error | Query page has no ```sql fenced block.                           |
+| `Q2`    | error | SQL `FROM`/`JOIN` references a dataset slug that does not exist. |
+| `Q3`    | error | Materialized SQL is non-deterministic or lacks outer `ORDER BY`. |
+| `Q4`    | error | Query page `.sql.hash` sidecar is stale vs current SQL.          |
+| `Q5`    | error | Inline `awiki-query` sidecar is stale or tampered.               |
+| `Q-PRIV`| warn  | Reserved privacy advisory placeholder; current linter is no-op. |
 
 Run `just lint --only=query` to execute Q1–Q5 + Q-PRIV.
 
 #### Privacy model
 
-Stage 1 (current): author declares `privacy:` in frontmatter; lint issues an
-advisory warning when a public query reads a private source (Q-PRIV stub).
+Stage 1 (current): author declares `privacy:` in frontmatter; Q-PRIV is a
+reserved no-op lint placeholder.
 Stage 3 will enforce a mandatory floor: queries that touch any private source
 are forced to `private` regardless of the declared value.
 

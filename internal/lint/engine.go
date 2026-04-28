@@ -35,6 +35,9 @@ func Run(opts Options) (Collector, int) {
 	}
 
 	if opts.Only != "" && opts.Only != "all" {
+		if ruleSet, ok := defaultRuleRegistry.lookup(opts.Only); ok {
+			return runRegisteredNamespace(ruleSet, opts)
+		}
 		if isDeferredNamespace(opts.Only) {
 			runLegacyNamespace(&c, runner, opts, opts.Only)
 			return c, c.ExitCode()
@@ -72,6 +75,31 @@ func Run(opts Options) (Collector, int) {
 	}
 	if opts.HugoCheck {
 		runHugoCheck(&c, runner, opts.RepoRoot)
+	}
+	return c, c.ExitCode()
+}
+
+func runRegisteredNamespace(ruleSet RuleSet, opts Options) (Collector, int) {
+	var c Collector
+	pages, err := wiki.DiscoverPages(opts.ContentDir)
+	if err != nil {
+		c.Add(Diagnostic{
+			Level:   Error,
+			File:    opts.ContentDir,
+			Message: err.Error(),
+		})
+		return c, 2
+	}
+	idx := wiki.BuildIndex(pages)
+	namespaceCollector, err := ruleSet.Run(context.Background(), opts, &idx)
+	c.Diagnostics = append(c.Diagnostics, namespaceCollector.Diagnostics...)
+	c.Fixes = append(c.Fixes, namespaceCollector.Fixes...)
+	if err != nil {
+		c.Add(Diagnostic{
+			Level:   Error,
+			File:    ruleSet.Name(),
+			Message: err.Error(),
+		})
 	}
 	return c, c.ExitCode()
 }

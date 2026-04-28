@@ -151,15 +151,33 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
 
 @test "xlsx-extract on injected mid-run failure leaves no partial files" {
   mkdir -p out csv
-  # AWIKI_XLSX_FORCE_FAIL_AFTER=1 must abort after writing the 1st sheet
-  # — extractor honours it for tests.
+  # AWIKI_XLSX_FORCE_FAIL_AFTER=1 raises after the 1st sheet's rename completes
+  # so the rollback path that unlinks already-renamed final files is exercised.
+  # multi-sheet-with-hidden.xlsx has 2 visible sheets (Sales, Inventory).
   run --separate-stderr env AWIKI_XLSX_FORCE_FAIL_AFTER=1 python3 \
     "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
     --in raw/inbox/batch/multi-sheet-with-hidden.xlsx \
     --out-dir out --csv-dir csv \
     --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix multi
   [ "$status" -eq 4 ]
+  [[ "$stderr" == *"XLSX-ERROR|reason=io|err=forced failure"* ]]
   # No partial md/csv files in destinations, no leftover hidden temp dirs.
   [ -z "$(ls -A out)" ]
   [ -z "$(ls -A csv)" ]
+}
+
+@test "xlsx-extract pipes/newlines in error message are escaped" {
+  # Sanity check: trigger the same rollback and assert stderr has no
+  # unescaped pipe inside the err= field that would confuse a downstream
+  # parser splitting on '|'.
+  mkdir -p out csv
+  run --separate-stderr env AWIKI_XLSX_FORCE_FAIL_AFTER=1 python3 \
+    "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/multi-sheet-with-hidden.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix multi
+  [ "$status" -eq 4 ]
+  # The error line should split into exactly three fields when cut on '|'.
+  fields=$(echo "$stderr" | grep "^XLSX-ERROR" | awk -F'|' '{print NF}')
+  [ "$fields" = "3" ]
 }

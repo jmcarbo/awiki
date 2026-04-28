@@ -238,14 +238,14 @@ def extract(args) -> int:
         })
 
     # Atomic rename phase: move staged files into final destinations.
-    # AWIKI_XLSX_FORCE_FAIL_AFTER injects a failure for atomicity testing.
-    force_fail = os.environ.get("AWIKI_XLSX_FORCE_FAIL_AFTER", "")
+    # AWIKI_XLSX_FORCE_FAIL_AFTER=N injects a failure AFTER the Nth sheet
+    # has been renamed (1-indexed) so the rollback path that unlinks
+    # already-renamed files is exercised by tests.
+    force_fail_raw = os.environ.get("AWIKI_XLSX_FORCE_FAIL_AFTER", "")
+    force_fail_after = int(force_fail_raw) if force_fail_raw.isdigit() else None
     renamed_md: list[Path] = []
     renamed_csv: list[Path] = []
     try:
-        if force_fail:
-            raise IOError("forced failure for atomicity test")
-
         for idx, s in enumerate(sheets_out):
             staged_md = Path(s["md"])
             staged_csv = Path(s["csv"])
@@ -257,10 +257,14 @@ def extract(args) -> int:
             renamed_csv.append(final_csv)
             s["md"] = str(final_md)
             s["csv"] = str(final_csv)
+            if force_fail_after is not None and idx + 1 == force_fail_after:
+                raise IOError(
+                    f"forced failure for atomicity test (after sheet {idx + 1})"
+                )
 
     except Exception as e:
-        shutil.rmtree(stage_md, ignore_errors=True)
-        shutil.rmtree(stage_csv, ignore_errors=True)
+        # Order: unlink finals first (we know exactly which paths committed),
+        # then rmtree staging (untracked but bounded by mkdtemp prefix).
         for f in renamed_md:
             try:
                 f.unlink()
@@ -271,7 +275,12 @@ def extract(args) -> int:
                 f.unlink()
             except OSError:
                 pass
-        print(f"XLSX-ERROR|reason=io|err={e}", file=sys.stderr)
+        shutil.rmtree(stage_md, ignore_errors=True)
+        shutil.rmtree(stage_csv, ignore_errors=True)
+        # Escape pipes / newlines in {e} so the XLSX-ERROR line stays
+        # parseable when split on '|'.
+        err_msg = str(e).replace("|", r"\|").replace("\n", " ")
+        print(f"XLSX-ERROR|reason=io|err={err_msg}", file=sys.stderr)
         return 4
 
     finally:

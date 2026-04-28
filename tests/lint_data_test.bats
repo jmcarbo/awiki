@@ -26,7 +26,7 @@ type: dataset
 format: csv
 rows: 0"
   run bash scripts/lint-data.sh
-  [[ "$output" == *"LINT|error|content/datasets/bad.md|D1|"* ]]
+  [[ "$output" == *"LINT|ERROR|content/datasets/bad.md|D1|"* ]]
 }
 
 @test "D1 fires when format missing" {
@@ -321,4 +321,17 @@ storage: inline
 EOF
   run bash scripts/lint.sh
   [[ "$output" == *"|D"*"|"* ]]
+}
+
+@test "lint.sh exits non-zero when D-code errors fire" {
+  cat > content/datasets/bad.md <<'EOF'
+---
+type: dataset
+format: csv
+---
+EOF
+  run bash scripts/lint.sh
+  # Errors should escalate exit code.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"|D1|"* ]]
 }

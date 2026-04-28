@@ -973,11 +973,28 @@ fi
 
 # --- Data lint dispatch -----------------------------------------------------
 if [[ "$ONLY" == "data" ]]; then
-  lint_data_all
+  data_out="$(lint_data_all)"
+  printf '%s\n' "$data_out"
+  data_errors="$(printf '%s\n' "$data_out" | grep -c '^LINT|ERROR|' || true)"
+  data_errors="${data_errors:-0}"
+  if (( data_errors > 0 )); then
+    exit 2
+  fi
   exit 0
 fi
 if [[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR/datasets" ]]; then
-  lint_data_all
+  data_out="$(lint_data_all)"
+  if [[ -n "$data_out" ]]; then
+    printf '%s\n' "$data_out"
+    while IFS= read -r dline; do
+      [[ -z "$dline" ]] && continue
+      case "$dline" in
+        LINT\|ERROR\|*) ERRORS=$((ERRORS + 1)) ;;
+        LINT\|WARN\|*)  WARNS=$((WARNS + 1)) ;;
+        LINT\|INFO\|*)  INFOS=$((INFOS + 1)) ;;
+      esac
+    done <<< "$data_out"
+  fi
 fi
 
 if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then

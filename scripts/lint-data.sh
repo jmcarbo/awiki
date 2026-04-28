@@ -24,7 +24,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 _emit() { # _emit <level> <file> <code> <msg>
-  printf 'LINT|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4"
+  local level="$1"
+  # Uppercase to match lint.sh tally pattern (LINT|ERROR|... and LINT|WARN|...).
+  level="$(printf '%s' "$level" | tr '[:lower:]' '[:upper:]')"
+  printf 'LINT|%s|%s|%s|%s\n' "$level" "$2" "$3" "$4"
 }
 
 _fence_info() { # _fence_info <page>: print info-string of the fence directly under ## Data, or empty

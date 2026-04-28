@@ -1011,7 +1011,8 @@ if [[ "$ONLY" == "chart" ]]; then
   exit 0
 fi
 if [[ "$ONLY" == "query" ]]; then
-  query_out="$(lint_query_all)"
+  query_rc=0
+  query_out="$(lint_query_all; lint_query_fences; lint_query_priv)" || query_rc=1
   printf '%s\n' "$query_out"
   query_errors="$(printf '%s\n' "$query_out" | grep -c '^LINT|ERROR|' || true)"
   query_errors="${query_errors:-0}"

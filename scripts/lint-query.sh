@@ -81,6 +81,49 @@ lint_query_all() {
   return $rc
 }
 
+lint_query_fences() {
+  # Q5 — every page with awiki-query fences must have a sidecar entry whose
+  # current hash matches. (Sidecar is pages-relative, named <page>.queries.json.)
+  python3 - <<'PY' > /tmp/q5.tsv
+import json, re, base64, pathlib
+for page in pathlib.Path("content").rglob("*.md"):
+    text = page.read_text(encoding="utf-8")
+    fences = list(re.finditer(
+        r'```sql\s+awiki-query\s+id="([a-z0-9][a-z0-9-]*)"\s*\n(.*?)\n```',
+        text, re.S))
+    if not fences:
+        continue
+    side = page.with_suffix(".queries.json")
+    entries = json.loads(side.read_text()) if side.exists() else {}
+    for m in fences:
+        fid = m.group(1)
+        sql_b64 = base64.b64encode(m.group(2).encode()).decode()
+        prev = entries.get(fid, "")
+        print(f"{page}\t{fid}\t{sql_b64}\t{prev}")
+PY
+  local rc=0
+  while IFS=$'\t' read -r page fid sql_b64 prev; do
+    [[ -z "$page" ]] && continue
+    local sql; sql="$(printf '%s' "$sql_b64" | base64 --decode)"
+    local now; now="sha256-$(bash "$ENGINE" hash "$sql")"
+    if [[ "$prev" != "$now" ]]; then
+      _emit_q error "$page" Q5 "managed region stale or tampered (id=$fid)"
+      rc=1
+    fi
+  done < /tmp/q5.tsv
+  rm -f /tmp/q5.tsv
+  return $rc
+}
+
+lint_query_priv() {
+  : # Q-PRIV stub for Stage 3. Intentionally a no-op.
+  return 0
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  lint_query_all
+  rc=0
+  lint_query_all || rc=1
+  lint_query_fences || rc=1
+  lint_query_priv || rc=1
+  exit $rc
 fi

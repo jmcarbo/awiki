@@ -98,3 +98,43 @@ PY
   run bash scripts/lint-query.sh
   [[ "$output" == *"|Q4|"* ]]
 }
+
+@test "Q5: tampered managed region flagged" {
+  mkdir -p content/concepts
+  cat > content/concepts/cf.md <<'MD'
+---
+type: concept
+---
+
+```sql awiki-query id="x"
+SELECT id FROM trades ORDER BY id
+```
+
+<!-- BEGIN query-result:x -->
+| id |
+|---|
+| 999 |
+<!-- END query-result:x -->
+MD
+  # Sidecar pretends current — but body is tampered.
+  echo '{"x": "sha256-deadbeef"}' > content/concepts/cf.queries.json
+  run bash scripts/lint-query.sh
+  [[ "$output" == *"|Q5|"* ]]
+}
+
+@test "Q-PRIV stub: never fails (stage 3 placeholder)" {
+  bash scripts/query.sh new okp --out=okp-out >/dev/null
+  python3 - <<'PY'
+import pathlib
+p = pathlib.Path("content/queries/okp.md")
+text = p.read_text().replace(
+    "SELECT 1 AS placeholder\nORDER BY 1",
+    "SELECT id FROM trades ORDER BY id",
+)
+p.write_text(text)
+PY
+  bash scripts/query.sh render-one okp >/dev/null
+  run bash scripts/lint-query.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"|Q-PRIV|"* ]]
+}

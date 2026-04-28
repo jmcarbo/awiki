@@ -11,6 +11,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def _strip_strings_and_comments(sql: str) -> str:
+    # Remove -- line comments and /* */ block comments and 'string literals'.
     sql = re.sub(r"--[^\n]*", "", sql)
     sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.S)
     sql = re.sub(r"'(?:''|[^'])*'", "''", sql)
@@ -21,6 +22,7 @@ def _cte_names(sql: str) -> set[str]:
     names: set[str] = set()
     for m in re.finditer(r"\bWITH\b(.+?)\bSELECT\b", sql, re.I | re.S):
         block = m.group(1)
+        # Each CTE is `name AS ( ... )`; comma-separated at depth 0.
         for cte in re.finditer(r"([a-zA-Z_][\w]*)\s+AS\s*\(", block, re.I):
             names.add(cte.group(1).lower())
     return names

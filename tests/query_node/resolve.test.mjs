@@ -56,5 +56,6 @@ test("multiple statements", () => {
 });
 
 test("ATTACH rejected as ref (caller will handle separately)", () => {
+  // Resolver only reports table refs; ATTACH detection is a separate pass.
   assert.deepEqual(refs("SELECT * FROM trades"), ["trades"]);
 });

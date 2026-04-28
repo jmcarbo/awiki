@@ -160,8 +160,9 @@ Rules to port:
 - S4 citation-in-scope validation.
 - S5 scope drift warnings, with query-scoped pages exempt.
 - S6 generated-region hand-edit warnings.
-- S7/S8 feedback and marker-adjacent safety rules already enforced by the
-  current synth lint surface.
+- S7 feedback-count metric, including warning when the count exceeds the
+  documented threshold.
+- S8 feedback-scope validation for wikilinks in `## Feedback` bullets.
 - S9 aggregate evidence word cap.
 
 The current helper behavior should become Go-owned, including Unicode NFC
@@ -204,14 +205,17 @@ Go implementation.
 Purpose: move task layer T1-T15 diagnostics into Go without changing task
 workflow behavior.
 
-The first task-lint port should consume existing task map artifacts instead of
-porting the full action scanner in the same slice:
+The task-lint port must not trust stale shell-generated task maps as its only
+source of truth. Lint should build the action index it needs from current page
+content in Go, then compare or write map artifacts only where compatibility
+requires them:
 
 - `.awiki/maps/actions.tsv`
 - `.awiki/maps/actions-rejected.tsv`
 
-That keeps action capture, recurrence, agenda generation, and scanner grammar
-out of scope while still removing task lint from `scripts/lint.sh`.
+This means the lint slice includes the action grammar parser needed for T-rule
+evaluation, but still keeps action capture, recurrence emission, agenda
+generation, and standalone `action-scan.sh` command migration out of scope.
 
 Rules to port:
 
@@ -223,6 +227,9 @@ Rules to port:
 - Agenda action consistency.
 - Review-date and stale-date warnings.
 - Continuation-line and chained-action edge cases.
+- Map freshness: if compatibility maps are present and disagree with the
+  current in-memory scan, lint must refresh them under `--fix` or emit a clear
+  diagnostic instead of silently using stale data.
 
 Go should own date parsing and comparisons. The port must not depend on BSD or
 GNU `date` behavior.
@@ -324,6 +331,21 @@ DuckDB execution, qmd indexing, and any full query-engine run remain external.
 If a lint rule genuinely needs to execute SQL, it must do so through an
 explicit adapter with bounded input and clear failure diagnostics.
 
+Before porting query lint, reconcile the current source-of-truth mismatch:
+`WIKI.md` describes Q1-Q5 as frontmatter, output freshness, source existence,
+determinism, and managed-region checks, while the current shell linter and Bats
+tests use Q1 for SQL-fence presence, Q2 for unknown referenced datasets, Q3 for
+determinism, Q4 for sidecar staleness, and Q5 for managed-region tamper checks.
+The implementation plan must choose one contract, update the other docs/tests in
+the same slice, and preserve compatibility messages where existing tests depend
+on them.
+
+Q-PRIV also needs an explicit stage decision. Current behavior is a no-op stub;
+the WIKI describes an advisory warning today and mandatory privacy floor later.
+This Go lint slice should implement the documented advisory warning only if the
+tests and WIKI are updated together. It must not silently turn Q-PRIV into a
+hard error in the lint port.
+
 Gate:
 
 ```sh
@@ -331,7 +353,7 @@ go test ./...
 bats tests/lint_query_test.bats
 bats tests/query_cli_test.bats
 bats tests/query_engine_test.bats
-bats tests/query_node/determinism.test.mjs
+node --test tests/query_node/*.test.mjs
 ```
 
 ## Migration Sequence
@@ -373,8 +395,10 @@ Lint should fail closed for schema and privacy risks:
 
 - Private-source declassification remains an error unless the documented
   workflow explicitly allows it.
-- Query/chart pages that expose private data outside private paths emit
-  namespace privacy diagnostics.
+- Query/chart pages that expose private data outside private paths emit the
+  namespace privacy diagnostics required by the current documented stage:
+  chart privacy remains blocking, query privacy remains advisory until the
+  Stage 3 privacy floor is implemented.
 - Malformed frontmatter, broken generated markers, invalid manifests, invalid
   JSON, invalid SQL fences, and unreadable referenced files emit diagnostics
   rather than panicking or aborting the whole run.

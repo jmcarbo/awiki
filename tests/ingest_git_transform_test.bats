@@ -27,3 +27,53 @@ teardown() {
   ! grep -q "^foo: bar" out.md
   grep -q "Upstream Title" out.md
 }
+
+@test "transform: rewrites relative md link to wikilink" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  cp "$BATS_TEST_DIRNAME/fixtures/git-docs-good/seed/docs/intro.md" upstream.md
+  printf '%s' '{"docs/foo.md":"git-x-docs-foo","README.md":"git-x-readme"}' \
+    | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath docs/intro.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x"
+  grep -q "\[\[git-x-docs-foo|foo\]\]" out.md
+  grep -q "\[\[git-x-readme|README\]\]" out.md
+}
+
+@test "transform: does not rewrite inside fenced code" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  cp "$BATS_TEST_DIRNAME/fixtures/git-docs-good/seed/docs/intro.md" upstream.md
+  printf '%s' '{"docs/foo.md":"git-x-docs-foo","docs/not-rewritten.md":"git-x-docs-not-rewritten"}' \
+    | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath docs/intro.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x"
+  ! grep -q "git-x-docs-not-rewritten" out.md
+  grep -q "fake" out.md
+}
+
+@test "transform: rewrites reference-style links" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  cp "$BATS_TEST_DIRNAME/fixtures/git-docs-good/seed/docs/intro.md" upstream.md
+  printf '%s' '{"docs/foo.md":"git-x-docs-foo"}' \
+    | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath docs/intro.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x"
+  grep -q "git-x-docs-foo" out.md
+}
+
+@test "transform: leaves link plain when target slug not in map" {
+  if ! python3 -c "import markdown_it" >/dev/null 2>&1; then skip "markdown-it-py not installed"; fi
+  cp "$BATS_TEST_DIRNAME/fixtures/git-docs-good/seed/docs/intro.md" upstream.md
+  echo '{}' \
+    | python3 "$BATS_TEST_DIRNAME/../scripts/ingest-git-transform.py" \
+    --in upstream.md --out out.md \
+    --repo-key local-x --repo-name x --repo-relpath docs/intro.md \
+    --git-url file:///x --git-blob-sha abc \
+    --asset-out-dir "$WORK/_assets/git-x"
+  grep -q "\[foo\](./foo.md)" out.md
+}

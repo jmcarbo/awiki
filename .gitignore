@@ -32,6 +32,8 @@ secrets/**
 .DS_Store
 *.swp
 *.swo
+__pycache__/
+*.pyc
 
 # === phase 13: synthesis ===
 content/synthesis/.staged/*

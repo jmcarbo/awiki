@@ -10,3 +10,6 @@
 *.sh text eol=lf
 *.toml text eol=lf
 *.md text eol=lf
+
+content/inbox.md filter=git-crypt diff=git-crypt
+content/agenda/** filter=git-crypt diff=git-crypt

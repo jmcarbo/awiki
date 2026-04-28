@@ -976,7 +976,9 @@ if [[ "$ONLY" == "data" ]]; then
   lint_data_all
   exit 0
 fi
-[[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR/datasets" ]] && lint_data_all || true
+if [[ -z "$ONLY" || "$ONLY" = "all" ]] && [[ -d "$CONTENT_DIR/datasets" ]]; then
+  lint_data_all
+fi
 
 if [[ "${HUGO_CHECK:-0}" -eq 1 ]]; then
   if command -v hugo >/dev/null 2>&1; then

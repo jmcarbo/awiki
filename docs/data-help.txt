@@ -56,3 +56,17 @@ Without a plugin, the managed-region SVG sidecar shows in reading view.
 Suppress sidecar injection: AWIKI_CHART_OBSIDIAN_PREVIEW=off in .awiki/config.
 
 MCP tool: list_charts() -> { charts, errors }
+
+=== query layer ===
+
+QUERY LAYER
+  just query "<SQL>"                    Run an ad-hoc SQL query against datasets.
+  just query "<SQL>" --out=<slug>       Materialize the result as a dataset page.
+  just query-new <slug> --out=<dst>     Scaffold a type:query page that materializes
+                                        to <dst>.
+  just query-render-one <slug>          Re-render one type:query page.
+  just query-render                     Re-render every type:query page.
+  just query-fence-render               Re-run every inline awiki-query fence.
+
+LINT
+  just lint --only=query                Run Q1..Q5 + Q-PRIV stub.

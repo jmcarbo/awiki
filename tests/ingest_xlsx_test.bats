@@ -148,3 +148,18 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
     --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix bad
   [ "$status" -eq 3 ]
 }
+
+@test "xlsx-extract on injected mid-run failure leaves no partial files" {
+  mkdir -p out csv
+  # AWIKI_XLSX_FORCE_FAIL_AFTER=1 must abort after writing the 1st sheet
+  # — extractor honours it for tests.
+  run --separate-stderr env AWIKI_XLSX_FORCE_FAIL_AFTER=1 python3 \
+    "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/multi-sheet-with-hidden.xlsx \
+    --out-dir out --csv-dir csv \
+    --csv-rel rel --original-rel rel/orig.xlsx --slug-prefix multi
+  [ "$status" -eq 4 ]
+  # No partial md/csv files in destinations, no leftover hidden temp dirs.
+  [ -z "$(ls -A out)" ]
+  [ -z "$(ls -A csv)" ]
+}

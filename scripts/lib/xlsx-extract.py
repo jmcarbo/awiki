@@ -10,9 +10,11 @@ import argparse
 import csv
 import json
 import math
-import os  # noqa: F401  # used in Task 7 (atomicity: os.replace, os.environ)
+import os
 import re
+import shutil
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -160,6 +162,10 @@ def extract(args) -> int:
     sheets_out: list[dict] = []
     taken: set[str] = set()
 
+    # Create staging dirs under each destination so os.replace is same-filesystem.
+    stage_md = Path(tempfile.mkdtemp(prefix=".xlsx-extract-", dir=str(out_dir)))
+    stage_csv = Path(tempfile.mkdtemp(prefix=".xlsx-extract-", dir=str(csv_dir)))
+
     # Visibility lives on wb.sheets_metadata, NOT on CalamineSheet itself.
     # Filter Hidden + VeryHidden the same way (anything not Visible is skipped).
     for meta in wb.sheets_metadata:
@@ -183,7 +189,7 @@ def extract(args) -> int:
         if sheet_slug != sheet_slug_raw:
             print(f"XLSX-DUP|slug={sheet_slug_raw}|resolved={sheet_slug}", file=sys.stderr)
 
-        csv_path = csv_dir / f"{sheet_slug}.csv"
+        csv_path = stage_csv / f"{sheet_slug}.csv"
         with csv_path.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
@@ -219,7 +225,7 @@ def extract(args) -> int:
         for h, t in zip(headers, col_types):
             body += f"- `{h}` — {t}\n"
         body += "\n## Notes\n\n"
-        md_path = out_dir / f"{sheet_slug}.md"
+        md_path = stage_md / f"{sheet_slug}.md"
         md_path.write_text(fm + body, encoding="utf-8")
 
         sheets_out.append({
@@ -230,6 +236,47 @@ def extract(args) -> int:
             "csv": str(csv_path),
             "md": str(md_path),
         })
+
+    # Atomic rename phase: move staged files into final destinations.
+    # AWIKI_XLSX_FORCE_FAIL_AFTER injects a failure for atomicity testing.
+    force_fail = os.environ.get("AWIKI_XLSX_FORCE_FAIL_AFTER", "")
+    renamed_md: list[Path] = []
+    renamed_csv: list[Path] = []
+    try:
+        if force_fail:
+            raise IOError("forced failure for atomicity test")
+
+        for idx, s in enumerate(sheets_out):
+            staged_md = Path(s["md"])
+            staged_csv = Path(s["csv"])
+            final_md = out_dir / staged_md.name
+            final_csv = csv_dir / staged_csv.name
+            os.replace(staged_md, final_md)
+            renamed_md.append(final_md)
+            os.replace(staged_csv, final_csv)
+            renamed_csv.append(final_csv)
+            s["md"] = str(final_md)
+            s["csv"] = str(final_csv)
+
+    except Exception as e:
+        shutil.rmtree(stage_md, ignore_errors=True)
+        shutil.rmtree(stage_csv, ignore_errors=True)
+        for f in renamed_md:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        for f in renamed_csv:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        print(f"XLSX-ERROR|reason=io|err={e}", file=sys.stderr)
+        return 4
+
+    finally:
+        shutil.rmtree(stage_md, ignore_errors=True)
+        shutil.rmtree(stage_csv, ignore_errors=True)
 
     manifest = {"workbook_slug": args.slug_prefix, "sheets": sheets_out}
     print(json.dumps(manifest))

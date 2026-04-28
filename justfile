@@ -4,8 +4,19 @@ default:
     @just --list
 
 # === ingest ===
+# Bookkeeping only: moves the source, logs, lints, reindexes. Prints
+# `AGENT-PROMPT|...` for the agent (or human) to drive steps 3-9 of the
+# WIKI.md §4.1 ingest workflow (read source, write summary, update
+# entity/concept pages, update catalog).
 ingest path:
     bash scripts/ingest.sh {{path}}
+
+# Same, plus shells the emitted prompt to an agent CLI for non-
+# interactive `batch` queue processing. Skips invocation for interactive/
+# checkpoint queues (human-in-the-loop). Default CLI: claude. Override
+# via AWIKI_AGENT in .awiki/config or pass explicitly.
+ingest-with-agent path agent="claude":
+    bash scripts/ingest.sh --agent {{agent}} {{path}}
 
 ingest-batch-list:
     @find raw/inbox/batch -type f | sort

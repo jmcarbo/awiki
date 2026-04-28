@@ -48,3 +48,19 @@ teardown() {
   run bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh"
   [ "$status" -eq 1 ]
 }
+
+@test "ingest emits paste-ready AGENT-PROMPT line" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh" raw/inbox/interactive/sample.md
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AGENT-PROMPT|"* ]]
+  [[ "$output" == *"raw/processed/interactive/sample.md"* ]]
+  [[ "$output" == *"WIKI.md §4.1"* ]]
+}
+
+@test "ingest --agent skips on interactive queue (human-in-the-loop)" {
+  run bash "$BATS_TEST_DIRNAME/../scripts/ingest.sh" --agent claude raw/inbox/interactive/sample.md
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AGENT-PROMPT|"* ]]
+  # Should NOT have invoked claude on interactive queue.
+  [[ "$output" != *"AGENT-INVOKE"* ]]
+}

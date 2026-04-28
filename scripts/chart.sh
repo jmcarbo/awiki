@@ -106,6 +106,64 @@ _walk_charts() { # emit `<page>\t<chart-id>\t<spec-tmpfile>` per chart
   done < <(find content -type f -name '*.md' -print0)
 }
 
+_obsidian_preview_enabled() {
+  local cfg="$REPO_ROOT/.awiki/config"
+  if [[ -f "$cfg" ]] && grep -q '^AWIKI_CHART_OBSIDIAN_PREVIEW=off' "$cfg"; then
+    return 1
+  fi
+  return 0
+}
+
+_inject_preview() {
+  local page="$1" chart_id="$2"
+  python3 - "$page" "$chart_id" "$ASSETS_DIR" "$REPO_ROOT" <<'PY'
+import re, sys, os
+page, cid, assets_dir, repo_root = sys.argv[1:5]
+text = open(page).read()
+begin = f"<!-- BEGIN chart-preview:{cid} -->"
+end = f"<!-- END chart-preview:{cid} -->"
+
+# Pick body (or empty if AWIKI_CHART_OBSIDIAN_PREVIEW=off).
+preview_on = True
+cfg = os.path.join(repo_root, ".awiki", "config")
+if os.path.exists(cfg):
+    with open(cfg) as f:
+        if any(line.strip() == "AWIKI_CHART_OBSIDIAN_PREVIEW=off" for line in f):
+            preview_on = False
+
+if preview_on:
+    # Path relative to the markdown file's directory.
+    page_dir = os.path.dirname(os.path.relpath(page, repo_root))
+    abs_sidecar = os.path.join(assets_dir, f"{cid}.svg")
+    rel = os.path.relpath(abs_sidecar, os.path.join(repo_root, page_dir))
+    body = f"![{cid}]({rel})"
+else:
+    body = ""
+
+block = f"{begin}\n{body}\n{end}"
+
+if begin in text:
+    new = re.sub(re.escape(begin) + r"\n.*?\n" + re.escape(end), block, text, count=1, flags=re.S)
+else:
+    # Insert after the closing fence of THIS chart-id (need to find which).
+    # We find the Nth ```vega-lite``` fence where N matches the chart-id suffix.
+    # For chart pages, the fence is unique on page.
+    if "-fig" in cid and cid.rsplit("-fig", 1)[1].isdigit():
+        idx = int(cid.rsplit("-fig", 1)[1])
+    else:
+        idx = 0
+    pattern = re.compile(r"(```vega-lite\s*\n.*?\n```)", re.S)
+    matches = list(pattern.finditer(text))
+    if idx >= len(matches):
+        new = text  # nothing to anchor to
+    else:
+        m = matches[idx]
+        insert_at = m.end()
+        new = text[:insert_at] + "\n\n" + block + text[insert_at:]
+open(page, "w").write(new)
+PY
+}
+
 _render_one() {
   local page="$1" chart_id="$2" spec_tmp="$3"
   local resolved hash existing_hash sidecar
@@ -127,6 +185,7 @@ _render_one() {
   if vl-convert vl2svg --input "$resolved_tmp" --output "$sidecar" 2>/tmp/vlc.err; then
     printf '%s' "$hash" > "$sidecar.hash"
     rm -f "$sidecar.failed"
+    _inject_preview "$page" "$chart_id"
     note "rendered $chart_id"
   else
     printf '%s\n' "$(cat /tmp/vlc.err)" > "$sidecar.failed"
@@ -172,6 +231,22 @@ cmd_render() {
       done
       [[ $found -eq 0 ]] && rm -f "$f" && note "removed orphan $f"
     done < <(find "$ASSETS_DIR" -type f \( -name '*.svg' -o -name '*.svg.hash' -o -name '*.svg.failed' \) -print0)
+
+    # Remove orphan managed regions inside content pages.
+    while IFS= read -r -d '' page; do
+      python3 - "$page" "${current_ids[@]:-_NONE_}" <<'PY'
+import re, sys, os
+page = sys.argv[1]
+ids = set(sys.argv[2:])
+text = open(page).read()
+def _keep(m):
+    cid = m.group(1)
+    if cid in ids: return m.group(0)
+    return ""
+new = re.sub(r"<!-- BEGIN chart-preview:([a-z0-9][a-z0-9-]*) -->\n.*?\n<!-- END chart-preview:\1 -->", _keep, text, flags=re.S)
+if new != text: open(page, "w").write(new)
+PY
+    done < <(find content -type f -name '*.md' -print0)
   fi
   return $rc
 }

@@ -13,6 +13,8 @@ import { scanInbox } from "./lib/triage-inbox-scan.js";
 import { triageApply } from "./lib/triage-apply.js";
 import { PathGuardError } from "./lib/path-guard.js";
 import { loadActionsTsv, applyFilter, isTsvStale } from "./lib/list-actions.js";
+import { listDatasets } from "./lib/list-datasets.js";
+import { getDataset } from "./lib/get-dataset.js";
 
 const FILTER_SCHEMA = {
   type: "object",
@@ -150,6 +152,21 @@ const TOOLS = [
     name: "mark_review_done",
     description: "Stamp .awiki/last-review with the current ISO timestamp and append a one-line summary to content/agenda/review-log.md. Runs under flock -x. Returns {last_review, log_line}.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "list_datasets",
+    description: "Enumerate all `type: dataset` pages.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_dataset",
+    description: "Return frontmatter + sample rows + total count for one dataset.",
+    inputSchema: {
+      type: "object",
+      properties: { slug: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" } },
+      required: ["slug"],
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -457,6 +474,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         ];
         out = JSON.stringify({ rebuilt, duration_ms });
         break;
+      }
+      case "list_datasets": {
+        const result = listDatasets(REPO_ROOT);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+      case "get_dataset": {
+        const slug = req.params.arguments?.slug;
+        if (typeof slug !== "string") {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "missing_slug" }) }] };
+        }
+        const result = getDataset(REPO_ROOT, slug);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
       default:
         throw new Error(`unknown tool: ${name}`);

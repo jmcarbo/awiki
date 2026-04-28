@@ -72,3 +72,28 @@ teardown() { cd - >/dev/null; rm -rf "$WORK"; }
   [ "$status" -eq 0 ]
   [ "$output" = "text" ]
 }
+
+@test "xlsx-extract single-sheet writes csv + md with frontmatter and preview table" {
+  mkdir -p out csv
+  run python3 "$BATS_TEST_DIRNAME/../scripts/lib/xlsx-extract.py" \
+    --in raw/inbox/batch/single-sheet.xlsx \
+    --out-dir out \
+    --csv-dir csv \
+    --csv-rel raw/processed/_originals/single-sheet \
+    --original-rel raw/processed/_originals/single-sheet/single-sheet.xlsx \
+    --slug-prefix single-sheet \
+    --preview-rows 10
+  [ "$status" -eq 0 ]
+  [ -f out/single-sheet--sales.md ]
+  [ -f csv/single-sheet--sales.csv ]
+  # Frontmatter has rows_total=3
+  grep -E '^rows_total: 3$' out/single-sheet--sales.md
+  # Frontmatter has csv path written verbatim from --csv-rel
+  grep -F 'csv: raw/processed/_originals/single-sheet/single-sheet--sales.csv' out/single-sheet--sales.md
+  # Frontmatter columns list preserves original strings
+  grep -E '^columns: \["region", "amount", "date"\]$' out/single-sheet--sales.md
+  # CSV body has the data row
+  grep -F 'EMEA,100,2026-01-01' csv/single-sheet--sales.csv
+  # Manifest emitted on stdout (single line of JSON)
+  echo "$output" | python3 -c "import sys,json; m=json.load(sys.stdin); assert m['workbook_slug']=='single-sheet'; assert len(m['sheets'])==1; assert m['sheets'][0]['rows_total']==3"
+}

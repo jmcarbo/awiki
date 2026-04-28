@@ -7,9 +7,13 @@ beyond what the bash wrapper passes in.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import os
 import re
 import sys
+from datetime import date
+from pathlib import Path
 
 
 def slugify(text: str) -> str:
@@ -58,6 +62,169 @@ def infer_type(samples: list) -> str:
     return next(iter(seen))
 
 
+def _stringify_cell(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    return str(v)
+
+
+def _md_table(headers: list[str], rows: list[list]) -> str:
+    if not rows:
+        return "(empty)\n"
+    sep = "| " + " | ".join(headers) + " |\n"
+    sep += "|" + "|".join("---" for _ in headers) + "|\n"
+    for r in rows:
+        cells = [_stringify_cell(c).replace("|", r"\|").replace("\n", " ") for c in r]
+        sep += "| " + " | ".join(cells) + " |\n"
+    return sep
+
+
+def _frontmatter(
+    *, title: str, today: str, workbook: str, sheet_name: str,
+    rows_total: int, rows_preview: int, columns: list[str],
+    csv_rel: str, original_rel: str,
+) -> str:
+    cols_json = json.dumps(columns)
+    return (
+        "---\n"
+        f"title: \"{title}\"\n"
+        f"date: {today}\n"
+        f"last_updated: {today}\n"
+        "type: source\n"
+        "tags: [xlsx]\n"
+        "aliases: []\n"
+        "sources: []\n"
+        f"workbook: {workbook}\n"
+        f"sheet: \"{sheet_name}\"\n"
+        f"rows_total: {rows_total}\n"
+        f"rows_preview: {rows_preview}\n"
+        f"columns: {cols_json}\n"
+        f"csv: {csv_rel}\n"
+        f"original: {original_rel}\n"
+        "draft: false\n"
+        "---\n\n"
+    )
+
+
+def _resolve_collision(slug: str, taken: set[str]) -> str:
+    if slug not in taken:
+        taken.add(slug)
+        return slug
+    i = 2
+    while f"{slug}-{i}" in taken:
+        i += 1
+    resolved = f"{slug}-{i}"
+    taken.add(resolved)
+    return resolved
+
+
+def _iter_sheet_rows(sheet) -> list[list]:
+    """Return rows as list-of-lists, trimming trailing all-empty rows."""
+    rows = sheet.to_python()
+    while rows and all(c is None or (isinstance(c, str) and not c.strip()) for c in rows[-1]):
+        rows.pop()
+    return rows
+
+
+def extract(args) -> int:
+    # imported lazily so --help works without dep
+    from python_calamine import CalamineWorkbook, SheetVisibleEnum
+    in_path = Path(args.in_path)
+    out_dir = Path(args.out_dir)
+    csv_dir = Path(args.csv_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        wb = CalamineWorkbook.from_path(str(in_path))
+    except Exception as e:  # parse error
+        print(f"XLSX-ERROR|reason=parse|file={in_path}|err={e}", file=sys.stderr)
+        return 3
+
+    today = date.today().isoformat()
+    sheets_out: list[dict] = []
+    taken: set[str] = set()
+
+    # Visibility lives on wb.sheets_metadata, NOT on CalamineSheet itself.
+    # Filter Hidden + VeryHidden the same way (anything not Visible is skipped).
+    for meta in wb.sheets_metadata:
+        sheet_name = meta.name
+        if meta.visible != SheetVisibleEnum.Visible:
+            print(f"XLSX-SKIP|sheet={sheet_name}|reason=hidden", file=sys.stderr)
+            continue
+        sheet = wb.get_sheet_by_name(sheet_name)
+        rows = _iter_sheet_rows(sheet)
+        if not rows:
+            print(f"XLSX-SKIP|sheet={sheet_name}|reason=empty", file=sys.stderr)
+            continue
+
+        headers = infer_headers(rows[0])
+        original_first_row_was_headers = headers == [str(c) for c in rows[0]]
+        data_rows = rows[1:] if original_first_row_was_headers else rows
+        rows_total = len(data_rows)
+
+        sheet_slug_raw = f"{args.slug_prefix}--{slugify(sheet_name)}"
+        sheet_slug = _resolve_collision(sheet_slug_raw, taken)
+        if sheet_slug != sheet_slug_raw:
+            print(f"XLSX-DUP|slug={sheet_slug_raw}|resolved={sheet_slug}", file=sys.stderr)
+
+        csv_path = csv_dir / f"{sheet_slug}.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for r in data_rows:
+                writer.writerow([_stringify_cell(c) for c in r])
+
+        preview_rows = data_rows[: args.preview_rows]
+        rows_preview = len(preview_rows)
+
+        # Per-column type inference, sampling first 50 non-null cells.
+        col_types: list[str] = []
+        for ci in range(len(headers)):
+            sample = []
+            for r in data_rows[:50]:
+                if ci < len(r) and r[ci] is not None and r[ci] != "":
+                    sample.append(r[ci])
+            col_types.append(infer_type(sample))
+
+        csv_rel = f"{args.csv_rel.rstrip('/')}/{sheet_slug}.csv"
+        fm = _frontmatter(
+            title=f"{args.slug_prefix} — {sheet_name}",
+            today=today,
+            workbook=in_path.name,
+            sheet_name=sheet_name,
+            rows_total=rows_total,
+            rows_preview=rows_preview,
+            columns=headers,
+            csv_rel=csv_rel,
+            original_rel=args.original_rel,
+        )
+        body = "## Preview\n\n" + _md_table(headers, preview_rows) + "\n"
+        body += "## Schema\n\n"
+        for h, t in zip(headers, col_types):
+            body += f"- `{h}` — {t}\n"
+        body += "\n## Notes\n\n"
+        md_path = out_dir / f"{sheet_slug}.md"
+        md_path.write_text(fm + body, encoding="utf-8")
+
+        sheets_out.append({
+            "name": sheet_name,
+            "slug": sheet_slug,
+            "rows_total": rows_total,
+            "rows_preview": rows_preview,
+            "csv": str(csv_path),
+            "md": str(md_path),
+        })
+
+    manifest = {"workbook_slug": args.slug_prefix, "sheets": sheets_out}
+    print(json.dumps(manifest))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="xlsx-extract",
@@ -93,6 +260,8 @@ def main(argv: list[str]) -> int:
             return 0
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.in_path:
+        return extract(args)
     if args.infer_headers is not None:
         print(json.dumps(infer_headers(json.loads(args.infer_headers))))
         return 0

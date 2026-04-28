@@ -124,6 +124,48 @@ PY
     if [[ ! -f "$sidecar" ]]; then
       _emit_c warn "$rel" C7 "sidecar missing for $chart_id (run charts-render)"
     fi
+    # C-PRIV — non-private page referencing a tagged-private dataset.
+    python3 - "$tmp" "$REPO_ROOT" "$page" "$rel" "$chart_id" <<'PY' || true
+import json, re, sys, os
+spec_path, repo_root, page, rel, cid = sys.argv[1:6]
+spec = json.load(open(spec_path))
+
+def collect_names(node, out):
+    if isinstance(node, dict):
+        d = node.get("data")
+        if isinstance(d, dict) and isinstance(d.get("name"), str):
+            m = re.match(r"^\[\[([a-z0-9][a-z0-9-]*)\]\]$", d["name"])
+            if m: out.append(m.group(1))
+        for v in node.values():
+            collect_names(v, out)
+    if isinstance(node, list):
+        for v in node: collect_names(v, out)
+names = []
+collect_names(spec, names)
+if not names: sys.exit(0)
+
+# Is the host page private?
+def is_private(text):
+    fm = re.search(r"^---\s*\n(.*?)\n---\s*$", text, re.M | re.S)
+    if not fm: return False
+    return bool(re.search(r"^tags:\s*\[.*\bprivate\b.*\]", fm.group(1), re.M))
+
+host_text = open(page).read()
+host_private = is_private(host_text) or "/private/" in page
+
+for slug in names:
+    # Find the dataset page (private/ subdir or root datasets/).
+    candidates = [
+        os.path.join(repo_root, "content", "datasets", f"{slug}.md"),
+        os.path.join(repo_root, "content", "datasets", "private", f"{slug}.md"),
+    ]
+    ds_path = next((c for c in candidates if os.path.exists(c)), None)
+    if not ds_path: continue
+    ds_text = open(ds_path).read()
+    if is_private(ds_text) or "/private/" in ds_path:
+        if not host_private:
+            print(f"LINT|error|{rel}|C-PRIV|chart references private dataset [[{slug}]] from non-private page (chart={cid})")
+PY
     rm -f "$tmp"
   done < <(_extract_fences_for_lint "$page")
 }

@@ -308,3 +308,64 @@ EOF
   run bash scripts/lint-chart.sh
   [[ "$output" == *"|C9|"* ]]
 }
+
+@test "C-PRIV blocks non-private chart referencing private dataset" {
+  mkdir -p content/datasets/private
+  cat > content/datasets/private/secret.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+tags: [private]
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/concepts/p.md <<'EOF'
+---
+type: concept
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[secret]]"},"encoding":{"x":{"field":"a"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" == *"|C-PRIV|"* ]]
+}
+
+@test "C-PRIV quiet when both sides private" {
+  mkdir -p content/datasets/private content/private
+  cat > content/datasets/private/secret.md <<'EOF'
+---
+type: dataset
+storage: inline
+format: csv
+rows: 0
+tags: [private]
+---
+
+## Data
+
+```csv
+a
+```
+EOF
+  cat > content/private/p.md <<'EOF'
+---
+type: concept
+tags: [private]
+---
+
+```vega-lite
+{"mark":"bar","data":{"name":"[[secret]]"},"encoding":{"x":{"field":"a"}}}
+```
+EOF
+  run bash scripts/lint-chart.sh
+  [[ "$output" != *"|C-PRIV|"* ]]
+}

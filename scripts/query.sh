@@ -97,11 +97,62 @@ PY
   note "MATERIALIZED|$target|rows=$rows_n"
 }
 
+cmd_new() {
+  local slug="" out=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --out=*) out="${1#--out=}" ;;
+      --) shift; break ;;
+      -*) die "unknown flag: $1" ;;
+      *) slug="$1" ;;
+    esac
+    shift
+  done
+  local SLUG_RE='^[a-z0-9][a-z0-9-]*$'
+  [[ -n "$slug" ]] || die "missing <slug>"
+  [[ "$slug" =~ $SLUG_RE ]] || die "invalid slug: $slug"
+  [[ -n "$out" ]]  || die "--out=<dataset-slug> required"
+  [[ "$out" =~ $SLUG_RE ]] || die "invalid out slug: $out"
+  local page="content/queries/$slug.md"
+  [[ ! -e "$page" ]] || die "$page already exists"
+  mkdir -p content/queries
+  local today; today="$(date '+%Y-%m-%d')"
+  cat > "$page" <<EOF
+---
+title: "$slug"
+date: $today
+last_updated: $today
+type: query
+sources: []
+out: $out
+privacy: internal
+deterministic: true
+sql_hash: ""
+draft: false
+---
+
+# $slug
+
+<!-- describe what this query answers -->
+
+## SQL
+
+\`\`\`sql
+SELECT 1 AS placeholder
+ORDER BY 1
+\`\`\`
+
+## Notes
+EOF
+  note "NEW|$page"
+}
+
 main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
     run)           cmd_run "$@" ;;
+    new)           cmd_new "$@" ;;
     "")            die "usage: query.sh <run|new|render|render-one|fence-render>" ;;
     *)             die "unknown subcommand: $cmd" ;;
   esac

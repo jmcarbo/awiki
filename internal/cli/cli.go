@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"awiki/internal/lint"
 )
@@ -69,7 +71,20 @@ func parseLintOptions(args []string, stderr io.Writer) (lint.Options, error) {
 	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
 	}
+	opts.RepoRoot = inferLintRepoRoot(opts.ContentDir, opts.RepoRoot)
 	return opts, nil
+}
+
+func inferLintRepoRoot(contentDir string, fallback string) string {
+	cleanContent := filepath.Clean(contentDir)
+	if filepath.Base(cleanContent) != "content" {
+		return fallback
+	}
+	parent := filepath.Dir(cleanContent)
+	if _, err := os.Stat(filepath.Join(parent, "scripts", "lint.sh")); err != nil {
+		return fallback
+	}
+	return parent
 }
 
 func isLintStringFlag(arg string) bool {

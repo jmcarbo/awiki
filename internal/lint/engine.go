@@ -2,6 +2,8 @@ package lint
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"awiki/internal/adapters"
@@ -16,16 +18,21 @@ func Run(opts Options) (Collector, int) {
 	}
 
 	if opts.AliasBuildOnly {
-		output, code, _ := runner.Run(context.Background(), "env", "AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh", "--alias-build-only", opts.ContentDir)
-		importExternalRecords(&c, output)
-		return c, externalExitCode(c, code)
+		args := []string{"AWIKI_LINT_LEGACY=1"}
+		if opts.RepoRoot != "" {
+			args = append(args, "AWIKI_REPO_ROOT="+opts.RepoRoot)
+		}
+		args = append(args, "bash", "scripts/lint.sh", "--alias-build-only", opts.ContentDir)
+		output, code, _ := runner.RunInDir(context.Background(), opts.RepoRoot, "env", args...)
+		imported := importExternalRecords(&c, output)
+		addLegacyFailureDiagnostic(&c, "alias-build", code, imported)
+		return c, c.ExitCode()
 	}
 
 	if opts.Only != "" && opts.Only != "all" {
 		if isDeferredNamespace(opts.Only) {
-			output, code, _ := adapters.LegacyLint(context.Background(), runner, opts.RepoRoot, opts.Only, opts.OnlyFile, opts.ContentDir, opts.Fix)
-			importExternalRecords(&c, output)
-			return c, externalExitCode(c, code)
+			runLegacyNamespace(&c, runner, opts, opts.Only)
+			return c, c.ExitCode()
 		}
 		return c, c.ExitCode()
 	}
@@ -55,7 +62,9 @@ func Run(opts Options) (Collector, int) {
 
 	idx := wiki.BuildIndex(pages)
 	runCoreRules(&c, idx)
-	runDeferredLegacyLint(&c, runner, opts)
+	if isRepoContentDir(opts.RepoRoot, opts.ContentDir) {
+		runDeferredLegacyLint(&c, runner, opts)
+	}
 	if opts.HugoCheck {
 		runHugoCheck(&c, runner)
 	}
@@ -73,13 +82,46 @@ func isDeferredNamespace(only string) bool {
 
 func runDeferredLegacyLint(c *Collector, runner adapters.Runner, opts Options) {
 	for _, namespace := range deferredNamespaces() {
-		output, _, _ := adapters.LegacyLint(context.Background(), runner, opts.RepoRoot, namespace, opts.OnlyFile, opts.ContentDir, opts.Fix)
-		importExternalRecords(c, output)
+		runLegacyNamespace(c, runner, opts, namespace)
 	}
 }
 
 func deferredNamespaces() []string {
 	return []string{"synth", "data", "chart", "task", "query"}
+}
+
+func runLegacyNamespace(c *Collector, runner adapters.Runner, opts Options, namespace string) {
+	output, code, _ := adapters.LegacyLint(context.Background(), runner, opts.RepoRoot, namespace, opts.OnlyFile, opts.ContentDir, opts.Fix)
+	imported := importExternalRecords(c, output)
+	addLegacyFailureDiagnostic(c, namespace, code, imported)
+}
+
+func addLegacyFailureDiagnostic(c *Collector, namespace string, code int, importedLintDiagnostics int) {
+	if code == 0 || importedLintDiagnostics > 0 {
+		return
+	}
+	c.Add(Diagnostic{
+		Level:   Error,
+		File:    namespace,
+		Message: fmt.Sprintf("legacy lint failed with exit code %d", code),
+	})
+}
+
+func isRepoContentDir(repoRoot string, contentDir string) bool {
+	if repoRoot == "" || contentDir == "" {
+		return false
+	}
+	repoContent, err := filepath.Abs(filepath.Join(repoRoot, "content"))
+	if err != nil {
+		return false
+	}
+	actualContent, err := filepath.Abs(contentDir)
+	if err != nil {
+		return false
+	}
+	repoContent = filepath.Clean(repoContent)
+	actualContent = filepath.Clean(actualContent)
+	return repoContent == actualContent
 }
 
 func runHugoCheck(c *Collector, runner adapters.Runner) {
@@ -102,41 +144,39 @@ func runHugoCheck(c *Collector, runner adapters.Runner) {
 	})
 }
 
-func externalExitCode(c Collector, code int) int {
-	if code != 0 {
-		return code
-	}
-	return c.ExitCode()
-}
-
-func importExternalRecords(c *Collector, output string) {
+func importExternalRecords(c *Collector, output string) int {
+	importedLintDiagnostics := 0
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		if strings.HasPrefix(line, "LINT|") {
-			importDiagnostic(c, line)
+			if importDiagnostic(c, line) {
+				importedLintDiagnostics++
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "FIX|") {
 			importFix(c, line)
 		}
 	}
+	return importedLintDiagnostics
 }
 
-func importDiagnostic(c *Collector, line string) {
+func importDiagnostic(c *Collector, line string) bool {
 	parts := strings.SplitN(line, "|", 4)
 	if len(parts) != 4 {
-		return
+		return false
 	}
 	level := Level(parts[1])
 	switch level {
 	case Error, Warn, Info:
 	default:
-		return
+		return false
 	}
 	c.Add(Diagnostic{Level: level, File: parts[2], Message: parts[3]})
+	return true
 }
 
 func importFix(c *Collector, line string) {

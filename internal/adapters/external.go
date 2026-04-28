@@ -8,12 +8,18 @@ import (
 
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (output string, code int, err error)
+	RunInDir(ctx context.Context, dir string, name string, args ...string) (output string, code int, err error)
 }
 
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string, int, error) {
+	return ExecRunner{}.RunInDir(ctx, "", name, args...)
+}
+
+func (ExecRunner) RunInDir(ctx context.Context, dir string, name string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0, nil
@@ -27,7 +33,11 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string,
 }
 
 func LegacyLint(ctx context.Context, r Runner, repoRoot string, only string, onlyFile string, contentDir string, fix bool) (string, int, error) {
-	args := []string{"AWIKI_LINT_LEGACY=1", "bash", "scripts/lint.sh"}
+	args := []string{"AWIKI_LINT_LEGACY=1"}
+	if repoRoot != "" {
+		args = append(args, "AWIKI_REPO_ROOT="+repoRoot)
+	}
+	args = append(args, "bash", "scripts/lint.sh")
 	if only != "" {
 		args = append(args, "--only="+only)
 	}
@@ -40,10 +50,7 @@ func LegacyLint(ctx context.Context, r Runner, repoRoot string, only string, onl
 	if contentDir != "" {
 		args = append(args, contentDir)
 	}
-	// Runner has no cwd hook yet. repoRoot is accepted for the public adapter
-	// contract and will become active if Runner grows process options.
-	_ = repoRoot
-	return r.Run(ctx, "env", args...)
+	return r.RunInDir(ctx, repoRoot, "env", args...)
 }
 
 func HugoCheck(ctx context.Context, r Runner) (string, int, error) {

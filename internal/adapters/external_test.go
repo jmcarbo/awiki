@@ -7,17 +7,23 @@ import (
 )
 
 type fakeRunner struct {
+	dir  string
 	name string
 	args []string
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, int, error) {
+	return r.RunInDir(context.Background(), "", name, args...)
+}
+
+func (r *fakeRunner) RunInDir(_ context.Context, dir string, name string, args ...string) (string, int, error) {
+	r.dir = dir
 	r.name = name
 	r.args = append([]string(nil), args...)
 	return "", 0, nil
 }
 
-func TestLegacyLintBuildsLegacyCommand(t *testing.T) {
+func TestLegacyLintRunsFromRepoRootWithLegacyEnv(t *testing.T) {
 	runner := &fakeRunner{}
 
 	_, _, err := LegacyLint(context.Background(), runner, "/repo", "synth", "content/synthesis/demo.md", "content", true)
@@ -28,8 +34,12 @@ func TestLegacyLintBuildsLegacyCommand(t *testing.T) {
 	if runner.name != "env" {
 		t.Fatalf("command name = %q, want env", runner.name)
 	}
+	if runner.dir != "/repo" {
+		t.Fatalf("command dir = %q, want /repo", runner.dir)
+	}
 	want := []string{
 		"AWIKI_LINT_LEGACY=1",
+		"AWIKI_REPO_ROOT=/repo",
 		"bash",
 		"scripts/lint.sh",
 		"--only=synth",

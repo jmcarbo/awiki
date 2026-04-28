@@ -20,14 +20,19 @@ type fakeRunner struct {
 }
 
 type fakeRunnerCall struct {
+	dir  string
 	name string
 	args []string
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, int, error) {
+	return r.RunInDir(context.Background(), "", name, args...)
+}
+
+func (r *fakeRunner) RunInDir(_ context.Context, dir string, name string, args ...string) (string, int, error) {
 	r.name = name
 	r.args = append([]string(nil), args...)
-	r.calls = append(r.calls, fakeRunnerCall{name: name, args: append([]string(nil), args...)})
+	r.calls = append(r.calls, fakeRunnerCall{dir: dir, name: name, args: append([]string(nil), args...)})
 	if output, ok := r.outputByOnly[onlyArgValue(args)]; ok {
 		return output, r.code, r.err
 	}
@@ -82,6 +87,18 @@ func TestRunOnlySynthDelegatesToLegacyLintAndImportsDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunOnlyDeferredNonzeroWithoutLintRecordsAddsError(t *testing.T) {
+	contentDir := t.TempDir()
+	runner := &fakeRunner{output: "bash: scripts/lint.sh: No such file or directory\n", code: 127}
+
+	collector, code := Run(Options{ContentDir: contentDir, Only: "synth", Runner: runner})
+
+	if code != 2 {
+		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	assertDiagnosticContains(t, collector, Error, "synth", "legacy lint failed with exit code 127")
+}
+
 func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
@@ -103,7 +120,8 @@ func TestRunDeferredOnlyWithoutLegacyOutputDoesNotRunCoreRules(t *testing.T) {
 }
 
 func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
-	contentDir := t.TempDir()
+	repoRoot := t.TempDir()
+	contentDir := filepath.Join(repoRoot, "content")
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source references [[missing-target]] for coverage.")))
 	runner := &fakeRunner{
 		outputByOnly: map[string]string{
@@ -111,7 +129,7 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 		},
 	}
 
-	collector, code := Run(Options{ContentDir: contentDir, Runner: runner})
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: repoRoot, Runner: runner})
 
 	if code != 2 {
 		t.Fatalf("Run() code = %d, want 2; diagnostics = %#v", code, collector.Diagnostics)
@@ -124,6 +142,23 @@ func TestRunDefaultDelegatesLegacyNamespacesAndKeepsCoreRules(t *testing.T) {
 	assertLegacyOnlyCalled(t, runner, "task")
 	assertLegacyOnlyCalled(t, runner, "query")
 	assertLegacyOnlyNotCalled(t, runner, "")
+}
+
+func TestRunDefaultAlternateContentDirSkipsLegacyNamespaces(t *testing.T) {
+	repoRoot := t.TempDir()
+	contentDir := filepath.Join(t.TempDir(), "content")
+	writeLintPage(t, contentDir, "entities/alpha.md", pageContent("Alpha", "entity", nil, nil, longBody("Alpha links to [[beta]] so beta is not orphaned.")))
+	writeLintPage(t, contentDir, "entities/beta.md", pageContent("Beta", "entity", nil, nil, longBody("Beta links back to [[alpha]] so alpha is not orphaned.")))
+	runner := &fakeRunner{}
+
+	collector, code := Run(Options{ContentDir: contentDir, RepoRoot: repoRoot, Runner: runner})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %#v, want none", runner.calls)
+	}
 }
 
 func TestRunHugoCheckAddsLegacyCompatibleDiagnostics(t *testing.T) {

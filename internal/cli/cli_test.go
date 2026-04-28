@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -50,6 +52,30 @@ func TestParseLintOptionsAcceptsFlagAfterContentDir(t *testing.T) {
 	}
 	if !opts.Fix {
 		t.Fatalf("Fix = false, want true")
+	}
+}
+
+func TestParseLintOptionsInfersRepoRootFromAbsoluteContentDir(t *testing.T) {
+	var stderr bytes.Buffer
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, "scripts"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(scripts) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "scripts", "lint.sh"), []byte("#!/usr/bin/env bash\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(lint.sh) error = %v", err)
+	}
+	contentDir := filepath.Join(repoRoot, "content")
+	if err := os.MkdirAll(contentDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(content) error = %v", err)
+	}
+
+	opts, err := parseLintOptions([]string{contentDir, "--only=synth"}, &stderr)
+	if err != nil {
+		t.Fatalf("parseLintOptions() error = %v; stderr = %q", err, stderr.String())
+	}
+
+	if opts.RepoRoot != repoRoot {
+		t.Fatalf("RepoRoot = %q, want %q", opts.RepoRoot, repoRoot)
 	}
 }
 

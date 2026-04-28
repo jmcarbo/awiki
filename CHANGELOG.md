@@ -1,3 +1,20 @@
+## [1.1.0] - 2026-04-28
+
+Adds the git-docs ingest pipeline (phase 20) and a watchdog daemon for the batch inbox. Users on v1.0.x can adopt v1.1.0 cleanly via `just template-update --apply`.
+
+### Added
+- **git-docs ingest** (`just ingest-git <spec>`, `scripts/ingest-git.sh`): clone or pull a documentation source repo, transform markdown (frontmatter strip, link → wikilink rewrite, image copy + path rewrite), generate a repo entity page, persist per-repo state JSON, lock per repo, batched log/catalog/qmd housekeeping. `--protect-edits` stages conflicts to `raw/inbox/checkpoint/` rather than overwriting user edits. Supports `--repo-name` override; emits exit codes 14/15 for missing-config / lock-busy. WIKI.md §4.7 documents the workflow. `markdown-it-py` is the new optional Python dep (`scripts/check-deps.sh`).
+- **Watchdog** (`just watchdog`, `scripts/watchdog.sh`): foreground daemon that auto-ingests files landing in `raw/inbox/batch/`. Backends: `fswatch` (mac), `inotifywait` (linux), polling fallback. Size-stable wait before ingest; failed ingests quarantine to `raw/inbox/batch/_failed/`. Flags: `--catchup`, `--once`, `--agent`, `--backend`, `--poll-interval`, `--stable-checks`, `--stable-interval`. Single-instance pid lock at `.awiki/watchdog.pid`.
+- **README**: expanded "Pulling template updates" section (status / dry-run / apply workflow, branch-per-phase model, pending-prompts pointer, recovery flags). New common-commands rows for `template-status`, `template-gc`, `watchdog`. Canonical clone URL.
+
+### Fixed
+- `task-init` smoke output no longer references unshipped phase 17/18/19 roadmap items. The pre-commit hook installer (which actually runs at `step_precommit`) is no longer described as "deferred."
+
+### Internal
+- Test suite at 578 cases. New: `tests/watchdog_test.bats` (8), git-docs coverage (51).
+
+---
+
 ## [1.0.0] - 2026-04-27
 
 First release with the template-update mechanism. Repos bootstrapped from this version (or later) get the clean update path. Pre-v1 repos use `just template-retrofit` to seed `.awiki/template.json` once.

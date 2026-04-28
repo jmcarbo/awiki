@@ -242,13 +242,30 @@ except Exception as e:
     print(f"ERROR: invalid JSON: {e}", file=sys.stderr); sys.exit(1)
 if obj.get("schema") != 1:
     print("ERROR: schema must be 1", file=sys.stderr); sys.exit(1)
-for key in ("repo_key","repo_name","url","head_sha","files"):
+for key in ("repo_key","repo_name","url","default_branch","head_sha","ingested_at","private","files"):
     if key not in obj:
         print(f"ERROR: missing key: {key}", file=sys.stderr); sys.exit(1)
 sys.exit(0)
 PY
 }
+
+awiki_git_state_validate_repo_key() {
+  local repo_key="$1"
+  if [[ -z "$repo_key" ]]; then
+    echo "ERROR: repo_key is empty" >&2
+    return 1
+  fi
+  if [[ "$repo_key" =~ \.\. ]] || [[ "$repo_key" == /* ]] || [[ "$repo_key" =~ / ]]; then
+    echo "ERROR: repo_key contains path-traversal chars: $repo_key" >&2
+    return 1
+  fi
+  return 0
+}
 ```
+
+`awiki_git_state_path` and `awiki_git_state_save` MUST call
+`awiki_git_state_validate_repo_key` before constructing or writing the
+path so a poisoned `repo_key` cannot escape `.awiki/git-state/`.
 
 - [ ] **Step 4: Run test, expect pass**
 
@@ -278,21 +295,39 @@ Append to `tests/ingest_git_lib_test.bats`:
 
 @test "git-state: validate() rejects schema!=1" {
   source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
-  run awiki_git_state_validate '{"schema":2,"repo_key":"rk","repo_name":"r","url":"u","head_sha":"s","files":{}}'
+  run awiki_git_state_validate '{"schema":2,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","ingested_at":"t","private":false,"files":{}}'
   [ "$status" -ne 0 ]
 }
 
 @test "git-state: validate() accepts well-formed" {
   source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
-  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","head_sha":"s","files":{}}'
+  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","ingested_at":"t","private":false,"files":{}}'
   [ "$status" -eq 0 ]
+}
+
+@test "git-state: validate() rejects missing ingested_at (spec §7.2 required)" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_validate '{"schema":1,"repo_key":"rk","repo_name":"r","url":"u","default_branch":"main","head_sha":"s","private":false,"files":{}}'
+  [ "$status" -ne 0 ]
+}
+
+@test "git-state: path() rejects repo_key with .. (path traversal)" {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_path "../escape"
+  [ "$status" -ne 0 ]
+}
+
+@test "git-state: path() rejects repo_key with / " {
+  source "$BATS_TEST_DIRNAME/../scripts/lib/git-state.sh"
+  run awiki_git_state_path "evil/path"
+  [ "$status" -ne 0 ]
 }
 ```
 
-- [ ] **Step 6: Run all four tests, expect pass**
+- [ ] **Step 6: Run all tests, expect pass**
 
 Run: `bats tests/ingest_git_lib_test.bats`
-Expected: 4 of 4 PASS.
+Expected: 8 of 8 PASS (path + load + save + 2 validate + 1 missing-key + 2 path-traversal).
 
 - [ ] **Step 7: Commit**
 

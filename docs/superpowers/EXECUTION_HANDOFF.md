@@ -1,10 +1,11 @@
 # Data Layer Execution — Handoff
 
-## State as of 2026-04-28 — Plan 1 + Plan 2 COMPLETE
+## State as of 2026-04-28 — Plan 1 + Plan 2 COMPLETE (verified with vl-convert)
 
 - **Branch:** `feat/data-layer` (in worktree `.worktrees/data-layer/`)
-- **Latest commit:** `10d106c` (just chart-new recipe)
+- **Latest commit:** `e25e7a3` (chart render bugfix + plan-test fixes)
 - **Worktree:** `/Users/joanmarc/dailywork/celonis/awiki/.worktrees/data-layer/`
+- **117/117 BATS** + **12/12 node:test** green with `vl-convert` 1.9.0 + `hugo` 0.160.1 installed.
 
 ## Plan 1 — done (datasets, 21/21 + 4 polish fixes)
 
@@ -39,7 +40,9 @@ See git log de6f522..d2d94d1 for the dataset commits.
 - **117/117 BATS** (data-layer suite, including 4 hugo+vl-convert smoke tests that skip in this environment).
 - **12/12 node:test** (MCP: list-datasets 3, get-dataset 5, list-charts 4).
 
-Tests that skip when binary missing: chart_render (5), chart_obsidian_preview (3), hugo_render_chart (3), data_layer_full_smoke (1) — total 12 skips. Re-run with `vl-convert` + `hugo` installed to fully exercise.
+Tests that skip when binary missing: chart_render (5), chart_obsidian_preview (3), hugo_render_chart (3), data_layer_full_smoke (1) — total 12 skips when `vl-convert` absent.
+
+**Note:** running with `vl-convert` installed requires the `themes/hugo-book` submodule initialized in the worktree: `git submodule update --init --recursive themes/hugo-book` (otherwise hugo fails with "no layout" warnings and the smoke / hugo_render_chart tests fail).
 
 ## Verification
 

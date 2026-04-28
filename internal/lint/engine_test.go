@@ -168,6 +168,61 @@ func TestRunCleanTwoPageLinkedWikiExitsZero(t *testing.T) {
 	}
 }
 
+func TestRunFixAddsLastUpdatedAfterDate(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContentWithoutField("Source", "entity", "last_updated", longBody("Source has enough body text for lint.")))
+
+	collector, code := Run(Options{ContentDir: contentDir, Fix: true, Today: "2026-04-28"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	content := readLintPage(t, contentDir, "entities/source.md")
+	want := "date: 2026-04-28\nlast_updated: 2026-04-28\ntype: entity"
+	if !strings.Contains(content, want) {
+		t.Fatalf("fixed content missing inserted last_updated after date:\n%s", content)
+	}
+	assertFixContains(t, collector, "entities/source.md", "added last_updated: 2026-04-28")
+}
+
+func TestRunFixLeavesPageWithoutDateUnchanged(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContentWithoutField("Source", "entity", "date", longBody("Source has enough body text for lint.")))
+	before := readLintPage(t, contentDir, "entities/source.md")
+
+	collector, code := Run(Options{ContentDir: contentDir, Fix: true, Today: "2026-04-28"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	after := readLintPage(t, contentDir, "entities/source.md")
+	if after != before {
+		t.Fatalf("content changed without date:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if len(collector.Fixes) != 0 {
+		t.Fatalf("Fixes = %#v, want none", collector.Fixes)
+	}
+}
+
+func TestRunFixLeavesExistingLastUpdatedUnchanged(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source has enough body text for lint.")))
+	before := readLintPage(t, contentDir, "entities/source.md")
+
+	collector, code := Run(Options{ContentDir: contentDir, Fix: true, Today: "2026-04-28"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	after := readLintPage(t, contentDir, "entities/source.md")
+	if after != before {
+		t.Fatalf("content changed with existing last_updated:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if len(collector.Fixes) != 0 {
+		t.Fatalf("Fixes = %#v, want none", collector.Fixes)
+	}
+}
+
 func writeLintPage(t *testing.T, root, relPath, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relPath))
@@ -177,6 +232,16 @@ func writeLintPage(t *testing.T, root, relPath, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
+}
+
+func readLintPage(t *testing.T, root, relPath string) string {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relPath))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	return string(data)
 }
 
 func pageContent(title, typ string, tags, aliases []string, body string) string {
@@ -193,6 +258,27 @@ func pageContentWithSources(title, typ string, tags, aliases, sources []string, 
 	b.WriteString("tags: [" + strings.Join(tags, ", ") + "]\n")
 	b.WriteString("aliases: [" + strings.Join(aliases, ", ") + "]\n")
 	b.WriteString("sources: [" + quotedList(sources) + "]\n")
+	b.WriteString("draft: false\n")
+	b.WriteString("---\n")
+	b.WriteString(body)
+	b.WriteString("\n")
+	return b.String()
+}
+
+func pageContentWithoutField(title, typ, omittedField, body string) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("title: \"" + title + "\"\n")
+	if omittedField != "date" {
+		b.WriteString("date: 2026-04-28\n")
+	}
+	if omittedField != "last_updated" {
+		b.WriteString("last_updated: 2026-04-28\n")
+	}
+	b.WriteString("type: " + typ + "\n")
+	b.WriteString("tags: []\n")
+	b.WriteString("aliases: []\n")
+	b.WriteString("sources: []\n")
 	b.WriteString("draft: false\n")
 	b.WriteString("---\n")
 	b.WriteString(body)
@@ -248,4 +334,14 @@ func assertNoDiagnosticContains(t *testing.T, collector Collector, level Level, 
 			t.Fatalf("unexpected %s diagnostic containing file %q and message %q: %#v", level, filePart, messagePart, d)
 		}
 	}
+}
+
+func assertFixContains(t *testing.T, collector Collector, relPath, messagePart string) {
+	t.Helper()
+	for _, f := range collector.Fixes {
+		if strings.HasSuffix(filepath.ToSlash(f.File), relPath) && strings.Contains(f.Message, messagePart) {
+			return
+		}
+	}
+	t.Fatalf("missing fix for %q containing %q; got %#v", relPath, messagePart, collector.Fixes)
 }

@@ -186,6 +186,7 @@ func lintS8(page wiki.Page, idx *wiki.Index) []Diagnostic {
 
 type pageScope struct {
 	kind  string
+	value string
 	slugs []string
 }
 
@@ -216,11 +217,13 @@ func parseScope(lines []string) pageScope {
 		switch key {
 		case "query":
 			scope.kind = "query"
+			scope.value = strings.Trim(value, `"'`)
 		case "slugs":
 			scope.kind = "slugs"
 			scope.slugs = parseInlineSlugList(value)
 		case "tag":
 			scope.kind = "tag"
+			scope.value = strings.Trim(value, `"'`)
 		}
 	}
 	return scope

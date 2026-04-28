@@ -45,16 +45,34 @@ func addLastUpdatedAfterDate(path, today string) (bool, error) {
 	}
 
 	lines := strings.SplitAfter(string(data), "\n")
-	for i, line := range lines {
+	frontmatterEnd := closingFrontmatterLine(lines)
+	if frontmatterEnd == -1 {
+		return false, nil
+	}
+
+	for i, line := range lines[1:frontmatterEnd] {
 		if !strings.HasPrefix(line, "date: ") {
 			continue
 		}
+		insertAt := i + 2
 		insert := fmt.Sprintf("last_updated: %s\n", today)
-		lines = append(lines[:i+1], append([]string{insert}, lines[i+1:]...)...)
+		lines = append(lines[:insertAt], append([]string{insert}, lines[insertAt:]...)...)
 		if err := os.WriteFile(path, []byte(strings.Join(lines, "")), 0o644); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 	return false, nil
+}
+
+func closingFrontmatterLine(lines []string) int {
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return -1
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return i
+		}
+	}
+	return -1
 }

@@ -204,6 +204,38 @@ func TestRunFixLeavesPageWithoutDateUnchanged(t *testing.T) {
 	}
 }
 
+func TestRunFixDoesNotUseBodyDateWhenFrontmatterDateIsNotExact(t *testing.T) {
+	contentDir := t.TempDir()
+	writeLintPage(t, contentDir, "entities/source.md", strings.Join([]string{
+		"---",
+		"title: \"Source\"",
+		"  date: 2026-04-28",
+		"type: entity",
+		"tags: []",
+		"aliases: []",
+		"sources: []",
+		"draft: false",
+		"---",
+		"date: body-value",
+		longBody("Source has enough body text for lint."),
+		"",
+	}, "\n"))
+	before := readLintPage(t, contentDir, "entities/source.md")
+
+	collector, code := Run(Options{ContentDir: contentDir, Fix: true, Today: "2026-04-28"})
+
+	if code != 0 {
+		t.Fatalf("Run() code = %d, want 0; diagnostics = %#v", code, collector.Diagnostics)
+	}
+	after := readLintPage(t, contentDir, "entities/source.md")
+	if after != before {
+		t.Fatalf("content changed using body date line:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if len(collector.Fixes) != 0 {
+		t.Fatalf("Fixes = %#v, want none", collector.Fixes)
+	}
+}
+
 func TestRunFixLeavesExistingLastUpdatedUnchanged(t *testing.T) {
 	contentDir := t.TempDir()
 	writeLintPage(t, contentDir, "entities/source.md", pageContent("Source", "entity", nil, nil, longBody("Source has enough body text for lint.")))

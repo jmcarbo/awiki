@@ -181,7 +181,108 @@ cmd_validate() {
   note "validated $slug (rows=$actual)"
 }
 
-cmd_compact() { die "compact not implemented yet (Task 9)"; }
+_load_thresholds() {
+  AWIKI_DATASET_INLINE_MAX_ROWS=500
+  AWIKI_DATASET_INLINE_MAX_BYTES=51200
+  if [[ -f .awiki/config ]]; then
+    # shellcheck disable=SC1091
+    source <(grep -E '^AWIKI_DATASET_INLINE_MAX_(ROWS|BYTES)=' .awiki/config || true)
+  fi
+}
+
+_remove_data_block() {
+  local page="$1" format="$2"
+  awk -v fmt="$format" '
+    BEGIN { state=0 }
+    state==0 && /^## Data[[:space:]]*$/ { state=1; next }
+    state==1 && match($0, "^```" fmt "[[:space:]]*$") { state=2; next }
+    state==2 && /^```[[:space:]]*$/ { state=3; next }
+    state==2 { next }
+    state==1 { state=0 }
+    { print }
+  ' "$page" > "$page.tmp"
+  mv "$page.tmp" "$page"
+}
+
+_insert_data_block() {
+  local page="$1" format="$2" body_file="$3"
+  awk -v fmt="$format" -v body_file="$body_file" '
+    BEGIN { inserted=0; while ((getline line < body_file) > 0) body = body line "\n" }
+    /^## Provenance[[:space:]]*$/ && !inserted {
+      print "## Data"; print ""
+      print "```" fmt
+      printf "%s", body
+      print "```"; print ""
+      inserted=1
+    }
+    { print }
+  ' "$page" > "$page.tmp"
+  mv "$page.tmp" "$page"
+}
+
+cmd_compact() {
+  local slug=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --) shift; break ;;
+      -*) die "unknown flag: $1" ;;
+      *) slug="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$slug" ]] || die "usage: dataset.sh compact <slug>"
+  local page="$DATASETS_DIR/$slug.md"
+  [[ -f "$page" ]] || die "$page not found"
+
+  _load_thresholds
+  local storage format
+  storage="$(fm_get "$page" storage)"
+  format="$(fm_get "$page" format)"
+
+  local tmp size rows
+  tmp="$(mktemp)"
+  if [[ "$storage" == "inline" ]]; then
+    _extract_inline "$page" "$format" > "$tmp"
+  else
+    cp "$(fm_get "$page" data_path)" "$tmp"
+  fi
+  rows="$(python3 "$ROWS_PY" count --format="$format" --file="$tmp")"
+  size="$(wc -c < "$tmp")"
+  rm -f "$tmp"
+
+  local over=0
+  (( rows > AWIKI_DATASET_INLINE_MAX_ROWS )) && over=1
+  (( size > AWIKI_DATASET_INLINE_MAX_BYTES )) && over=1
+
+  if [[ "$storage" == "inline" && $over -eq 1 ]]; then
+    # Move inline -> file.
+    mkdir -p "$DATA_DIR"
+    local target="$DATA_DIR/$slug.$format"
+    _extract_inline "$page" "$format" > "$target"
+    _remove_data_block "$page" "$format"
+    fm_set "$page" storage "file"
+    fm_set "$page" data_path "$target"
+    fm_set "$page" rows "$rows"
+    note "compacted $slug inline -> file ($target, rows=$rows, bytes=$size)"
+    return 0
+  fi
+  if [[ "$storage" == "file" && $over -eq 0 ]]; then
+    # Move file -> inline.
+    local src
+    src="$(fm_get "$page" data_path)"
+    _insert_data_block "$page" "$format" "$src"
+    fm_remove "$page" data_path
+    fm_set "$page" storage "inline"
+    fm_set "$page" rows "$rows"
+    rm -f "$src"
+    note "compacted $slug file -> inline (rows=$rows, bytes=$size)"
+    return 0
+  fi
+  if [[ "$storage" == "file" && $over -eq 1 ]]; then
+    die "$slug is over threshold (rows=$rows, bytes=$size); cannot inline"
+  fi
+  note "$slug already compact (storage=$storage, rows=$rows, bytes=$size)"
+}
 
 main() {
   [[ $# -ge 1 ]] || die "usage: dataset.sh <new|compact|validate> [args...]"

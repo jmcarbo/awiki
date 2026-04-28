@@ -68,3 +68,36 @@ MD
   [ "$status" -eq 0 ]
   diff data/big.csv .cache/duckdb/big.csv
 }
+
+@test "engine runs SELECT against single dataset" {
+  run bash scripts/lib/query-engine.sh run "SELECT COUNT(*) AS n FROM trades"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"n":5'* ]] || [[ "$output" == *'"n": 5'* ]]
+}
+
+@test "engine runs JOIN across two datasets" {
+  run bash scripts/lib/query-engine.sh run \
+    "SELECT r.name, COUNT(*) AS n FROM trades t JOIN regions r ON t.region_id=r.id GROUP BY 1 ORDER BY 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"amer"'* ]] || [[ "$output" == *'"name": "amer"'* ]]
+  [[ "$output" == *'"name":"emea"'* ]] || [[ "$output" == *'"name": "emea"'* ]]
+}
+
+@test "engine exits 3 for unknown dataset" {
+  run bash scripts/lib/query-engine.sh run "SELECT * FROM ghost"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"unknown dataset: ghost"* ]]
+}
+
+@test "engine exits 9 for ATTACH" {
+  run bash scripts/lib/query-engine.sh run "ATTACH 'foo.db'; SELECT 1"
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"external attach not supported"* ]]
+}
+
+@test "engine emits stable result hash" {
+  h1=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  h2=$(bash scripts/lib/query-engine.sh hash "SELECT id FROM trades ORDER BY id")
+  [ "$h1" = "$h2" ]
+  [ -n "$h1" ]
+}

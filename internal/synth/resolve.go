@@ -26,9 +26,23 @@ func (r *Runner) synthDir() string {
 // Matches scripts/synth.sh:cmd_resolve + synth_resolve_to_slugs output.
 func (r *Runner) Resolve(ctx context.Context, slug string, out io.Writer) error {
 	synthPagePath := filepath.Join(r.synthDir(), slug+".md")
-	data, err := os.ReadFile(synthPagePath)
+	slugs, err := r.resolveSlugs(ctx, synthPagePath)
 	if err != nil {
 		return err
+	}
+	for _, s := range slugs {
+		fmt.Fprintln(out, s)
+	}
+	return nil
+}
+
+// resolveSlugs resolves the scope of the synthesis page at livePath and
+// returns the sorted, filtered slug list. It is the internal helper shared
+// by Resolve and Regen.
+func (r *Runner) resolveSlugs(ctx context.Context, livePath string) ([]string, error) {
+	data, err := os.ReadFile(livePath)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract raw frontmatter text.
@@ -38,20 +52,9 @@ func (r *Runner) Resolve(ctx context.Context, slug string, out io.Writer) error 
 	scope := ParseScopeFromFrontmatter(fmText)
 
 	// Determine privacy of the synth page itself.
-	synthPrivate := isPrivatePath(synthPagePath)
+	synthPrivate := isPrivatePath(livePath)
 
-	// Resolve primary slug list.
-	slugs, err := r.resolveScope(ctx, scope, synthPrivate)
-	if err != nil {
-		return err
-	}
-
-	// Emit one slug per line, ASCII-sorted (sort.Strings is ASCII/lexicographic).
-	sort.Strings(slugs)
-	for _, s := range slugs {
-		fmt.Fprintln(out, s)
-	}
-	return nil
+	return r.resolveScope(ctx, scope, synthPrivate)
 }
 
 // resolveScope dispatches on scope.Kind and applies all post-filters.
@@ -375,4 +378,60 @@ func uniqueSorted(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// readScalar extracts a single top-level YAML scalar value from
+// a full page body (including frontmatter markers). Delegates to
+// fmFieldFromText after extracting the frontmatter block.
+func readScalar(body, key string) string {
+	return fmFieldFromText(extractFrontmatterText(body), key)
+}
+
+// readPageTags reads the tags list from a page file. Returns nil on
+// missing file or parse error (fail-safe).
+func readPageTags(path string) []string {
+	tags, _ := fmTags(path)
+	return tags
+}
+
+// hasTag reports whether t is in tags (exact match).
+func hasTag(tags []string, t string) bool {
+	for _, tag := range tags {
+		if tag == t {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeDescription returns the human-readable scope description used
+// in the prompt template. Mirrors the bash logic in cmd_regen:
+//
+//	[[ -n "$SCOPE_TAG"   ]] && scope_desc="pages tagged '$SCOPE_TAG'"
+//	[[ -n "$SCOPE_SLUGS" ]] && scope_desc="explicit slug list"
+//	[[ -n "$SCOPE_QUERY" ]] && scope_desc="qmd query: $SCOPE_QUERY"
+func scopeDescription(scope Scope) string {
+	switch scope.Kind {
+	case "tag":
+		return "pages tagged '" + scope.Tag + "'"
+	case "slugs":
+		return "explicit slug list"
+	case "query":
+		return "qmd query: " + scope.Query
+	}
+	return ""
+}
+
+// resolveSlugsWithPrivacy is like resolveSlugs but treats the synth page as
+// private (allowPrivate=true), skipping the privacy filter. Used for the
+// privacy fail-closed probe in Regen.
+func (r *Runner) resolveSlugsWithPrivacy(ctx context.Context, livePath string) ([]string, error) {
+	data, err := os.ReadFile(livePath)
+	if err != nil {
+		return nil, err
+	}
+	fmText := extractFrontmatterText(string(data))
+	scope := ParseScopeFromFrontmatter(fmText)
+	// Pass synthPrivate=true to skip the privacy filter (probe all pages).
+	return r.resolveScope(ctx, scope, true)
 }

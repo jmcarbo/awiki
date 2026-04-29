@@ -37,7 +37,9 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 		return runSynthResolve(r, rest, stdout, stderr)
 	case "refine":
 		return runSynthRefine(r, rest, stderr)
-	case "new", "regen", "accept-stage", "finalize":
+	case "regen":
+		return runSynthRegen(r, rest, stdout, stderr)
+	case "new", "accept-stage", "finalize":
 		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
 		return 1
 	default:
@@ -107,6 +109,52 @@ func runSynthRefine(r *synth.Runner, args []string, stderr io.Writer) int {
 	note := strings.Join(args[1:], " ")
 	if err := r.Refine(slug, note, stderr); err != nil {
 		fmt.Fprintf(stderr, "synth refine: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func runSynthRegen(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth regen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var force, stage bool
+	fs.BoolVar(&force, "force", false, "")
+	fs.BoolVar(&stage, "stage", false, "")
+	// Slug must precede flags per bash convention; flag.NewFlagSet
+	// accepts any order anyway. Take first non-flag positional as slug.
+	var slug string
+	var pass []string
+	for _, a := range args {
+		switch {
+		case a == "--": // stop
+		case len(a) > 1 && a[0] == '-':
+			pass = append(pass, a)
+		default:
+			if slug == "" {
+				slug = a
+			} else {
+				pass = append(pass, a)
+			}
+		}
+	}
+	if err := fs.Parse(pass); err != nil {
+		return 1
+	}
+	if slug == "" {
+		fmt.Fprintln(stderr, "usage: awiki synth regen <slug> [--force] [--stage]")
+		return 1
+	}
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth regen: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.Regen(context.Background(), synth.RegenOptions{Slug: slug, Force: force, Stage: stage}, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth regen: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
 		return 2
 	}
 	return 0

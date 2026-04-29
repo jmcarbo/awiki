@@ -1,6 +1,8 @@
 package fsutil
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +54,7 @@ func TestAtomicWriteLeavesNoTempOnSuccess(t *testing.T) {
 func TestAtomicWriteRequiresExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing.md")
-	if err := AtomicWrite(path, []byte("x")); err == nil {
-		t.Fatalf("expected error when target file does not exist")
+	if err := AtomicWrite(path, []byte("x")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("expected fs.ErrNotExist, got %v", err)
 	}
 }

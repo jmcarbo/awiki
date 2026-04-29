@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"awiki/internal/fsutil"
 )
 
 type fakeRunner struct {
@@ -383,8 +385,8 @@ func TestAtomicWriteFileReplacesContentAndCleansTemp(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	if err := atomicWriteFile(path, []byte("after\n")); err != nil {
-		t.Fatalf("atomicWriteFile() error = %v", err)
+	if err := fsutil.AtomicWrite(path, []byte("after\n")); err != nil {
+		t.Fatalf("fsutil.AtomicWrite() error = %v", err)
 	}
 
 	content, err := os.ReadFile(path)

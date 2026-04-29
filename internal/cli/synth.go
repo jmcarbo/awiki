@@ -67,6 +67,8 @@ func buildSynthRunner() (*synth.Runner, error) {
 		Config:     cfg,
 		Qmd:        adapters.ExecQmd{},
 		PostHook:   adapters.ExecPostHook{},
+		Git:        adapters.ExecSynthGit{},
+		Lint:       adapters.ExecSynthLint{},
 	}, nil
 }
 

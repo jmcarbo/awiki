@@ -41,7 +41,9 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 		return runSynthRegen(r, rest, stdout, stderr)
 	case "accept-stage":
 		return runSynthAcceptStage(r, rest, stdout, stderr)
-	case "new", "finalize":
+	case "finalize":
+		return runSynthFinalize(r, rest, stdout, stderr)
+	case "new":
 		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
 		return 1
 	default:
@@ -180,6 +182,33 @@ func runSynthAcceptStage(r *synth.Runner, args []string, _ io.Writer, stderr io.
 	err := r.AcceptStage(context.Background(), slug, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "synth accept-stage: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthFinalize(r *synth.Runner, args []string, _ io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth finalize", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: awiki synth finalize <slug>")
+		return 1
+	}
+	slug := fs.Arg(0)
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth finalize: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.Finalize(context.Background(), slug, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth finalize: %v\n", err)
 		var ee *synth.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode()

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"awiki/internal/adapters"
 	"awiki/internal/config"
@@ -34,7 +35,9 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 		return runSynthList(r, rest, stdout, stderr)
 	case "resolve":
 		return runSynthResolve(r, rest, stdout, stderr)
-	case "refine", "new", "regen", "accept-stage", "finalize":
+	case "refine":
+		return runSynthRefine(r, rest, stderr)
+	case "new", "regen", "accept-stage", "finalize":
 		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
 		return 1
 	default:
@@ -84,6 +87,24 @@ func runSynthResolve(r *synth.Runner, args []string, stdout, stderr io.Writer) i
 	}
 	if err := r.Resolve(context.Background(), slug, stdout); err != nil {
 		fmt.Fprintf(stderr, "synth resolve: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func runSynthRefine(r *synth.Runner, args []string, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: awiki synth refine <slug> <note...>")
+		return 1
+	}
+	slug := args[0]
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth refine: invalid slug %q (must match [a-z0-9][a-z0-9-]*)\n", slug)
+		return 1
+	}
+	note := strings.Join(args[1:], " ")
+	if err := r.Refine(slug, note, stderr); err != nil {
+		fmt.Fprintf(stderr, "synth refine: %v\n", err)
 		return 2
 	}
 	return 0

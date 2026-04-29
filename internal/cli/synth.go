@@ -39,7 +39,9 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 		return runSynthRefine(r, rest, stderr)
 	case "regen":
 		return runSynthRegen(r, rest, stdout, stderr)
-	case "new", "accept-stage", "finalize":
+	case "accept-stage":
+		return runSynthAcceptStage(r, rest, stdout, stderr)
+	case "new", "finalize":
 		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
 		return 1
 	default:
@@ -151,6 +153,33 @@ func runSynthRegen(r *synth.Runner, args []string, stdout, stderr io.Writer) int
 	err := r.Regen(context.Background(), synth.RegenOptions{Slug: slug, Force: force, Stage: stage}, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "synth regen: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthAcceptStage(r *synth.Runner, args []string, _ io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth accept-stage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: awiki synth accept-stage <slug>")
+		return 1
+	}
+	slug := fs.Arg(0)
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth accept-stage: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.AcceptStage(context.Background(), slug, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth accept-stage: %v\n", err)
 		var ee *synth.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode()

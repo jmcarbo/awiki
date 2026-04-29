@@ -24,6 +24,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runDataset(args[1:], stdout, stderr)
 	case "data-init":
 		return runDataInit(args[1:], stdout, stderr)
+	case "chart":
+		return runChart(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

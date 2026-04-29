@@ -9,7 +9,7 @@ AWIKI_SYNTH_REPO_ROOT="$(cd "$AWIKI_SYNTH_SCRIPT_DIR/.." && pwd)"
 AWIKI_SYNTH_GO_BIN="$AWIKI_SYNTH_REPO_ROOT/bin/awiki"
 
 # Verbs already ported to Go. Add to this array as each verb ships.
-AWIKI_SYNTH_GO_VERBS=(list resolve refine regen accept-stage finalize)
+AWIKI_SYNTH_GO_VERBS=(list resolve refine regen accept-stage finalize new)
 
 if [[ "${AWIKI_SYNTH_LEGACY:-0}" != "1" && -x "$AWIKI_SYNTH_GO_BIN" ]]; then
   case "${1:-}" in

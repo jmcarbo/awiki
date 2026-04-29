@@ -44,8 +44,7 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 	case "finalize":
 		return runSynthFinalize(r, rest, stdout, stderr)
 	case "new":
-		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
-		return 1
+		return runSynthNew(r, rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "synth: unknown verb %q\n", verb)
 		return 1
@@ -209,6 +208,65 @@ func runSynthFinalize(r *synth.Runner, args []string, _ io.Writer, stderr io.Wri
 	err := r.Finalize(context.Background(), slug, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "synth finalize: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthNew(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: awiki synth new <plugin> <topic-slug> (--tag=X | --slugs=a,b | --query=\"...\") [...]")
+		return 1
+	}
+	plugin, topic := args[0], args[1]
+	rest := args[2:]
+	var (
+		tag, slugs, query        string
+		excludeTags, minLU, types string
+		allowPrivate              bool
+	)
+	fs := flag.NewFlagSet("synth new", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&tag, "tag", "", "")
+	fs.StringVar(&slugs, "slugs", "", "")
+	fs.StringVar(&query, "query", "", "")
+	fs.StringVar(&excludeTags, "exclude-tags", "", "")
+	fs.StringVar(&minLU, "min-last-updated", "", "")
+	fs.StringVar(&types, "types", "", "")
+	fs.BoolVar(&allowPrivate, "allow-private", false, "")
+	if err := fs.Parse(rest); err != nil {
+		return 1
+	}
+	kind := ""
+	val := ""
+	set := 0
+	if tag != "" {
+		kind, val = "tag", tag
+		set++
+	}
+	if slugs != "" {
+		kind, val = "slugs", slugs
+		set++
+	}
+	if query != "" {
+		kind, val = "query", query
+		set++
+	}
+	if set != 1 {
+		fmt.Fprintln(stderr, "synth new: exactly one of --tag, --slugs, --query required")
+		return 1
+	}
+	err := r.New(context.Background(), synth.NewOptions{
+		Plugin: plugin, Topic: topic, ScopeKind: kind, ScopeValue: val,
+		ExcludeTags: excludeTags, MinLastUpdated: minLU, Types: types,
+		AllowPrivate: allowPrivate,
+	}, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth new: %v\n", err)
 		var ee *synth.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode()

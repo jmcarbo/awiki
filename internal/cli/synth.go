@@ -37,9 +37,14 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 		return runSynthResolve(r, rest, stdout, stderr)
 	case "refine":
 		return runSynthRefine(r, rest, stderr)
-	case "new", "regen", "accept-stage", "finalize":
-		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
-		return 1
+	case "regen":
+		return runSynthRegen(r, rest, stdout, stderr)
+	case "accept-stage":
+		return runSynthAcceptStage(r, rest, stdout, stderr)
+	case "finalize":
+		return runSynthFinalize(r, rest, stdout, stderr)
+	case "new":
+		return runSynthNew(r, rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "synth: unknown verb %q\n", verb)
 		return 1
@@ -67,6 +72,8 @@ func buildSynthRunner() (*synth.Runner, error) {
 		Config:     cfg,
 		Qmd:        adapters.ExecQmd{},
 		PostHook:   adapters.ExecPostHook{},
+		Git:        adapters.ExecSynthGit{},
+		Lint:       adapters.ExecSynthLint{},
 	}, nil
 }
 
@@ -105,6 +112,165 @@ func runSynthRefine(r *synth.Runner, args []string, stderr io.Writer) int {
 	note := strings.Join(args[1:], " ")
 	if err := r.Refine(slug, note, stderr); err != nil {
 		fmt.Fprintf(stderr, "synth refine: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func runSynthRegen(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth regen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var force, stage bool
+	fs.BoolVar(&force, "force", false, "")
+	fs.BoolVar(&stage, "stage", false, "")
+	// Slug must precede flags per bash convention; flag.NewFlagSet
+	// accepts any order anyway. Take first non-flag positional as slug.
+	var slug string
+	var pass []string
+	for _, a := range args {
+		switch {
+		case a == "--": // stop
+		case len(a) > 1 && a[0] == '-':
+			pass = append(pass, a)
+		default:
+			if slug == "" {
+				slug = a
+			} else {
+				pass = append(pass, a)
+			}
+		}
+	}
+	if err := fs.Parse(pass); err != nil {
+		return 1
+	}
+	if slug == "" {
+		fmt.Fprintln(stderr, "usage: awiki synth regen <slug> [--force] [--stage]")
+		return 1
+	}
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth regen: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.Regen(context.Background(), synth.RegenOptions{Slug: slug, Force: force, Stage: stage}, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth regen: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthAcceptStage(r *synth.Runner, args []string, _ io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth accept-stage", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: awiki synth accept-stage <slug>")
+		return 1
+	}
+	slug := fs.Arg(0)
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth accept-stage: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.AcceptStage(context.Background(), slug, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth accept-stage: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthFinalize(r *synth.Runner, args []string, _ io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth finalize", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: awiki synth finalize <slug>")
+		return 1
+	}
+	slug := fs.Arg(0)
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth finalize: invalid slug %q\n", slug)
+		return 1
+	}
+	err := r.Finalize(context.Background(), slug, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth finalize: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		return 2
+	}
+	return 0
+}
+
+func runSynthNew(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: awiki synth new <plugin> <topic-slug> (--tag=X | --slugs=a,b | --query=\"...\") [...]")
+		return 1
+	}
+	plugin, topic := args[0], args[1]
+	rest := args[2:]
+	var (
+		tag, slugs, query        string
+		excludeTags, minLU, types string
+		allowPrivate              bool
+	)
+	fs := flag.NewFlagSet("synth new", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&tag, "tag", "", "")
+	fs.StringVar(&slugs, "slugs", "", "")
+	fs.StringVar(&query, "query", "", "")
+	fs.StringVar(&excludeTags, "exclude-tags", "", "")
+	fs.StringVar(&minLU, "min-last-updated", "", "")
+	fs.StringVar(&types, "types", "", "")
+	fs.BoolVar(&allowPrivate, "allow-private", false, "")
+	if err := fs.Parse(rest); err != nil {
+		return 1
+	}
+	kind := ""
+	val := ""
+	set := 0
+	if tag != "" {
+		kind, val = "tag", tag
+		set++
+	}
+	if slugs != "" {
+		kind, val = "slugs", slugs
+		set++
+	}
+	if query != "" {
+		kind, val = "query", query
+		set++
+	}
+	if set != 1 {
+		fmt.Fprintln(stderr, "synth new: exactly one of --tag, --slugs, --query required")
+		return 1
+	}
+	err := r.New(context.Background(), synth.NewOptions{
+		Plugin: plugin, Topic: topic, ScopeKind: kind, ScopeValue: val,
+		ExcludeTags: excludeTags, MinLastUpdated: minLU, Types: types,
+		AllowPrivate: allowPrivate,
+	}, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "synth new: %v\n", err)
+		var ee *synth.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
 		return 2
 	}
 	return 0

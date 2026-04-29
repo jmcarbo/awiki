@@ -27,34 +27,19 @@ func LintSummary(errors, warnings, infos int) string {
 		errors, warnings, infos)
 }
 
-// AgentPrompt formats an AGENT-PROMPT| record. fields are emitted in
-// the order given (the bash callers preserve insertion order).
-func AgentPrompt(verb string, fields []string) string {
-	if len(fields) == 0 {
-		return "AGENT-PROMPT|" + verb
-	}
-	return "AGENT-PROMPT|" + verb + "|" + strings.Join(fields, "|")
+// AgentPrompt formats an AGENT-PROMPT| record. The bash original emits
+// a single free-form prompt string after the prefix
+// (scripts/ingest.sh:115).
+func AgentPrompt(prompt string) string {
+	return "AGENT-PROMPT|" + prompt
 }
 
-// Ingest formats an INGEST| record.
-func Ingest(format, source, status string) string {
-	return fmt.Sprintf("INGEST|%s|%s|%s", format, source, status)
-}
-
-// Review formats a REVIEW| record. extra fields are joined with '|'.
-func Review(kind, period string, fields []string) string {
-	head := fmt.Sprintf("REVIEW|%s|%s", kind, period)
+// Review formats a REVIEW| record. The bash original is
+// `REVIEW|<key>|<k=v>[|<k=v>...]` (scripts/review-status.sh). fields
+// is the list of `<k=v>` tokens after the key.
+func Review(key string, fields []string) string {
 	if len(fields) == 0 {
-		return head
+		return "REVIEW|" + key
 	}
-	return head + "|" + strings.Join(fields, "|")
-}
-
-// Recur formats a RECUR| record produced by action-recur.
-func Recur(file, blockID string, fields ...string) string {
-	head := fmt.Sprintf("RECUR|%s|%s", file, blockID)
-	if len(fields) == 0 {
-		return head
-	}
-	return head + "|" + strings.Join(fields, "|")
+	return "REVIEW|" + key + "|" + strings.Join(fields, "|")
 }

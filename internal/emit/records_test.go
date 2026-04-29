@@ -35,32 +35,24 @@ func TestLintSummary(t *testing.T) {
 }
 
 func TestAgentPromptRecord(t *testing.T) {
-	got := AgentPrompt("ingest", []string{"path=raw/inbox/foo.md", "kind=entity"})
-	want := "AGENT-PROMPT|ingest|path=raw/inbox/foo.md|kind=entity"
+	got := AgentPrompt("Process the source at raw/inbox/foo.md per WIKI.md §4.1")
+	want := "AGENT-PROMPT|Process the source at raw/inbox/foo.md per WIKI.md §4.1"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
-func TestIngestRecord(t *testing.T) {
-	got := Ingest("xlsx", "raw/inbox/batch/sales.xlsx", "ok")
-	want := "INGEST|xlsx|raw/inbox/batch/sales.xlsx|ok"
+func TestReviewRecordWithFields(t *testing.T) {
+	got := Review("projects-no-next-action", []string{"count=3", "slugs=foo,bar"})
+	want := "REVIEW|projects-no-next-action|count=3|slugs=foo,bar"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
-func TestReviewRecord(t *testing.T) {
-	got := Review("week", "2026-W17", []string{"open=12", "done=4"})
-	want := "REVIEW|week|2026-W17|open=12|done=4"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestRecurRecord(t *testing.T) {
-	got := Recur("content/inbox.md", "abc123", "due=2026-05-06")
-	want := "RECUR|content/inbox.md|abc123|due=2026-05-06"
+func TestReviewRecordEmptyFields(t *testing.T) {
+	got := Review("inbox-unprocessed", nil)
+	want := "REVIEW|inbox-unprocessed"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

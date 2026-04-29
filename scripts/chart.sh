@@ -8,7 +8,7 @@ AWIKI_CHART_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AWIKI_CHART_REPO_ROOT="$(cd "$AWIKI_CHART_SCRIPT_DIR/.." && pwd)"
 AWIKI_CHART_GO_BIN="$AWIKI_CHART_REPO_ROOT/bin/awiki"
 
-AWIKI_CHART_GO_VERBS=(new)
+AWIKI_CHART_GO_VERBS=(new render)
 
 if [[ "${AWIKI_CHART_LEGACY:-0}" != "1" && -x "$AWIKI_CHART_GO_BIN" ]]; then
   case "${1:-}" in

@@ -1,81 +1,10 @@
 package synth
 
-import "strings"
+import "awiki/internal/region"
 
-const (
-	beginMarker = "<!-- BEGIN GENERATED"
-	endMarker   = "<!-- END GENERATED -->"
-)
-
-type GeneratedRegion struct {
-	BeginOffset int
-	EndOffset   int
-	Body        string
-	BeginLine   string
-}
-
-type RegionDiagnostic struct {
-	Code    string
-	Message string
-}
+type GeneratedRegion = region.Generated
+type RegionDiagnostic = region.Diagnostic
 
 func ParseGeneratedRegion(text string) (GeneratedRegion, []RegionDiagnostic) {
-	beginOffsets := markerOffsets(text, beginMarker)
-	endOffsets := markerOffsets(text, endMarker)
-	var diagnostics []RegionDiagnostic
-	if len(beginOffsets) != 1 {
-		diagnostics = append(diagnostics, RegionDiagnostic{
-			Code:    "S1",
-			Message: "expected exactly one BEGIN GENERATED marker",
-		})
-	}
-	if len(endOffsets) != 1 {
-		diagnostics = append(diagnostics, RegionDiagnostic{
-			Code:    "S1",
-			Message: "expected exactly one END GENERATED marker",
-		})
-	}
-	if len(beginOffsets) != 1 || len(endOffsets) != 1 {
-		return GeneratedRegion{BeginOffset: -1, EndOffset: -1}, diagnostics
-	}
-
-	beginOffset := beginOffsets[0]
-	endOffset := endOffsets[0]
-	if beginOffset > endOffset {
-		diagnostics = append(diagnostics, RegionDiagnostic{
-			Code:    "S1",
-			Message: "BEGIN GENERATED marker must appear before END GENERATED marker",
-		})
-		return GeneratedRegion{BeginOffset: beginOffset, EndOffset: endOffset}, diagnostics
-	}
-
-	beginLineEnd := strings.IndexByte(text[beginOffset:], '\n')
-	if beginLineEnd < 0 {
-		beginLineEnd = len(text) - beginOffset
-	}
-	beginLineEnd += beginOffset
-	bodyStart := beginLineEnd
-	if bodyStart < len(text) && text[bodyStart] == '\n' {
-		bodyStart++
-	}
-	return GeneratedRegion{
-		BeginOffset: beginOffset,
-		EndOffset:   endOffset,
-		Body:        text[bodyStart:endOffset],
-		BeginLine:   text[beginOffset:beginLineEnd],
-	}, diagnostics
-}
-
-func markerOffsets(text string, marker string) []int {
-	var offsets []int
-	searchFrom := 0
-	for {
-		next := strings.Index(text[searchFrom:], marker)
-		if next < 0 {
-			return offsets
-		}
-		offset := searchFrom + next
-		offsets = append(offsets, offset)
-		searchFrom = offset + len(marker)
-	}
+	return region.ParseGenerated(text)
 }

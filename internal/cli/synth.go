@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func buildSynthRunner() (*synth.Runner, error) {
 	}
 	pluginDir := os.Getenv("AWIKI_SYNTH_PLUGINS_DIR")
 	if pluginDir == "" {
-		pluginDir = filepath.Join(repoRoot, "plugins", "synth")
+		pluginDir = filepath.Join(repoRoot, "synthesis-plugins")
 	}
 	cfg, _ := config.Load(filepath.Join(repoRoot, ".awiki", "config"))
 	return &synth.Runner{
@@ -68,6 +69,9 @@ func runSynthList(r *synth.Runner, args []string, stdout, stderr io.Writer) int 
 	}
 	if err := r.List(stdout); err != nil {
 		fmt.Fprintf(stderr, "synth list: %v\n", err)
+		if errors.Is(err, synth.ErrNoPlugins) {
+			return 1
+		}
 		return 2
 	}
 	return 0

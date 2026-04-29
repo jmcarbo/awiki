@@ -18,7 +18,7 @@ func TestExclusiveLockReturnsContentionExit(t *testing.T) {
 		defer close(released)
 		err := WithExclusiveLock(lockPath, time.Second, func() error {
 			close(holding)
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 			return nil
 		})
 		if err != nil {
@@ -44,7 +44,9 @@ func TestSharedLockAllowsConcurrentReaders(t *testing.T) {
 	lockPath := filepath.Join(dir, ".awiki", "lock")
 
 	first := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = WithSharedLock(lockPath, time.Second, func() error {
 			close(first)
 			time.Sleep(100 * time.Millisecond)
@@ -58,6 +60,7 @@ func TestSharedLockAllowsConcurrentReaders(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("shared/shared should not block: %v", err)
 	}
+	<-done
 }
 
 func TestContentionErrorExitCodeIsSeven(t *testing.T) {

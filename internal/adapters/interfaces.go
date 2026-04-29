@@ -24,6 +24,11 @@ type VLConvert interface {
 	RenderSVG(ctx context.Context, specPath, outPath string) (code int, err error)
 }
 
+// VendorVega vendors the Vega JS libraries. Used by the chart domain.
+type VendorVega interface {
+	Ensure(ctx context.Context, repoRoot string) error
+}
+
 // PDFToText extracts text from a PDF. Used by the ingest-pdf flow.
 type PDFToText interface {
 	Extract(ctx context.Context, pdfPath string) (text string, code int, err error)
@@ -90,3 +95,7 @@ func (gpgStub) Available(context.Context) (bool, error) { return false, nil }
 type fsnotifyStub struct{}
 
 func (fsnotifyStub) Watch(context.Context, string, chan<- string) error { return nil }
+
+type vendorVegaStub struct{}
+
+func (vendorVegaStub) Ensure(context.Context, string) error { return nil }

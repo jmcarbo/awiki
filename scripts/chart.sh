@@ -4,6 +4,26 @@ set -euo pipefail
 # scripts/chart.sh — manage Vega-Lite chart pages and rendered SVG sidecars.
 # Subcommands: new, render, render-one.
 
+AWIKI_CHART_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_CHART_REPO_ROOT="$(cd "$AWIKI_CHART_SCRIPT_DIR/.." && pwd)"
+AWIKI_CHART_GO_BIN="$AWIKI_CHART_REPO_ROOT/bin/awiki"
+
+AWIKI_CHART_GO_VERBS=(new render render-one)
+
+if [[ "${AWIKI_CHART_LEGACY:-0}" != "1" && -x "$AWIKI_CHART_GO_BIN" ]]; then
+  case "${1:-}" in
+    --) shift ;;
+  esac
+  verb="${1:-}"
+  for v in "${AWIKI_CHART_GO_VERBS[@]}"; do
+    if [[ "$v" == "$verb" ]]; then
+      shift
+      cd "$AWIKI_CHART_REPO_ROOT" || exit 1
+      exec "$AWIKI_CHART_GO_BIN" chart "$verb" "$@"
+    fi
+  done
+fi
+
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 

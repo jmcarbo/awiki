@@ -7,6 +7,7 @@ func TestInterfaceShapes(t *testing.T) {
 	var _ Qmd = (*qmdStub)(nil)
 	var _ DuckDB = (*duckdbStub)(nil)
 	var _ VLConvert = (*vlconvertStub)(nil)
+	var _ VendorVega = (*vendorVegaStub)(nil)
 	var _ PDFToText = (*pdftotextStub)(nil)
 	var _ Whisper = (*whisperStub)(nil)
 	var _ Git = (*gitStub)(nil)

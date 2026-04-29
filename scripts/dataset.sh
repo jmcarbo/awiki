@@ -4,6 +4,26 @@ set -euo pipefail
 # scripts/dataset.sh — manage awiki datasets.
 # Subcommands: new, compact, validate.
 
+AWIKI_DS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_DS_REPO_ROOT="$(cd "$AWIKI_DS_SCRIPT_DIR/.." && pwd)"
+AWIKI_DS_GO_BIN="$AWIKI_DS_REPO_ROOT/bin/awiki"
+
+AWIKI_DATASET_GO_VERBS=(validate compact new)
+
+if [[ "${AWIKI_DATASET_LEGACY:-0}" != "1" && -x "$AWIKI_DS_GO_BIN" ]]; then
+  case "${1:-}" in
+    --) shift ;;
+  esac
+  verb="${1:-}"
+  for v in "${AWIKI_DATASET_GO_VERBS[@]}"; do
+    if [[ "$v" == "$verb" ]]; then
+      shift
+      cd "$AWIKI_DS_REPO_ROOT" || exit 1
+      exec "$AWIKI_DS_GO_BIN" dataset "$verb" "$@"
+    fi
+  done
+fi
+
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 

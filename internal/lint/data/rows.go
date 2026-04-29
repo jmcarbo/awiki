@@ -1,186 +1,150 @@
 package data
 
 import (
-	"encoding/csv"
-	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
+
+	ds "awiki/internal/dataset"
 )
 
+// rowSet is the internal representation used by lintDataset rules. It holds
+// rows as maps keyed by header name, which is what the rules-layer expects.
 type rowSet struct {
 	rows []map[string]any
 }
 
-type column struct {
-	Name string
-	Type string
-}
+// column is an alias so rules.go can keep using the unqualified name.
+type column = ds.Column
 
+// loadRows loads a data file in the given format and returns a rowSet.
 func loadRows(path, format string) (rowSet, error) {
-	switch format {
-	case "csv":
-		return loadDelimitedRows(path, ',')
-	case "tsv":
-		return loadDelimitedRows(path, '\t')
-	case "dsv":
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return rowSet{}, err
-		}
-		delimiter := byte(',')
-		if lines := strings.SplitN(string(data), "\n", 2); len(lines) > 0 {
-			for _, candidate := range []byte{',', ';', '|', '\t'} {
-				if strings.ContainsRune(lines[0], rune(candidate)) {
-					delimiter = candidate
-					break
-				}
-			}
-		}
-		return parseDelimitedRows(string(data), rune(delimiter))
-	case "json":
-		return loadJSONRows(path, false)
-	case "topojson":
-		return loadJSONRows(path, true)
-	default:
-		return rowSet{}, fmt.Errorf("unknown format: %s", format)
-	}
-}
-
-func loadDelimitedRows(path string, delimiter rune) (rowSet, error) {
-	data, err := os.ReadFile(path)
+	rawRows, err := ds.LoadRows(ds.Format(format), path)
 	if err != nil {
 		return rowSet{}, err
 	}
-	return parseDelimitedRows(string(data), delimiter)
+	return rawRowsToRowSet(rawRows), nil
 }
 
-func parseDelimitedRows(data string, delimiter rune) (rowSet, error) {
-	reader := csv.NewReader(strings.NewReader(data))
-	reader.Comma = delimiter
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	if err != nil {
-		return rowSet{}, err
-	}
-	if len(records) == 0 {
-		return rowSet{}, nil
-	}
-	headers := records[0]
-	rows := make([]map[string]any, 0, len(records)-1)
-	for _, record := range records[1:] {
-		row := make(map[string]any, len(headers))
-		for i, header := range headers {
-			value := ""
-			if i < len(record) {
-				value = record[i]
-			}
-			row[header] = value
-		}
-		rows = append(rows, row)
-	}
-	return rowSet{rows: rows}, nil
-}
-
-func loadJSONRows(path string, singleObject bool) (rowSet, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return rowSet{}, err
-	}
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return rowSet{}, err
-	}
-	if singleObject {
-		return rowSet{rows: []map[string]any{{"_": value}}}, nil
-	}
-	switch typed := value.(type) {
-	case []any:
-		rows := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			if m, ok := item.(map[string]any); ok {
-				rows = append(rows, m)
-			} else {
-				rows = append(rows, map[string]any{"_": item})
-			}
-		}
-		return rowSet{rows: rows}, nil
-	case map[string]any:
-		return rowSet{rows: []map[string]any{typed}}, nil
-	default:
-		return rowSet{rows: []map[string]any{{"_": typed}}}, nil
-	}
-}
-
+// sampleRows returns a sample of rows for validation (up to 60 total).
 func sampleRows(rows []map[string]any) []map[string]any {
-	if len(rows) <= 60 {
+	if len(rows) == 0 {
 		return rows
 	}
-	out := make([]map[string]any, 0, 60)
-	out = append(out, rows[:50]...)
-	out = append(out, rows[len(rows)-10:]...)
+	// Collect all keys from all rows to form a synthetic header.
+	keys := make([]string, 0)
+	keySet := map[string]bool{}
+	for _, row := range rows {
+		for k := range row {
+			if !keySet[k] {
+				keySet[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+
+	matrix := make([][]string, 0, len(rows)+1)
+	matrix = append(matrix, keys)
+	for _, row := range rows {
+		r := make([]string, len(keys))
+		for i, k := range keys {
+			r[i] = fmt.Sprint(row[k])
+		}
+		matrix = append(matrix, r)
+	}
+
+	sampled := ds.SampleRows(matrix, 0)
+	if len(sampled) == 0 {
+		return nil
+	}
+	// Convert back to []map[string]any.
+	header := sampled[0]
+	out := make([]map[string]any, 0, len(sampled)-1)
+	for _, row := range sampled[1:] {
+		m := make(map[string]any, len(header))
+		for i, k := range header {
+			if i < len(row) {
+				m[k] = row[i]
+			}
+		}
+		out = append(out, m)
+	}
 	return out
 }
 
+// validateRows validates rows against the column schema and returns error
+// messages in the format the lint rules emit.
 func validateRows(rows []map[string]any, schema []column) []string {
-	var errs []string
-	for i, row := range rows {
-		for _, col := range schema {
-			value, ok := row[col.Name]
-			if !ok {
-				errs = append(errs, fmt.Sprintf("row=%d col=%s missing", i+1, col.Name))
-				continue
-			}
-			if !coerces(value, col.Type) {
-				errs = append(errs, fmt.Sprintf("row=%d col=%s want=%s got=%q", i+1, col.Name, col.Type, fmt.Sprint(value)))
+	if len(rows) == 0 || len(schema) == 0 {
+		return nil
+	}
+
+	// Collect all keys from all rows to build the header.
+	keys := make([]string, 0)
+	keySet := map[string]bool{}
+	for _, row := range rows {
+		for k := range row {
+			if !keySet[k] {
+				keySet[k] = true
+				keys = append(keys, k)
 			}
 		}
 	}
-	return errs
+
+	matrix := make([][]string, 0, len(rows)+1)
+	matrix = append(matrix, keys)
+	for _, row := range rows {
+		r := make([]string, len(keys))
+		for i, k := range keys {
+			r[i] = fmt.Sprint(row[k])
+		}
+		matrix = append(matrix, r)
+	}
+
+	cols := make([]ds.Column, len(schema))
+	copy(cols, schema)
+
+	errs := ds.ValidateRows(matrix, cols)
+	msgs := make([]string, 0, len(errs))
+	for _, e := range errs {
+		if e.Missing {
+			msgs = append(msgs, fmt.Sprintf("row=%d col=%s missing", e.Row, e.Column))
+		} else {
+			msgs = append(msgs, fmt.Sprintf("row=%d col=%s want=%s got=%q", e.Row, e.Column, e.Want, e.Got))
+		}
+	}
+	return msgs
 }
 
+// rawRowsToRowSet converts [][]string (header + data rows) to a rowSet.
+func rawRowsToRowSet(rawRows [][]string) rowSet {
+	if len(rawRows) == 0 {
+		return rowSet{}
+	}
+	header := rawRows[0]
+	rows := make([]map[string]any, 0, len(rawRows)-1)
+	for _, record := range rawRows[1:] {
+		row := make(map[string]any, len(header))
+		for i, h := range header {
+			val := ""
+			if i < len(record) {
+				val = record[i]
+			}
+			row[h] = val
+		}
+		rows = append(rows, row)
+	}
+	return rowSet{rows: rows}
+}
+
+// coerces delegates to ds.ValidateRows for type checking. Retained for any
+// direct callers within the lint package.
 func coerces(value any, ty string) bool {
 	if value == nil {
 		return true
 	}
 	s := strings.TrimSpace(fmt.Sprint(value))
-	if s == "" {
-		return true
-	}
-	switch ty {
-	case "string":
-		return true
-	case "integer":
-		if _, ok := value.(bool); ok {
-			return false
-		}
-		if f, ok := value.(float64); ok {
-			return f == float64(int64(f))
-		}
-		if strings.HasPrefix(s, "-") {
-			s = s[1:]
-		}
-		if s == "" {
-			return false
-		}
-		for _, r := range s {
-			if r < '0' || r > '9' {
-				return false
-			}
-		}
-		return true
-	case "number":
-		_, err := strconv.ParseFloat(s, 64)
-		return err == nil
-	case "boolean":
-		switch strings.ToLower(s) {
-		case "true", "false", "1", "0":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
+	return ds.ValidateRows(
+		[][]string{{"_col"}, {s}},
+		[]ds.Column{{Name: "_col", Type: ty}},
+	) == nil
 }

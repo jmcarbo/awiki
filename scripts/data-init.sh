@@ -5,6 +5,17 @@ set -euo pipefail
 # Mirrors scripts/task-init.sh: each step detects its own state and skips
 # work that is already done.
 
+AWIKI_DI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_DI_REPO_ROOT="$(cd "$AWIKI_DI_SCRIPT_DIR/.." && pwd)"
+AWIKI_DI_GO_BIN="$AWIKI_DI_REPO_ROOT/bin/awiki"
+
+# Go shim is opt-in until bats parity verified (DATA-INIT|done line and
+# encryption-step record format need to match bash exactly first).
+if [[ "${AWIKI_DATA_INIT_GO:-0}" == "1" && -x "$AWIKI_DI_GO_BIN" ]]; then
+  cd "$AWIKI_DI_REPO_ROOT" || exit 1
+  exec "$AWIKI_DI_GO_BIN" data-init "$@"
+fi
+
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 

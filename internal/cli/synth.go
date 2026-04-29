@@ -1,17 +1,21 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"awiki/internal/adapters"
 	"awiki/internal/config"
 	"awiki/internal/synth"
 )
+
+var synthSlugRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // runSynth dispatches `awiki synth <verb> [args]`.
 func runSynth(args []string, stdout, stderr io.Writer) int {
@@ -28,7 +32,9 @@ func runSynth(args []string, stdout, stderr io.Writer) int {
 	switch verb {
 	case "list":
 		return runSynthList(r, rest, stdout, stderr)
-	case "resolve", "refine", "new", "regen", "accept-stage", "finalize":
+	case "resolve":
+		return runSynthResolve(r, rest, stdout, stderr)
+	case "refine", "new", "regen", "accept-stage", "finalize":
 		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
 		return 1
 	default:
@@ -56,9 +62,31 @@ func buildSynthRunner() (*synth.Runner, error) {
 		ContentDir: filepath.Join(repoRoot, "content"),
 		PluginDir:  pluginDir,
 		Config:     cfg,
-		Qmd:        nil,
+		Qmd:        adapters.ExecQmd{},
 		PostHook:   adapters.ExecPostHook{},
 	}, nil
+}
+
+func runSynthResolve(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth resolve", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: awiki synth resolve <slug>")
+		return 1
+	}
+	slug := fs.Arg(0)
+	if !synthSlugRegexp.MatchString(slug) {
+		fmt.Fprintf(stderr, "synth resolve: invalid slug %q (must match [a-z0-9][a-z0-9-]*)\n", slug)
+		return 1
+	}
+	if err := r.Resolve(context.Background(), slug, stdout); err != nil {
+		fmt.Fprintf(stderr, "synth resolve: %v\n", err)
+		return 2
+	}
+	return 0
 }
 
 func runSynthList(r *synth.Runner, args []string, stdout, stderr io.Writer) int {

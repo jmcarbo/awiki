@@ -1,0 +1,74 @@
+package cli
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"awiki/internal/adapters"
+	"awiki/internal/config"
+	"awiki/internal/synth"
+)
+
+// runSynth dispatches `awiki synth <verb> [args]`.
+func runSynth(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: awiki synth <verb> [args]")
+		return 1
+	}
+	verb, rest := args[0], args[1:]
+	r, err := buildSynthRunner()
+	if err != nil {
+		fmt.Fprintf(stderr, "synth: %v\n", err)
+		return 1
+	}
+	switch verb {
+	case "list":
+		return runSynthList(r, rest, stdout, stderr)
+	case "resolve", "refine", "new", "regen", "accept-stage", "finalize":
+		fmt.Fprintf(stderr, "synth: verb %q not yet ported\n", verb)
+		return 1
+	default:
+		fmt.Fprintf(stderr, "synth: unknown verb %q\n", verb)
+		return 1
+	}
+}
+
+func buildSynthRunner() (*synth.Runner, error) {
+	repoRoot := os.Getenv("AWIKI_REPO_ROOT")
+	if repoRoot == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		repoRoot = wd
+	}
+	pluginDir := os.Getenv("AWIKI_SYNTH_PLUGINS_DIR")
+	if pluginDir == "" {
+		pluginDir = filepath.Join(repoRoot, "plugins", "synth")
+	}
+	cfg, _ := config.Load(filepath.Join(repoRoot, ".awiki", "config"))
+	return &synth.Runner{
+		RepoRoot:   repoRoot,
+		ContentDir: filepath.Join(repoRoot, "content"),
+		PluginDir:  pluginDir,
+		Config:     cfg,
+		Qmd:        nil,
+		PostHook:   adapters.ExecPostHook{},
+	}, nil
+}
+
+func runSynthList(r *synth.Runner, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("synth list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if err := r.List(stdout); err != nil {
+		fmt.Fprintf(stderr, "synth list: %v\n", err)
+		return 2
+	}
+	return 0
+}

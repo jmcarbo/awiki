@@ -146,21 +146,6 @@ func BlockIDPattern() *regexp.Regexp {
 	return blockIDPattern
 }
 
-// ValidIDPattern returns the compiled regexp for valid block IDs.
-func ValidIDPattern() *regexp.Regexp {
-	return validIDPattern
-}
-
-// ValidPlainIDPattern returns the compiled regexp for plain (non-chain) block IDs.
-func ValidPlainIDPattern() *regexp.Regexp {
-	return validPlainIDPattern
-}
-
-// ValidChainIDPattern returns the compiled regexp for chain block IDs (base~n).
-func ValidChainIDPattern() *regexp.Regexp {
-	return validChainIDPattern
-}
-
 // TokenKeyPattern returns the compiled regexp for key:value tail tokens.
 func TokenKeyPattern() *regexp.Regexp {
 	return tokenKeyPattern

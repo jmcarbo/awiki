@@ -9,6 +9,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Canonical lock-acquire timeouts mirroring scripts/lib/lock.sh
+// (AWIKI_LOCK_TIMEOUT_USER, AWIKI_LOCK_TIMEOUT_DEFERRED). Domain code
+// should reuse these instead of hand-deriving durations.
+const (
+	TimeoutUser     = 30 * time.Second
+	TimeoutDeferred = 180 * time.Second
+)
+
 // ContentionError indicates the lock could not be acquired before the
 // configured timeout. Exit code 7 matches scripts/lib/lock.sh.
 type ContentionError struct {

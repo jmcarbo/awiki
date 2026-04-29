@@ -87,6 +87,19 @@ func runDatasetCompact(r *dataset.Runner, args []string, stdout, stderr io.Write
 	return 0
 }
 
+func runDataInit(args []string, stdout, stderr io.Writer) int {
+	r, err := buildDatasetRunner()
+	if err != nil {
+		fmt.Fprintf(stderr, "data-init: %v\n", err)
+		return 1
+	}
+	if err := r.DataInit(stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "data-init: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func runDatasetNew(r *dataset.Runner, args []string, stdout, stderr io.Writer) int {
 	var format, from string
 	fs := flag.NewFlagSet("dataset new", flag.ContinueOnError)

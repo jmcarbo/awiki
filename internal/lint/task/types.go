@@ -27,32 +27,6 @@ type Options struct {
 	Today      string
 }
 
-type Action struct {
-	ID        string
-	Status    string
-	Text      string
-	File      string
-	AbsPath   string
-	Line      int
-	Context   string
-	Due       string
-	Defer     string
-	Wait      string
-	Since     string
-	Every     string
-	Done      string
-	Priority  string
-	Estimate  string
-	Project   string
-	Raw       string
-	TailKeys  map[string]string
-	HasBadID  bool
-	BadID     string
-	BadDate   string
-	BadKey    string
-	BadStatus string
-}
-
 type PageInfo struct {
 	RelPath     string
 	AbsPath     string

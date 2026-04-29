@@ -2,103 +2,27 @@ package task
 
 import (
 	"regexp"
-	"strings"
-	"time"
+
+	"awiki/internal/action"
 )
 
-var actionLinePattern = regexp.MustCompile(`^\s*[-*]\s+\[([^\]])\]\s+(.+)$`)
-var contextPattern = regexp.MustCompile(`^@[a-z0-9][a-z0-9-]*$`)
-var blockIDPattern = regexp.MustCompile(`^\^([^\s]+)$`)
-var validIDPattern = regexp.MustCompile(`^[a-z0-9]{3,16}(~[0-9]+)?$`)
-var validPlainIDPattern = regexp.MustCompile(`^[a-z0-9]{3,16}$`)
-var validChainIDPattern = regexp.MustCompile(`^[a-z0-9]{3,16}~[0-9]+$`)
-var tokenKeyPattern = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*):(.+)$`)
+// Action is a type alias for action.Action so existing rule code compiles unchanged.
+type Action = action.Action
 
-var allowedTailKeys = map[string]bool{
-	"due": true, "defer": true, "wait": true, "since": true,
-	"every": true, "done": true, "priority": true, "est": true,
-}
-
+// ParseActionLine parses a single task-action line.
+// It delegates to action.ParseLine; existing callers need no changes.
 func ParseActionLine(line string) (Action, bool) {
-	match := actionLinePattern.FindStringSubmatch(line)
-	if len(match) == 0 {
-		return Action{}, false
-	}
-	action := Action{
-		Status:   match[1],
-		Raw:      line,
-		TailKeys: make(map[string]string),
-	}
-	if !strings.Contains(" /?>x-", action.Status) {
-		action.BadStatus = action.Status
-		return action, true
-	}
-	body := match[2]
-	if regexp.MustCompile(`^\[.\]\s+`).MatchString(body) {
-		return Action{}, false
-	}
-	var text []string
-	for _, tok := range strings.Fields(body) {
-		switch {
-		case action.Context == "" && contextPattern.MatchString(tok):
-			action.Context = tok
-		case blockIDPattern.MatchString(tok):
-			id := strings.TrimPrefix(tok, "^")
-			action.ID = id
-			if !validIDPattern.MatchString(id) {
-				action.HasBadID = true
-				action.BadID = id
-			}
-		case tokenKeyPattern.MatchString(tok):
-			parts := tokenKeyPattern.FindStringSubmatch(tok)
-			key, value := parts[1], parts[2]
-			if !allowedTailKeys[key] {
-				action.BadKey = key
-				continue
-			}
-			action.TailKeys[key] = value
-			switch key {
-			case "due":
-				action.Due = value
-			case "defer":
-				action.Defer = value
-			case "wait":
-				action.Wait = value
-			case "since":
-				action.Since = value
-			case "every":
-				action.Every = value
-			case "done":
-				action.Done = value
-			case "priority":
-				action.Priority = value
-			case "est":
-				action.Estimate = value
-			}
-			if isDateKey(key) && !validDate(value) {
-				action.BadDate = key + ":" + value
-			}
-		default:
-			if action.Context == "" && len(action.TailKeys) == 0 && action.ID == "" {
-				text = append(text, tok)
-			}
-		}
-	}
-	action.Text = strings.Join(text, " ")
-	return action, true
+	return action.ParseLine(line)
 }
 
-func isDateKey(key string) bool {
-	return key == "due" || key == "defer" || key == "since" || key == "done"
-}
-
-func validDate(value string) bool {
-	if len(value) != 10 {
-		return false
-	}
-	_, err := time.Parse("2006-01-02", value)
-	return err == nil
-}
+// Package-level pattern variables used by scan.go and fix.go.
+// These are thin references to the canonical vars in the action package.
+var (
+	actionLinePattern = action.ActionLinePattern()
+	contextPattern    = action.ContextPattern()
+	blockIDPattern    = action.BlockIDPattern()
+	tokenKeyPattern   = action.TokenKeyPattern()
+)
 
 func normalizeDateToken(value string) string {
 	parts := regexp.MustCompile(`^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$`).FindStringSubmatch(value)

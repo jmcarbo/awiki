@@ -4,6 +4,27 @@ set -euo pipefail
 # scripts/synth.sh — orchestrator for awiki synthesis pages.
 # Subcommands: new | regen | accept-stage | finalize | list | resolve | refine
 
+AWIKI_SYNTH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_SYNTH_REPO_ROOT="$(cd "$AWIKI_SYNTH_SCRIPT_DIR/.." && pwd)"
+AWIKI_SYNTH_GO_BIN="$AWIKI_SYNTH_REPO_ROOT/bin/awiki"
+
+# Verbs already ported to Go. Add to this array as each verb ships.
+AWIKI_SYNTH_GO_VERBS=(list resolve refine)
+
+if [[ "${AWIKI_SYNTH_LEGACY:-0}" != "1" && -x "$AWIKI_SYNTH_GO_BIN" ]]; then
+  case "${1:-}" in
+    --) shift ;;
+  esac
+  verb="${1:-}"
+  for v in "${AWIKI_SYNTH_GO_VERBS[@]}"; do
+    if [[ "$v" == "$verb" ]]; then
+      shift
+      cd "$AWIKI_SYNTH_REPO_ROOT" || exit 1
+      exec "$AWIKI_SYNTH_GO_BIN" synth "$verb" "$@"
+    fi
+  done
+fi
+
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 

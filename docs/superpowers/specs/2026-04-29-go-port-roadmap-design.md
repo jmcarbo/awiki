@@ -57,10 +57,18 @@ Multi-verb domains take nested subcommands; one-shots stay flat.
   <verb>`, `awiki query <verb>`, `awiki ingest <verb>`, `awiki template
   <verb>`.
 - Flat: `awiki lint`, `awiki agenda`, `awiki triage`, `awiki capture`,
-  `awiki recur`, `awiki review`, `awiki rename`, `awiki delete`, `awiki
-  log`, `awiki reindex`, `awiki build`, `awiki serve`, `awiki check-deps`,
-  `awiki install-hooks`, `awiki encrypt-init`, `awiki watchdog`,
-  `awiki bootstrap-step`, `awiki data-init`, `awiki task-init`.
+  `awiki recur`, `awiki recur-dry`, `awiki review`, `awiki scan`,
+  `awiki rename`, `awiki delete`, `awiki log`, `awiki reindex`,
+  `awiki build`, `awiki serve`, `awiki check-deps`,
+  `awiki install-hooks`, `awiki install-qmd`, `awiki encrypt-init`,
+  `awiki watchdog`, `awiki bootstrap-step`, `awiki data-init`,
+  `awiki task-init`, plus the per-format ingest workers above.
+
+`awiki review` ports the existing chain (`agenda` → `lint` →
+`review-status`), not a single shell call. `data-init` and `task-init`
+stay flat (instead of `awiki dataset init` / `awiki ops task-init`) to
+preserve the current `just data-init` / `just task-init` caller
+contract; this is a compat carve-out, not an oversight.
 
 ### Compatibility strategy: shim then delete
 
@@ -105,13 +113,25 @@ domain delete last.
 Each domain ships under one umbrella spec as one infra slice plus N verb
 sub-slices, plus a cleanup slice.
 
+### Slice 0: lint cleanup (already queued)
+
+The lint port shipped without the cleanup slice. Bash and Python lint
+files still live under `scripts/` (`lint.sh`, `lint-synth.sh`,
+`lint-data.sh`, `lint-chart.sh`, `lint-query.sh`, and five
+`lint-synth-*.py` helpers). Slice 0 of this roadmap deletes those after
+confirming Go test coverage matches, in line with the standard cleanup
+slice (see "Cleanup criteria"). It is not one of the seven domains
+listed below.
+
 ### Infra slice (first PR per domain)
 
 - Add `internal/<domain>/` package skeleton, types, fixture loader, golden
   test harness wiring.
 - Register nested command in `internal/cli`. Dispatch returns
   "verb not yet ported" for any verb not in the first sub-slice.
-- Wire shim once first sub-slice ships.
+- Bash scripts and the justfile are unchanged. The shim is wired in the
+  **first verb sub-slice**, not here, because there is nothing to delegate
+  to until a verb actually exists in Go.
 
 ### Verb sub-slice (each subsequent PR)
 
@@ -199,12 +219,21 @@ internal/
 ### Shared building blocks (extracted before first domain port)
 
 These are pulled out before `synth` so every domain consumes one
-implementation:
+implementation. The extraction is a **lint refactor slice** (no behavior
+change): the helpers already exist inside `internal/lint/` (atomic write,
+lock, managed-region, record formats) and get lifted into the new shared
+packages, then lint imports them. This slice precedes the synth infra
+slice and ships green-field for everyone after lint.
 
 - `fsutil` ports `scripts/lib/lock.sh` and the atomic-write helpers
   already used by lint.
 - `region` ports `scripts/lib/managed-region.sh`. Synth, agenda, query,
   and dataset all depend on this.
+- `action` ports `scripts/lib/action-grammar.sh`. The single most
+  cross-cutting bash library: sourced by `action-recur.sh`,
+  `action-scan.sh`, `triage.sh`, `task-layer-migrate-review.sh`,
+  `lint.sh`, and `ingest-git.sh`. It owns action-line tokenization and
+  must be shared, not re-implemented per domain.
 - `config` reads `.awiki/config`.
 - `emit` owns the `LINT|`, `FIX|`, `AGENT-PROMPT|`, `INGEST|`, `REVIEW|`,
   `RECUR|` record formats so domain code never builds the strings by
@@ -212,8 +241,9 @@ implementation:
 - `adapters` is the only package allowed to call `os/exec`. Domain
   packages take an adapter interface and unit tests inject fakes.
 
-Each domain package depends only on `wiki`, `fsutil`, `region`, `config`,
-`emit`, `adapters`, and `testutil`. There are no cross-domain imports.
+Each domain package depends only on `wiki`, `fsutil`, `region`, `action`,
+`config`, `emit`, `adapters`, and `testutil`. There are no cross-domain
+imports.
 
 ## Domain scope
 
@@ -231,6 +261,9 @@ synth spec).
 
 External boundary: plugin loader keeps the existing plugin protocol
 (plugins remain external scripts) but dispatch lives in Go.
+`synth-export-anki.py` carries algorithmic logic (Anki package
+generation) and is treated as Python algorithmic logic for the risks
+section: rich golden fixtures required.
 
 ### 2. dataset
 
@@ -264,21 +297,49 @@ Bash/Python: `ingest.sh`, `ingest-xlsx.sh`,
 `scripts/lib/git-state.sh`, `ingest-pdf.sh`, `ingest-audio.sh`,
 `watchdog.sh`, `capture.sh`.
 
-CLI maps the existing justfile recipes: `awiki ingest <path>` auto-detects
-type (matches `just ingest <path>`); `awiki ingest xlsx <path>`,
-`awiki ingest git <spec>`, `awiki ingest pdf <path>`,
-`awiki ingest audio <path>` mirror the per-format recipes. The
-agent-driven variant (`just ingest-with-agent path agent`) ports as
-`awiki ingest --agent=<cli> <path>`. Plus `awiki watchdog` and
-`awiki capture` flat. Native: `fsnotify`, `go-git`. Exec: `pdftotext`,
-`whisper`, `qmd`.
+CLI maps the existing justfile recipes as **flat verbs** (matches the
+"flat verbs for one-shots" rule and avoids the path-vs-subverb
+ambiguity that nested ingest dispatch would create):
+
+- `awiki ingest <path>` — bookkeeping flow, mirrors `just ingest <path>`.
+  Auto-detects format by extension and delegates to the per-format
+  workers below for extraction, then runs the bookkeeping step
+  (`AGENT-PROMPT|...` for steps 3-9 of `WIKI.md §4.1`).
+- `awiki ingest --agent=<cli> <path>` — agent-driven variant, mirrors
+  `just ingest-with-agent`.
+- `awiki ingest-xlsx <path>`, `awiki ingest-git <spec>`,
+  `awiki ingest-pdf <path>`, `awiki ingest-audio <path>` — per-format
+  workers, mirror the existing format-specific recipes. Each worker is
+  format extraction only; bookkeeping is invoked separately by
+  `awiki ingest <path>`.
+- `awiki watchdog`, `awiki capture` — flat.
+- `awiki ingest-batch-list`, `awiki ingest-git-list` — flat listers.
+
+Native: `fsnotify`, `go-git`. Exec: `pdftotext`, `whisper`, `qmd`. The
+ingest spec pins which python helpers (`xlsx-extract.py`,
+`ingest-git-transform.py`) port as Go versus stay exec-via-adapter.
 
 ### 6. template
 
-Bash: `template-init.sh`, `template-update.sh` (~971 LOC),
-`template-step.sh`, `template-retrofit.sh`, `template-merge.sh`,
-`template-plan.sh`, `template-provenance.sh`, `template-source-check.sh`,
+Bash: `template-init.sh`, `template-update.sh` (~971 LOC, mostly a
+driver around `scripts/_template_helpers/`), `template-step.sh`,
+`template-retrofit.sh`, `template-merge.sh`, `template-plan.sh`,
+`template-provenance.sh`, `template-source-check.sh`,
 `template-manifest.sh`, `template-attr-audit.sh`, `template-config.sh`.
+
+Python helpers under `scripts/_template_helpers/` (12 modules:
+`availability.py`, `bootstrap_hash.py`, `bootstrap_replay.py`,
+`cache_rotate.py`, `escape.py`, `lint_template.py`, `manifest_parse.py`,
+`migration.py`, `plan_emit.py`, `preflight.py`, `provenance.py`,
+`state.py`, `sync.py`) carry the heaviest algorithmic logic in the
+domain. The template port is dominated by porting these helpers, not by
+porting the bash drivers; the per-domain spec must enumerate each
+helper's parity oracle.
+
+Markdown payloads under `scripts/templates/` (`wiki-data-layer.md`,
+`wiki-task-layer.md`, `wiki-weekly-review.md`) are user-visible
+artifacts. The template spec pins whether they are embedded into the
+binary (via `embed.FS`) or kept as repo files referenced by path.
 
 CLI: `awiki template {init, update, status, gc, retrofit, merge, plan,
 provenance, source-check, manifest, attr-audit, config}` plus
@@ -286,17 +347,25 @@ provenance, source-check, manifest, attr-audit, config}` plus
 
 ### 7. ops
 
-Bash/Python: `task-init.sh`, `task-layer-migrate-review.sh`, `triage.sh`
-(~856 LOC), `action-scan.sh`, `action-recur.sh`, `agenda.sh`,
-`review-status.sh`, `log-append.sh`, `qmd-index.sh`, `rename.sh`,
-`delete-page.sh`, `update-catalog.sh`, `build.sh`, `serve.sh`,
-`deploy-build.sh`, `install-hooks.sh`, `install-qmd.sh`,
-`encrypt-init.sh`, `check-deps.sh`, `wire-awiki-mcp.sh`,
-`wire-qmd-mcp.sh`.
+Bash/Python: `task-init.sh`, `triage.sh` (~856 LOC), `action-scan.sh`,
+`action-recur.sh`, `agenda.sh`, `review-status.sh`, `log-append.sh`,
+`qmd-index.sh`, `rename.sh`, `delete-page.sh`, `update-catalog.sh`,
+`build.sh`, `serve.sh`, `deploy-build.sh`, `install-hooks.sh`,
+`install-qmd.sh`, `encrypt-init.sh`, `check-deps.sh`,
+`wire-awiki-mcp.sh`, `wire-qmd-mcp.sh`.
 
-CLI: mostly flat verbs (see CLI shape above). Python helpers (none in
-this domain) — covered. Some scripts may stay bash forever (see Open
-questions).
+`update-catalog.sh` is invoked by both `ingest-git.sh` and the agenda
+chain. It ports as part of `ops` (verb: `awiki update-catalog` flat),
+and `ingest-git`'s adapter calls the Go function directly rather than
+re-implementing.
+
+`task-layer-migrate-review.sh` is a one-off migration tool, not a
+recurring verb. Disposition: keep as bash, do not port. It will be
+deleted in the ops cleanup slice once the migration window has passed
+(no users depend on it being callable from Go).
+
+CLI: mostly flat verbs (see CLI shape above). Some scripts may stay bash
+forever (see Open questions).
 
 ## Compatibility contract (per domain)
 
@@ -304,10 +373,14 @@ Locked before the infra slice merges:
 
 - Justfile recipes keep their current name and argument shape.
 - Emitted records (`LINT|`, `FIX|`, `AGENT-PROMPT|`, `INGEST|`, `REVIEW|`,
-  `RECUR|`, etc.) are byte-identical to the bash output.
+  `RECUR|`, etc.) are **per-record byte-identical** to the bash output.
+  Where bash emits records in non-deterministic order (parallel
+  ingest, multi-page lint), parity is asserted on the sorted record set
+  using a per-domain stable sort key, not on raw output order.
 - Written file shapes (frontmatter keys, managed-region markers,
   dataset/chart sidecars, synth page bodies, template manifests) are
-  byte-identical.
+  byte-identical, modulo timestamps and absolute paths normalized by
+  the golden differ.
 - Exit codes match.
 - Existing bats tests continue to pass against the shim during the
   transition.
@@ -347,8 +420,14 @@ The cleanup slice may merge only when:
 - **CGO temptation.** `go-duckdb`, `git2go` pull CGO. Stay pure Go:
   `go-git` is pure; `duckdb` stays exec.
 - **Caller regression.** Some users invoke scripts directly
-  (`bash scripts/synth.sh ...`). The shim preserves this; CHANGELOG warns
-  before the cleanup slice deletes scripts.
+  (`bash scripts/synth.sh ...`). The shim preserves this; the existing
+  `CHANGELOG.md` records the deletion in the cleanup slice's release
+  notes.
+- **Bats coverage gaps.** The cleanup criterion "bats coverage matched
+  by Go tests" is trivially true for any verb without a bats test today.
+  Mitigation: each per-domain spec audits existing bats files and lists
+  any verb without coverage; those verbs get a new behavioral test
+  before the verb sub-slice merges, not after.
 
 ## Open questions (defer to per-domain spec)
 

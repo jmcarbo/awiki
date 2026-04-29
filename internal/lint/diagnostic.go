@@ -1,6 +1,8 @@
 package lint
 
-import "fmt"
+import (
+	"awiki/internal/emit"
+)
 
 type Level string
 
@@ -18,10 +20,7 @@ type Diagnostic struct {
 }
 
 func (d Diagnostic) Record() string {
-	if d.Code != "" {
-		return fmt.Sprintf("LINT|%s|%s|%s|%s", d.Level, d.File, d.Code, d.Message)
-	}
-	return fmt.Sprintf("LINT|%s|%s|%s", d.Level, d.File, d.Message)
+	return emit.Lint(string(d.Level), d.File, d.Code, d.Message)
 }
 
 type FixRecord struct {
@@ -30,7 +29,7 @@ type FixRecord struct {
 }
 
 func (r FixRecord) Record() string {
-	return fmt.Sprintf("FIX|%s|%s", r.File, r.Message)
+	return emit.Fix(r.File, r.Message)
 }
 
 type Collector struct {
@@ -62,7 +61,7 @@ func (c Collector) Counts() (errors int, warnings int, infos int) {
 
 func (c Collector) Summary() string {
 	errors, warnings, infos := c.Counts()
-	return fmt.Sprintf("LINT-SUMMARY|errors=%d|warnings=%d|info=%d", errors, warnings, infos)
+	return emit.LintSummary(errors, warnings, infos)
 }
 
 func (c Collector) ExitCode() int {

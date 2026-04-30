@@ -1,7 +1,18 @@
 set shell := ["bash", "-uc"]
 
+# Prepend repo-local bin/ to PATH so all recipes find `awiki` without
+# the user having to add bin/ to their shell PATH.
+export PATH := absolute_path("bin") + ":" + env_var("PATH")
+
 default:
     @just --list
+
+# Build the awiki Go binary into bin/awiki. Recipes prepend bin/ to
+# PATH so this binary is what `awiki <verb>` resolves to. Run this
+# once after clone, and after each `git pull` that touches Go sources.
+build-self:
+    @mkdir -p bin
+    go build -o bin/awiki ./cmd/awiki
 
 # === ingest ===
 # Bookkeeping only: moves the source, logs, lints, reindexes. Prints

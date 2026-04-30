@@ -1,3 +1,10 @@
+## [1.3.3] - 2026-04-30
+
+Justfile prepends `<repoRoot>/bin` to PATH so `awiki <verb>` resolves
+to the local build without the user having to add bin/ to their
+shell PATH. New `just build-self` recipe compiles bin/awiki; run
+after clone or after Go-source changes.
+
 ## [1.3.2] - 2026-04-30
 
 Fix `awiki template update --continue` failing with "nothing to

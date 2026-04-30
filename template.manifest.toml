@@ -1,5 +1,5 @@
 schema_version = 1
-template_version = "1.3.2"
+template_version = "1.3.3"
 
 [strategies]
 overwrite        = ["scripts/**", "layouts/**", "mcp/awiki-server/**", "deploy/**", "scheduled/**", "BOOTSTRAP.md", "README.md", "justfile", "tests/**"]

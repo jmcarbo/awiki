@@ -7,12 +7,12 @@ import (
 	"os/exec"
 )
 
-// IngestLint shells the repo's lint script for the auto-lint phase of
+// IngestLint shells the repo's lint verb for the auto-lint phase of
 // the ingest bookkeep flow (scripts/ingest.sh:84-98). When the
 // AWIKI_LINT_CMD env var is set on the supplied env (or in the process
 // environment when env is nil), the adapter runs that command via
 // `sh -c` (mirroring bash's `eval "$AWIKI_LINT_CMD"` test/override
-// hook). Otherwise it shells `bash <repoRoot>/scripts/lint.sh`.
+// hook). Otherwise it shells `<awiki-bin> lint`.
 //
 // The bash form runs the command in a subshell so an `exit` in the
 // override cannot terminate the parent script. The Go adapter mirrors
@@ -37,7 +37,7 @@ func (ExecIngestLint) Run(ctx context.Context, repoRoot string, env []string) (i
 	if override != "" {
 		cmd = exec.CommandContext(ctx, "sh", "-c", override)
 	} else {
-		cmd = exec.CommandContext(ctx, "bash", resolveScript(repoRoot, "lint.sh"))
+		cmd = exec.CommandContext(ctx, ResolveAwikiBin(repoRoot), "lint")
 	}
 	cmd.Dir = repoRoot
 	if env != nil {

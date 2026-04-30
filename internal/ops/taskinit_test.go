@@ -294,8 +294,11 @@ func TestTaskInitInstallsPreCommitWhenAssumeYes(t *testing.T) {
 	if !strings.Contains(body, "# task-layer") {
 		t.Fatalf("missing marker: %s", body)
 	}
-	if !strings.Contains(body, "action-scan.sh") {
-		t.Fatalf("missing action-scan: %s", body)
+	if !strings.Contains(body, "awiki scan") {
+		t.Fatalf("missing scan invocation: %s", body)
+	}
+	if !strings.Contains(body, "awiki lint --alias-build-only") {
+		t.Fatalf("missing lint --alias-build-only: %s", body)
 	}
 	info, _ := os.Stat(hook)
 	if info.Mode()&0o111 == 0 {

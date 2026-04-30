@@ -33,24 +33,31 @@ func (ExecRunner) RunInDir(ctx context.Context, dir string, name string, args ..
 }
 
 func LegacyLint(ctx context.Context, r Runner, toolRoot string, wikiRoot string, only string, onlyFile string, contentDir string, fix bool) (string, int, error) {
-	args := []string{"AWIKI_LINT_LEGACY=1"}
+	// Shells the awiki binary's `lint` verb directly. Historical
+	// callers wrapped `bash scripts/lint.sh` with an `AWIKI_LINT_LEGACY=1`
+	// env so the shim fell through to the legacy bash logic. With
+	// every namespace ported to Go, the shim is gone and the env
+	// gating with it — but we keep the AWIKI_REPO_ROOT pass-through
+	// because the lint engine still consults it for content discovery.
+	bin := ResolveAwikiBin(toolRoot)
+	envArgs := []string{}
 	if wikiRoot != "" {
-		args = append(args, "AWIKI_REPO_ROOT="+wikiRoot)
+		envArgs = append(envArgs, "AWIKI_REPO_ROOT="+wikiRoot)
 	}
-	args = append(args, "bash", "scripts/lint.sh")
+	envArgs = append(envArgs, bin, "lint")
 	if only != "" {
-		args = append(args, "--only="+only)
+		envArgs = append(envArgs, "--only="+only)
 	}
 	if fix {
-		args = append(args, "--fix")
+		envArgs = append(envArgs, "--fix")
 	}
 	if onlyFile != "" {
-		args = append(args, "--file="+onlyFile)
+		envArgs = append(envArgs, "--file="+onlyFile)
 	}
 	if contentDir != "" {
-		args = append(args, contentDir)
+		envArgs = append(envArgs, contentDir)
 	}
-	return r.RunInDir(ctx, toolRoot, "env", args...)
+	return r.RunInDir(ctx, toolRoot, "env", envArgs...)
 }
 
 func HugoCheck(ctx context.Context, r Runner, repoRoot string) (string, int, error) {

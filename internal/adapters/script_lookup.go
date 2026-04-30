@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -36,4 +37,37 @@ func resolveScript(repoRoot, name string) string {
 		}
 	}
 	return filepath.Join("scripts", name)
+}
+
+// ResolveAwikiBin returns the path of the awiki binary so a Go caller
+// can shell into another verb without recursion-by-package-import.
+//
+// Resolution order, returning the first hit:
+//
+//  1. <repoRoot>/bin/awiki                  (source-tree convention)
+//  2. os.Executable()                       (the running binary itself)
+//  3. exec.LookPath("awiki")                (PATH fallback)
+//  4. literal "awiki"                       (bare name; PATH lookup at exec time)
+//
+// The bare-name fallback keeps callers in unit tests that chdir to a
+// fixture root working — the missing-binary error surfaces via the
+// `exec` syscall with a clear message instead of a panic here.
+func ResolveAwikiBin(repoRoot string) string {
+	cand := filepath.Join(repoRoot, "bin", "awiki")
+	if _, err := os.Stat(cand); err == nil {
+		if abs, err := filepath.Abs(cand); err == nil {
+			return abs
+		}
+		return cand
+	}
+	if exe, err := os.Executable(); err == nil {
+		if abs, err := filepath.EvalSymlinks(exe); err == nil {
+			return abs
+		}
+		return exe
+	}
+	if path, err := exec.LookPath("awiki"); err == nil {
+		return path
+	}
+	return "awiki"
 }

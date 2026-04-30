@@ -14,6 +14,7 @@ import (
 	"awiki/internal/config"
 	"awiki/internal/ingest"
 	"awiki/internal/ingest/formats"
+	gitingest "awiki/internal/ingest/git"
 )
 
 // runIngestVerb dispatches the flat ingest verbs (`awiki ingest`,
@@ -222,8 +223,75 @@ func runIngestXLSX(r *ingest.Runner, args []string, stdout, stderr io.Writer) in
 	return 0
 }
 
-func runIngestGit(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-git", stderr)
+// runIngestGit parses `awiki ingest-git <repo-spec> [flags]` and
+// delegates to git.Run. Mirrors the bash flag parser in
+// scripts/ingest-git.sh:17-55:
+//
+//   - --paths=<csv>        override include paths
+//   - --private            force private routing
+//   - --protect-edits      stage conflicts under raw/inbox/checkpoint/.staged/
+//   - --summarize          (reserved; not implemented v1)
+//   - --dry-run            print PLAN + exit 0
+//   - --repo-name=<name>   override derived name for slug prefix + entity page
+//   - -h | --help          print usage and exit 0
+func runIngestGit(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: ingest-git.sh <repo-spec> [flags]")
+		return 1
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		fmt.Fprintln(stdout, "usage: ingest-git.sh <repo-spec> [flags]")
+		fmt.Fprintln(stdout, "")
+		fmt.Fprintln(stdout, "  <repo-spec>          local path | https URL | git@ URL | config alias")
+		fmt.Fprintln(stdout, "  --paths=<csv>        override include paths (default README.md,docs/,rfcs/,adr/)")
+		fmt.Fprintln(stdout, "  --private            force private routing")
+		fmt.Fprintln(stdout, "  --protect-edits      stage conflicts under raw/inbox/checkpoint/.staged/")
+		fmt.Fprintln(stdout, "  --summarize          (reserved; not implemented v1)")
+		fmt.Fprintln(stdout, "  --dry-run            print plan + exit 0; no writes")
+		fmt.Fprintln(stdout, "  --repo-name=<name>   override derived name for slug prefix + entity page")
+		return 0
+	}
+
+	opts := gitingest.RunOptions{Spec: args[0]}
+	for _, a := range args[1:] {
+		switch {
+		case strings.HasPrefix(a, "--paths="):
+			opts.PathsOverride = strings.TrimPrefix(a, "--paths=")
+		case a == "--private":
+			opts.Private = true
+		case a == "--protect-edits":
+			opts.ProtectEdits = true
+		case a == "--summarize":
+			opts.Summarize = true
+		case a == "--dry-run":
+			opts.DryRun = true
+		case strings.HasPrefix(a, "--repo-name="):
+			opts.RepoNameOverride = strings.TrimPrefix(a, "--repo-name=")
+		case a == "-h" || a == "--help":
+			// Already handled above when first arg.
+			fmt.Fprintln(stdout, "usage: ingest-git.sh <repo-spec> [flags]")
+			return 0
+		default:
+			fmt.Fprintf(stderr, "ERROR: unknown flag: %s\n", a)
+			fmt.Fprintln(stderr, "usage: ingest-git.sh <repo-spec> [flags]")
+			return 1
+		}
+	}
+
+	err := gitingest.Run(context.Background(), r.RepoRoot, r.GitExt, opts, stdout, stderr)
+	if err != nil {
+		var re *gitingest.RunError
+		if errors.As(err, &re) {
+			return re.ExitCode()
+		}
+		var rer *gitingest.ResolveError
+		if errors.As(err, &rer) {
+			return rer.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-git: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // runIngestPDF parses `awiki ingest-pdf <path>` and delegates to

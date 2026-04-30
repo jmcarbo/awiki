@@ -1,11 +1,23 @@
 package git
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func stateFixturePath(t *testing.T, name string) string {
+	t.Helper()
+	_, here, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(here), "..", "..", ".."))
+	return filepath.Join(repoRoot, "tests", "fixtures", "ingest", "git", name)
+}
 
 // TestStatePathRejectsTraversal mirrors the bash
 // `awiki_git_state_validate_repo_key` rejections at
@@ -152,6 +164,44 @@ func TestSaveStateAtomicLeavesNoTemp(t *testing.T) {
 		if strings.Contains(e.Name(), ".tmp.") {
 			t.Errorf("leftover temp file: %s", e.Name())
 		}
+	}
+}
+
+// TestStateFixtureRoundTrip loads the on-disk state fixture, validates
+// it, and roundtrips it through SaveState. Pins compatibility with the
+// JSON shape bash writes (scripts/ingest-git.sh:307).
+func TestStateFixtureRoundTrip(t *testing.T) {
+	fixture := stateFixturePath(t, "state-roundtrip/sample.json")
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	var got State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := ValidateState(got); err != nil {
+		t.Fatalf("ValidateState: %v", err)
+	}
+	if got.RepoName != "bar" {
+		t.Errorf("RepoName = %q", got.RepoName)
+	}
+	if len(got.Files) != 2 {
+		t.Errorf("Files len = %d, want 2", len(got.Files))
+	}
+
+	// Roundtrip via SaveState/LoadState.
+	tmp := t.TempDir()
+	if err := SaveState(tmp, "github-com-foo-bar", got); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+	loaded, ok, err := LoadState(tmp, "github-com-foo-bar")
+	if err != nil || !ok {
+		t.Fatalf("LoadState: ok=%v err=%v", ok, err)
+	}
+	if loaded.RepoKey != got.RepoKey || loaded.HeadSHA != got.HeadSHA {
+		t.Errorf("roundtrip mismatch:\n got %+v\nwant %+v", loaded, got)
 	}
 }
 

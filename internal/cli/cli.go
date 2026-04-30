@@ -80,6 +80,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runWireAwikiMCP(args[1:], stdout, stderr)
 	case "wire-qmd-mcp":
 		return runWireQmdMCP(args[1:], stdout, stderr)
+	case "task-init":
+		return runTaskInit(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

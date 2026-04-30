@@ -111,3 +111,9 @@ func runWireAwikiMCP(args []string, stdout, stderr io.Writer) int {
 func runWireQmdMCP(args []string, stdout, stderr io.Writer) int {
 	return ops.WireQmdMCPCLI(args, stdout, stderr)
 }
+
+// runTaskInit dispatches `awiki task-init`. Mirrors
+// scripts/task-init.sh.
+func runTaskInit(args []string, stdout, stderr io.Writer) int {
+	return ops.TaskInitCLI(args, stdout, stderr)
+}

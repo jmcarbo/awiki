@@ -25,3 +25,9 @@ func runReindex(args []string, stdout, stderr io.Writer) int {
 func runCheckDeps(args []string, stdout, stderr io.Writer) int {
 	return ops.CheckDepsCLI(args, stdout, stderr)
 }
+
+// runRename dispatches `awiki rename <old> <new>`. Mirrors
+// scripts/rename.sh.
+func runRename(args []string, stdout, stderr io.Writer) int {
+	return ops.RenameCLI(args, stdout, stderr)
+}

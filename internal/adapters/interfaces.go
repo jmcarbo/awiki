@@ -83,6 +83,13 @@ type whisperStub struct{}
 
 func (whisperStub) Transcribe(context.Context, string) (string, int, error) { return "", 0, nil }
 
+type xlsxExtractStub struct{}
+
+func (xlsxExtractStub) Slugify(context.Context, string) (string, int, error) { return "", 0, nil }
+func (xlsxExtractStub) Extract(context.Context, XLSXExtractOptions) (string, int, error) {
+	return "", 0, nil
+}
+
 type gitStub struct{}
 
 func (gitStub) Clone(context.Context, string, string) (int, error)            { return 0, nil }

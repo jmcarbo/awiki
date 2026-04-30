@@ -32,12 +32,12 @@ type Runner struct {
 	// the corresponding verbs; the infra slice keeps them as bare
 	// fields so types.go and runner.go compile against the adapter
 	// package without forcing every verb to land at once.
-	PDFToText adapters.PDFToText
-	Whisper   adapters.Whisper
-	XLSX2CSV  adapters.XLSX2CSV
-	FSNotify  adapters.FSNotify
-	GitExt    adapters.GitExt
-	Qmd       adapters.Qmd
+	PDFToText   adapters.PDFToText
+	Whisper     adapters.Whisper
+	XLSXExtract adapters.XLSXExtract
+	FSNotify    adapters.FSNotify
+	GitExt      adapters.GitExt
+	Qmd         adapters.Qmd
 
 	Today string // injected for tests; defaults to time.Now date
 

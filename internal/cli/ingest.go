@@ -65,16 +65,16 @@ func buildIngestRunner() (*ingest.Runner, error) {
 	}
 	cfg, _ := config.Load(filepath.Join(repoRoot, ".awiki", "config"))
 	return &ingest.Runner{
-		RepoRoot:   repoRoot,
-		ContentDir: filepath.Join(repoRoot, "content"),
-		Config:     cfg,
-		PDFToText:  adapters.ExecPDFToText{},
-		Whisper:    adapters.ExecWhisper{},
-		XLSX2CSV:   adapters.ExecXLSX2CSV{},
-		FSNotify:   adapters.ExecFSNotify{},
-		GitExt:     adapters.ExecGitExt{},
-		Qmd:        adapters.ExecQmd{},
-		Today:      todayDate(),
+		RepoRoot:    repoRoot,
+		ContentDir:  filepath.Join(repoRoot, "content"),
+		Config:      cfg,
+		PDFToText:   adapters.ExecPDFToText{},
+		Whisper:     adapters.ExecWhisper{},
+		XLSXExtract: adapters.ExecXLSXExtract{RepoRoot: repoRoot},
+		FSNotify:    adapters.ExecFSNotify{},
+		GitExt:      adapters.ExecGitExt{},
+		Qmd:         adapters.ExecQmd{},
+		Today:       todayDate(),
 	}, nil
 }
 

@@ -72,6 +72,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runBuild(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "install-hooks":
+		return runInstallHooks(args[1:], stdout, stderr)
+	case "install-qmd":
+		return runInstallQmd(args[1:], stdout, stderr)
+	case "wire-awiki-mcp":
+		return runWireAwikiMCP(args[1:], stdout, stderr)
+	case "wire-qmd-mcp":
+		return runWireQmdMCP(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

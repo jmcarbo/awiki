@@ -87,3 +87,27 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 func runServe(args []string, stdout, stderr io.Writer) int {
 	return ops.ServeCLI(args, stdout, stderr)
 }
+
+// runInstallHooks dispatches `awiki install-hooks`. Mirrors
+// scripts/install-hooks.sh.
+func runInstallHooks(args []string, stdout, stderr io.Writer) int {
+	return ops.InstallHooksCLI(args, stdout, stderr)
+}
+
+// runInstallQmd dispatches `awiki install-qmd`. Mirrors
+// scripts/install-qmd.sh.
+func runInstallQmd(args []string, stdout, stderr io.Writer) int {
+	return ops.InstallQmdCLI(args, stdout, stderr)
+}
+
+// runWireAwikiMCP dispatches `awiki wire-awiki-mcp`. Mirrors
+// scripts/wire-awiki-mcp.sh.
+func runWireAwikiMCP(args []string, stdout, stderr io.Writer) int {
+	return ops.WireAwikiMCPCLI(args, stdout, stderr)
+}
+
+// runWireQmdMCP dispatches `awiki wire-qmd-mcp`. Mirrors
+// scripts/wire-qmd-mcp.sh.
+func runWireQmdMCP(args []string, stdout, stderr io.Writer) int {
+	return ops.WireQmdMCPCLI(args, stdout, stderr)
+}

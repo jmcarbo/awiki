@@ -31,3 +31,9 @@ func runCheckDeps(args []string, stdout, stderr io.Writer) int {
 func runRename(args []string, stdout, stderr io.Writer) int {
 	return ops.RenameCLI(args, stdout, stderr)
 }
+
+// runDelete dispatches `awiki delete <slug>`. Mirrors
+// scripts/delete-page.sh.
+func runDelete(args []string, stdout, stderr io.Writer) int {
+	return ops.DeleteCLI(args, stdout, stderr)
+}

@@ -38,6 +38,9 @@ type Runner struct {
 	FSNotify    adapters.FSNotify
 	GitExt      adapters.GitExt
 	Qmd         adapters.Qmd
+	Lint        adapters.IngestLint
+	Agent       adapters.Agent
+	LogAppend   adapters.LogAppend
 
 	Today string // injected for tests; defaults to time.Now date
 

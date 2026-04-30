@@ -407,7 +407,7 @@ func (r *UpdateRunner) runForward() (int, error) {
 		// Currently unsupported by the Go orchestrator. The bash
 		// oracle covers this path; tests for it are kept by the
 		// cleanup slice when no Go counterpart exists.
-		r.out().errf("halt: schema-upgrade flow not yet ported to Go; use bash template-update.sh until ported")
+		r.out().errf("halt: schema-upgrade flow not yet ported to Go")
 		return 1, nil
 	}
 

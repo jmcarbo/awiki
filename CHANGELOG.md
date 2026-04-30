@@ -1,3 +1,11 @@
+## [1.3.2] - 2026-04-30
+
+Fix `awiki template update --continue` failing with "nothing to
+commit, working tree clean" on Commit A when the prior run already
+applied sync changes. Commit A now skips the `git commit` call when
+`git diff --cached --quiet` reports a clean tree, matching the
+existing behavior of Commit B and C.
+
 ## [1.3.1] - 2026-04-30
 
 `awiki template update` now rebuilds `bin/awiki` after Commit A

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"awiki/internal/adapters"
 	"awiki/internal/config"
 	"awiki/internal/ingest"
+	"awiki/internal/ingest/formats"
 )
 
 // runIngestVerb dispatches the flat ingest verbs (`awiki ingest`,
@@ -95,8 +97,28 @@ func runIngestGit(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
 	return notYetPorted("ingest-git", stderr)
 }
 
-func runIngestPDF(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-pdf", stderr)
+// runIngestPDF parses `awiki ingest-pdf <path>` and delegates to
+// formats.IngestPDF. Mirrors the bash usage at scripts/ingest-pdf.sh:4
+// — exactly one positional arg; --help prints usage and exits 0.
+func runIngestPDF(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: awiki ingest-pdf <pdf-path-under-raw/inbox/>")
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: ingest-pdf.sh <pdf-path-under-raw/inbox/>")
+		return 1
+	}
+	_, err := formats.IngestPDF(context.Background(), r, formats.PDFOptions{SourcePath: args[0]}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-pdf: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runIngestAudio(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {

@@ -12,13 +12,13 @@ import (
 // from this list as of slice 2 (it is now ported and has dedicated
 // coverage in internal/ingest/capture_test.go). `ingest-batch-list` and
 // `ingest-git-list` are removed as of slice 3 (leaf listers — coverage
-// in internal/ingest/list_test.go).
+// in internal/ingest/list_test.go). `ingest-pdf` is removed as of
+// slice 4 (coverage in internal/ingest/formats/pdf_test.go).
 func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 	verbs := []string{
 		"ingest",
 		"ingest-xlsx",
 		"ingest-git",
-		"ingest-pdf",
 		"ingest-audio",
 		"watchdog",
 	}

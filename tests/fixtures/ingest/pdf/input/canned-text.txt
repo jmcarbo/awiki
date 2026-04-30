@@ -1,0 +1,4 @@
+Hello PDF
+
+This is the canned text the FakePDFToText returns.
+It stands in for whatever pdftotext -layout would produce.

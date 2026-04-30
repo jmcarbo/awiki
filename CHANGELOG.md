@@ -1,3 +1,12 @@
+## [1.3.1] - 2026-04-30
+
+`awiki template update` now rebuilds `bin/awiki` after Commit A
+(sync) so migrations + bootstrap steps invoke the just-synced
+binary, not a stale one. Falls back gracefully if `go` is not on
+PATH. Bootstrap-step + migration env builders prepend
+`<repoRoot>/bin` to PATH so bash scripts find `awiki` without the
+user having to add bin/ to their shell PATH.
+
 ## [1.3.0] - 2026-04-30
 
 Ports the ingest domain to the `awiki` Go binary (slices 1-9, merged

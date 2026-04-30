@@ -338,7 +338,7 @@ Markdown, comparison table, Marp slide deck (`type: deck`), Matplotlib chart (`t
 
 ## 7. Lint Checklist
 
-Mechanical (`scripts/lint.sh`):
+Mechanical (`awiki lint`):
 - Broken wikilinks.
 - Missing required frontmatter fields per `type`.
 - Stale `last_updated` (>90d, configurable via `AWIKI_STALE_DAYS`).
@@ -388,7 +388,7 @@ Semantic (agent-driven, post-lint review):
 ## 9. Privacy Guarantees
 
 - Agent NEVER moves files into a `private/` path without explicit user confirmation.
-- Lint (`scripts/lint.sh`) warns on `tags: [private]` outside `**/private/`.
+- Lint (`awiki lint`) warns on `tags: [private]` outside `**/private/`.
 - `log.md` ships with `draft: true`; opt-in publishing via BOOTSTRAP.
 - `query` action NOT logged unless `AWIKI_LOG_QUERIES=1` in `.awiki/config`.
 
@@ -418,9 +418,9 @@ Failure to surface prompts to the user before acting violates the Trust Model. A
 <!-- BEGIN task-layer -->
 ## Task Layer (opt-in)
 
-This block is managed by `scripts/task-init.sh`. To remove the layer,
+This block is managed by `awiki task-init`. To remove the layer,
 delete everything between the BEGIN and END markers and run
-`bash scripts/lint.sh` to surface broken references.
+`awiki lint` to surface broken references.
 
 ### Page-kind enum extension
 

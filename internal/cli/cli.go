@@ -151,7 +151,7 @@ func inferLintRepoRoot(contentDir string, fallback string) string {
 		return fallback
 	}
 	parent := filepath.Dir(cleanContent)
-	if !hasLintScript(parent) {
+	if !hasAwikiRoot(parent) {
 		return fallback
 	}
 	if abs, err := filepath.Abs(parent); err == nil {
@@ -161,7 +161,7 @@ func inferLintRepoRoot(contentDir string, fallback string) string {
 }
 
 func inferLintToolRoot(fallback string) string {
-	if hasLintScript(fallback) {
+	if hasAwikiRoot(fallback) {
 		if abs, err := filepath.Abs(fallback); err == nil {
 			return abs
 		}
@@ -170,7 +170,7 @@ func inferLintToolRoot(fallback string) string {
 	exe, err := os.Executable()
 	if err == nil {
 		candidate := filepath.Dir(filepath.Dir(exe))
-		if hasLintScript(candidate) {
+		if hasAwikiRoot(candidate) {
 			if abs, err := filepath.Abs(candidate); err == nil {
 				return abs
 			}
@@ -180,8 +180,12 @@ func inferLintToolRoot(fallback string) string {
 	return fallback
 }
 
-func hasLintScript(root string) bool {
-	_, err := os.Stat(filepath.Join(root, "scripts", "lint.sh"))
+// hasAwikiRoot returns true when the path looks like an awiki repo
+// root. The marker is `content/_index.md` (every awiki site has one)
+// — the historical anchor `scripts/lint.sh` is gone now that lint
+// lives in Go.
+func hasAwikiRoot(root string) bool {
+	_, err := os.Stat(filepath.Join(root, "content", "_index.md"))
 	return err == nil
 }
 

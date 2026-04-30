@@ -58,15 +58,14 @@ func TestParseLintOptionsAcceptsFlagAfterContentDir(t *testing.T) {
 func TestParseLintOptionsInfersRepoRootFromAbsoluteContentDir(t *testing.T) {
 	var stderr bytes.Buffer
 	repoRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoRoot, "scripts"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(scripts) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "scripts", "lint.sh"), []byte("#!/usr/bin/env bash\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(lint.sh) error = %v", err)
-	}
 	contentDir := filepath.Join(repoRoot, "content")
 	if err := os.MkdirAll(contentDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(content) error = %v", err)
+	}
+	// content/_index.md is the awiki-root marker now that scripts/lint.sh
+	// is gone.
+	if err := os.WriteFile(filepath.Join(contentDir, "_index.md"), []byte("---\ntitle: home\n---\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(_index.md) error = %v", err)
 	}
 
 	opts, err := parseLintOptions([]string{contentDir, "--only=synth"}, &stderr)

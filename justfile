@@ -221,23 +221,23 @@ review:
 
 # === template ===
 template-init:
-    bash scripts/template-init.sh --repo "${TEMPLATE_REPO:?TEMPLATE_REPO required}" \
-                                   --ref "${TEMPLATE_REF:-main}" \
-                                   --version "${TEMPLATE_VERSION:?TEMPLATE_VERSION required}" \
-                                   --commit "${TEMPLATE_COMMIT:?TEMPLATE_COMMIT required}"
+    awiki template init --repo "${TEMPLATE_REPO:?TEMPLATE_REPO required}" \
+                        --ref "${TEMPLATE_REF:-main}" \
+                        --version "${TEMPLATE_VERSION:?TEMPLATE_VERSION required}" \
+                        --commit "${TEMPLATE_COMMIT:?TEMPLATE_COMMIT required}"
 
 # === template (added Phase 09) ===
 template-update *args:
-    bash scripts/template-update.sh {{args}}
+    awiki template update {{args}}
 
 template-status:
-    bash scripts/template-update.sh --status
+    awiki template status
 
 template-gc:
-    bash scripts/template-update.sh --gc
+    awiki template gc
 
 bootstrap-step id:
-    bash scripts/template-step.sh {{id}}
+    awiki bootstrap-step {{id}}
 
 template-retrofit:
-    bash scripts/template-retrofit.sh
+    awiki template retrofit

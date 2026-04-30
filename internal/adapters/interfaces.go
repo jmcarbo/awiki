@@ -107,3 +107,15 @@ func (fsnotifyStub) Watch(context.Context, string, chan<- string) error { return
 type vendorVegaStub struct{}
 
 func (vendorVegaStub) Ensure(context.Context, string) error { return nil }
+
+type ingestLintStub struct{}
+
+func (ingestLintStub) Run(context.Context, string, []string) (int, error) { return 0, nil }
+
+type agentStub struct{}
+
+func (agentStub) Run(context.Context, string, string, string) (int, error) { return 0, nil }
+
+type logAppendStub struct{}
+
+func (logAppendStub) Append(context.Context, string, string, string) error { return nil }

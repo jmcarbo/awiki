@@ -154,10 +154,31 @@ func runWatchdog(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
 	return notYetPorted("watchdog", stderr)
 }
 
-func runIngestBatchList(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-batch-list", stderr)
+// runIngestBatchList delegates to ingest.Runner.ListBatch. Mirrors the
+// inline justfile recipe `find raw/inbox/batch -type f | sort`. Accepts
+// no flags or args; emits a usage hint on stderr if any are supplied.
+func runIngestBatchList(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "usage: awiki ingest-batch-list")
+		return 1
+	}
+	if err := r.ListBatch(stdout); err != nil {
+		fmt.Fprintf(stderr, "ingest-batch-list: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
-func runIngestGitList(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-git-list", stderr)
+// runIngestGitList delegates to ingest.Runner.ListGit. Mirrors the inline
+// justfile recipe `ls -1 .awiki/git-state/ 2>/dev/null | sed 's/\.json$//'`.
+func runIngestGitList(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "usage: awiki ingest-git-list")
+		return 1
+	}
+	if err := r.ListGit(stdout); err != nil {
+		fmt.Fprintf(stderr, "ingest-git-list: %v\n", err)
+		return 1
+	}
+	return 0
 }

@@ -22,7 +22,7 @@ ingest-xlsx path *flags:
     bash scripts/ingest-xlsx.sh {{path}} {{flags}}
 
 ingest-batch-list:
-    @find raw/inbox/batch -type f | sort
+    @awiki ingest-batch-list
 
 # Auto-ingest documents landing in raw/inbox/batch/. Foreground daemon —
 # Ctrl-C to stop. Uses fswatch (mac) / inotifywait (linux); falls back to
@@ -36,7 +36,7 @@ ingest-git spec *flags:
     bash scripts/ingest-git.sh {{spec}} {{flags}}
 
 ingest-git-list:
-    @ls -1 .awiki/git-state/ 2>/dev/null | sed 's/\.json$//'
+    @awiki ingest-git-list
 
 # === maintenance ===
 lint:

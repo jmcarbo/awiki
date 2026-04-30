@@ -10,7 +10,9 @@ import (
 // in slice 1 returns the "verb not yet ported" sentinel on stderr.
 // Subsequent slices replace each case as they land. `capture` is removed
 // from this list as of slice 2 (it is now ported and has dedicated
-// coverage in internal/ingest/capture_test.go).
+// coverage in internal/ingest/capture_test.go). `ingest-batch-list` and
+// `ingest-git-list` are removed as of slice 3 (leaf listers — coverage
+// in internal/ingest/list_test.go).
 func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 	verbs := []string{
 		"ingest",
@@ -19,8 +21,6 @@ func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 		"ingest-pdf",
 		"ingest-audio",
 		"watchdog",
-		"ingest-batch-list",
-		"ingest-git-list",
 	}
 	t.Setenv("AWIKI_REPO_ROOT", t.TempDir())
 	for _, v := range verbs {

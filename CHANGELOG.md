@@ -1,3 +1,69 @@
+## [1.2.0] - 2026-04-29
+
+Begins the awiki Go-port roadmap. Lifts shared helpers from
+`internal/lint/` into reusable packages and ports four full domains
+(synth, dataset, chart, query) to the `awiki` Go binary. Bash
+scripts remain in place behind a per-domain shim and continue to
+work via `AWIKI_<DOMAIN>_LEGACY=1` for safety. Cleanup slices
+(deleting bash + python) gated on a release window.
+
+### Added
+- **Shared building blocks**: `internal/{fsutil,emit,region,action,
+  config,adapters}` — atomic write, advisory lock, record formatters,
+  region parsers (synth-flavor BEGIN-GENERATED + managed-region
+  `<kind>:<id>`), action-line grammar, `.awiki/config` loader, typed
+  adapter interfaces. Lint internals continue to consume these via
+  type aliases.
+- **Synth domain**: `awiki synth {list, resolve, refine, regen,
+  accept-stage, finalize, new}` — all seven verbs ported. Adapters:
+  `ExecPostHook`, `ExecQmd`, `ExecSynthGit`, `ExecSynthLint`. Helpers
+  for plugin manifest parsing, scope resolution + hash, region
+  clear/check/scope_hash update, frontmatter set/insert, hand-edit
+  detection (git diff inside markers), prompt mustache rendering,
+  page scaffold writer. Verb shim flips per-verb in
+  `scripts/synth.sh`.
+- **Dataset domain**: `awiki dataset {validate, compact, new}` plus
+  `awiki data-init` (Go path opt-in via
+  `AWIKI_DATA_INIT_GO=1`). Adapters/helpers: row loader (csv/tsv/dsv
+  delimiter sniffing, json, topojson) lifted from
+  `internal/lint/data` into `internal/dataset`, frontmatter
+  set/insert (sibling to synth's replace-only), `## Data` fence
+  ops, threshold loader. Lint package re-exports row helpers via
+  thin wrappers; existing rules unchanged.
+- **Chart domain**: `awiki chart {new, render, render-one}`.
+  Adapters: `ExecVLConvert` (shells `vl-convert vl2svg`),
+  `ExecVendorVega` (shells `vendor-vega.sh`). Helpers: fence
+  extraction, dataset resolver mirroring `vl-resolve.py`, canonical
+  (sorted-key) JSON SHA1 hash, sidecar writer with orphan cleanup,
+  managed-region preview injection.
+- **Query domain**: `awiki query {run, new, render, render-one,
+  fence-render}`. `ExecDuckDB` adapter shells the `duckdb` CLI.
+  Four python helpers ported: extract (awiki-query fences), format
+  (markdown table render), resolve (`[[<slug>]]` → DuckDB
+  `read_csv_auto`/`read_json_auto` calls), determinism (canonical
+  hash for cache invalidation).
+- **Specs and plans for remaining domains** (ingest, template, ops)
+  under `docs/superpowers/{specs,plans}/`.
+
+### Internal
+- 150 commits ahead of v1.1.0 baseline. Go module bumped to
+  `go 1.25` (driven by `golang.org/x/sys v0.43.0` minimum;
+  `github.com/fsnotify/fsnotify` introduction deferred to ingest
+  domain).
+- Bats coverage 772/774 maintained (2 pre-existing failures unrelated
+  to this slice: `data_layer_full_smoke_test:41` Hugo chart-render and
+  `triage_threshold` rebuild).
+- All four shipped domain ports verified byte-equivalent to bash
+  output via `AWIKI_<DOMAIN>_LEGACY=1` smoke comparison on live
+  wiki pages.
+
+### Deferred
+- Ingest, template, ops domain implementations — specs+plans queued.
+- Cleanup slices (delete bash + python, flip justfile to call
+  `awiki` directly) — gated on release window per umbrella roadmap.
+
+---
+
 ## [1.1.0] - 2026-04-28
 
 Adds the git-docs ingest pipeline (phase 20) and a watchdog daemon for the batch inbox. Users on v1.0.x can adopt v1.1.0 cleanly via `just template-update --apply`.

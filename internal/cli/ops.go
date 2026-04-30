@@ -54,3 +54,8 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 func runRecur(dry bool, args []string, stdout, stderr io.Writer) int {
 	return ops.RecurCLI(dry, args, stdout, stderr)
 }
+
+// runAgenda dispatches `awiki agenda`. Mirrors scripts/agenda.sh.
+func runAgenda(args []string, stdout, stderr io.Writer) int {
+	return ops.AgendaCLI(args, stdout, stderr)
+}

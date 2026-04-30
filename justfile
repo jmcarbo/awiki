@@ -40,10 +40,10 @@ ingest-git-list:
 
 # === maintenance ===
 lint:
-    bash scripts/lint.sh
+    awiki lint
 
 lint-fix:
-    bash scripts/lint.sh --fix
+    awiki lint --fix
 
 reindex:
     bash scripts/qmd-index.sh
@@ -216,7 +216,7 @@ recur-dry:
 # and emit the structured REVIEW|... report on stdout.
 review:
     bash scripts/agenda.sh
-    bash scripts/lint.sh
+    awiki lint
     bash scripts/review-status.sh
 
 # === template ===

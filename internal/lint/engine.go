@@ -23,11 +23,15 @@ func Run(opts Options) (Collector, int) {
 	}
 
 	if opts.AliasBuildOnly {
-		args := []string{"AWIKI_LINT_LEGACY=1"}
+		// Pre-Go-port the legacy bash shim turned `--alias-build-only`
+		// into `exec awiki build --maps-only`. We skip the bash hop
+		// entirely now and shell the binary directly.
+		bin := adapters.ResolveAwikiBin(opts.ToolRoot)
+		args := []string{}
 		if opts.RepoRoot != "" {
 			args = append(args, "AWIKI_REPO_ROOT="+opts.RepoRoot)
 		}
-		args = append(args, "bash", "scripts/lint.sh", "--alias-build-only", opts.ContentDir)
+		args = append(args, bin, "build", "--maps-only")
 		output, code, _ := runner.RunInDir(context.Background(), opts.ToolRoot, "env", args...)
 		imported := importExternalRecords(&c, output)
 		addLegacyFailureDiagnostic(&c, "alias-build", code, imported)

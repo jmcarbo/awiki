@@ -9,7 +9,7 @@ import (
 // FakeIngestLint is a test double for adapters.IngestLint. It records
 // every Run invocation and returns a configurable exit code/error,
 // letting tests pin the bookkeep verb's auto-lint branch without
-// shelling out to scripts/lint.sh.
+// shelling out to the awiki binary.
 type FakeIngestLint struct {
 	// Code is the exit code returned by Run. 0 means success;
 	// >= 2 forces the bookkeep flow to set LINT_RC=4 (matches

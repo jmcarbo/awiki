@@ -12,7 +12,7 @@ required_sections:
   - "## Legend"
   - "## Pages"
   - "## Evidence"
-post_hook: scripts/synth-mindmap-validate.sh
+post_hook: awiki synth-mindmap-validate
 ---
 
 # Prompt

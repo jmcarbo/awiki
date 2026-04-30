@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-// SynthLint shells `bash <repoRoot>/scripts/lint.sh <args...>`.
+// SynthLint shells `<awiki-bin> lint <args...>` from <repoRoot>.
 type SynthLint interface {
 	Run(ctx context.Context, repoRoot string, args ...string) (output string, code int, err error)
 }
@@ -14,8 +14,9 @@ type SynthLint interface {
 type ExecSynthLint struct{}
 
 func (ExecSynthLint) Run(ctx context.Context, repoRoot string, args ...string) (string, int, error) {
-	all := append([]string{"scripts/lint.sh"}, args...)
-	cmd := exec.CommandContext(ctx, "bash", all...)
+	bin := ResolveAwikiBin(repoRoot)
+	all := append([]string{"lint"}, args...)
+	cmd := exec.CommandContext(ctx, bin, all...)
 	cmd.Dir = repoRoot
 	out, err := cmd.CombinedOutput()
 	if err == nil {

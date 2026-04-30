@@ -99,7 +99,7 @@ teardown() {
   # not block the review chain) + structured review report.
   "$AWIKI_BIN" scan
   "$AWIKI_BIN" agenda
-  bash scripts/lint.sh >/dev/null 2>&1 || true
+  "$AWIKI_BIN" lint >/dev/null 2>&1 || true
   run "$AWIKI_BIN" review-status
   [ "$status" -eq 0 ]
   # The eight REVIEW| lines + summary line must all be present.

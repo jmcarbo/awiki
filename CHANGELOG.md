@@ -4,6 +4,55 @@ Ports the ingest domain to the `awiki` Go binary (slices 1-9, merged
 2026-04-30) and removes the bash + Python originals (slice 10).
 Continues the Go-port roadmap started in v1.2.0.
 
+### Shim cleanup (2026-04-30)
+
+Final pass: every remaining bash shim that delegated to the `awiki`
+Go binary is gone. Five scripts stay under `scripts/` (`deploy-build.sh`,
+`encrypt-init.sh`, `lib/vendor-vega.sh`, `lib/xlsx-extract.py`,
+`task-layer-migrate-review.sh`) — each has a real reason to remain
+(site-specific deploy step, interactive gpg/git-crypt, exec'd from
+the Go vendor-vega adapter, exec'd from the Go xlsx ingest adapter,
+or one-off migration).
+
+#### Removed
+- `scripts/lint.sh`, `scripts/chart.sh`, `scripts/query.sh` —
+  pure shims that exec'd `awiki {lint, chart, query}`. Go callers
+  (`internal/lint/engine.go`, `internal/adapters/{external,lint,ingest_lint}.go`)
+  now invoke the `awiki` binary directly via the new
+  `adapters.ResolveAwikiBin` helper.
+- `scripts/lib/action-grammar.sh`, `scripts/lib/managed-region.sh` —
+  no remaining sourcers once the three shims above were gone. The
+  canonical grammar lives in `internal/action/grammar.go`; the
+  managed-region read/write logic in `internal/region/`.
+- `scripts/lib/lock.sh` and `tests/lock_test.bats` — covered by
+  `internal/fsutil/lock.go` (timeout-30s, exit-7-on-contention).
+  `scripts/task-layer-migrate-review.sh`, the only remaining bash
+  caller, carries a ~10-line inlined `flock -x 9 ... 9>>.awiki/lock`
+  copy.
+- `scripts/synth-mindmap-validate.sh` — ported to a flat
+  `awiki synth-mindmap-validate <page>` verb (`internal/synth/mindmap_validate.go`).
+  Exit-code discipline preserved (1 usage, 2 missing page,
+  3 no mermaid block, 4 mmdc rejected, 5 bad first line, 6 brace
+  imbalance) plus the `.awiki/post-hook-ran` sentinel.
+
+#### Changed
+- `synthesis-plugins/mindmap.md` `post_hook` field flipped from
+  `scripts/synth-mindmap-validate.sh` to `awiki synth-mindmap-validate`.
+  The plugin runner (`internal/synth/posthook.go`) now accepts
+  whitespace-separated commands as post-hooks; the adapter
+  (`internal/adapters/posthook.go`) splits on spaces and forwards as
+  `<prog> <args...> -- <page>`, preserving the bash-era argv
+  convention for any external hooks left behind.
+- The pre-commit hook template emitted by `awiki task-init` writes
+  `awiki lint --alias-build-only` and `awiki scan` instead of
+  `bash scripts/...sh` lines. Existing hooks left in place are not
+  rewritten — re-run `awiki task-init` to refresh them.
+- WIKI.md doc references to `scripts/lint.sh` / `scripts/task-init.sh`
+  updated to `awiki lint` / `awiki task-init`.
+- The CLI's repo-root inference (`internal/cli/cli.go:hasAwikiRoot`)
+  uses `content/_index.md` as the awiki-root marker now that
+  `scripts/lint.sh` is gone.
+
 ### Added
 - **Ingest domain**: `awiki {ingest, ingest-pdf, ingest-audio,
   ingest-xlsx, ingest-git, capture, watchdog, ingest-batch-list,
@@ -56,8 +105,10 @@ unchanged.
 - `scripts/lib/xlsx-extract.py` retained — still exec'd by the Go
   xlsx adapter (`internal/adapters/xlsx2csv.go`) per the v1 pin
   (xlsx2csv stays exec; no `excelize/v2`).
-- `scripts/log-append.sh`, `scripts/lint.sh`, `scripts/qmd-index.sh`
-  retained — exec'd by other adapters and other domains.
+- `scripts/lint.sh` was retained from the v1.2.0 release window only
+  as a compatibility hop; it has now been removed in the Shim cleanup
+  section above. `scripts/log-append.sh` / `scripts/qmd-index.sh`
+  were already deleted in earlier domain ports.
 - The `awiki` binary must be on `PATH` for the justfile recipes to
   resolve (build via `go build -o bin/awiki ./cmd/awiki` and add
   `./bin/` to `PATH`, or symlink to `/usr/local/bin/awiki`).

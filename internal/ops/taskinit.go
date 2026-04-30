@@ -460,9 +460,9 @@ func taskInitStepPreCommit(opts TaskInitOptions, stdout, stderr io.Writer) int {
 
 	addition := `
 # task-layer
-# (Inserted by scripts/task-init.sh — do not remove the marker line above.)
-bash scripts/lint.sh --alias-build-only
-bash scripts/action-scan.sh
+# (Inserted by awiki task-init — do not remove the marker line above.)
+awiki lint --alias-build-only
+awiki scan
 `
 	if _, err := os.Stat(hook); os.IsNotExist(err) {
 		body := "#!/usr/bin/env bash\nset -e\n" + addition

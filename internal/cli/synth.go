@@ -291,3 +291,23 @@ func runSynthList(r *synth.Runner, args []string, stdout, stderr io.Writer) int 
 	}
 	return 0
 }
+
+// runSynthMindmapValidate is the post-hook entry point invoked by the
+// mindmap synthesis plugin manifest (synthesis-plugins/mindmap.md).
+// Accepts an optional `--` argv terminator so the plugin loader can
+// keep its existing `<command> -- <page>` calling convention.
+func runSynthMindmapValidate(args []string, _ io.Writer, stderr io.Writer) int {
+	// Strip a single leading `--` for parity with the bash port.
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: awiki synth-mindmap-validate [--] <page>")
+		return synth.MindmapValidateUsage
+	}
+	repoRoot := os.Getenv("AWIKI_REPO_ROOT")
+	return synth.MindmapValidate(context.Background(), synth.MindmapValidateOptions{
+		Page:     args[0],
+		RepoRoot: repoRoot,
+	}, stderr)
+}

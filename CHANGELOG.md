@@ -1,8 +1,11 @@
-## Unreleased
+## [1.3.0] - 2026-04-30
 
 Ports the ingest domain to the `awiki` Go binary (slices 1-9, merged
 2026-04-30) and removes the bash + Python originals (slice 10).
-Continues the Go-port roadmap started in v1.2.0.
+Ports the template + ops domains in full. Eliminates every remaining
+bash shim. Five scripts stay under `scripts/` by design (deploy,
+encrypt-init, vendor-vega, xlsx-extract, task-layer-migrate-review).
+Closes the Go-port roadmap started in v1.2.0.
 
 ### Shim cleanup (2026-04-30)
 

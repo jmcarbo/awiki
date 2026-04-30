@@ -65,3 +65,15 @@ func runAgenda(args []string, stdout, stderr io.Writer) int {
 func runReview(args []string, stdout, stderr io.Writer) int {
 	return ops.ReviewCLI(args, stdout, stderr)
 }
+
+// runTriageApply dispatches `awiki triage-apply <id> <outcome> [k=v ...]`.
+// Mirrors `bash scripts/triage.sh <id> <outcome> ...`.
+func runTriageApply(args []string, stdout, stderr io.Writer) int {
+	return ops.TriageApplyCLI(args, stdout, stderr)
+}
+
+// runTriage dispatches `awiki triage`. Mirrors
+// `bash scripts/triage.sh --interactive`.
+func runTriage(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return ops.TriageCLI(args, stdin, stdout, stderr)
+}

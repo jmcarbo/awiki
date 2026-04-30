@@ -64,6 +64,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runAgenda(args[1:], stdout, stderr)
 	case "review":
 		return runReview(args[1:], stdout, stderr)
+	case "triage-apply":
+		return runTriageApply(args[1:], stdout, stderr)
+	case "triage":
+		return runTriage(args[1:], os.Stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

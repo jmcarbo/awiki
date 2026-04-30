@@ -43,3 +43,14 @@ func runDelete(args []string, stdout, stderr io.Writer) int {
 func runUpdateCatalog(args []string, stdout, stderr io.Writer) int {
 	return ops.UpdateCatalogCLI(args, stdout, stderr)
 }
+
+// runScan dispatches `awiki scan`. Mirrors scripts/action-scan.sh.
+func runScan(args []string, stdout, stderr io.Writer) int {
+	return ops.ScanCLI(args, stdout, stderr)
+}
+
+// runRecur dispatches `awiki recur` and `awiki recur-dry`. Mirrors
+// scripts/action-recur.sh.
+func runRecur(dry bool, args []string, stdout, stderr io.Writer) int {
+	return ops.RecurCLI(dry, args, stdout, stderr)
+}

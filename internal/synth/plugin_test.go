@@ -17,7 +17,7 @@ max_evidence_total_words: 500
 required_sections:
   - Summary
   - Sources
-post_hook: scripts/synth-mindmap-validate.sh
+post_hook: awiki synth-mindmap-validate
 render: markdown
 version: 1
 ---
@@ -44,7 +44,7 @@ func TestLoadPluginParsesBlockList(t *testing.T) {
 	if len(got.RequiredSections) != 2 || got.RequiredSections[0] != "Summary" {
 		t.Fatalf("required: %v", got.RequiredSections)
 	}
-	if got.PostHook != "scripts/synth-mindmap-validate.sh" {
+	if got.PostHook != "awiki synth-mindmap-validate" {
 		t.Fatalf("post_hook: %q", got.PostHook)
 	}
 	if got.Body != "Body line 1\nBody line 2\n" {

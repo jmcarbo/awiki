@@ -95,3 +95,22 @@ func TestRunPluginPostHookFailure(t *testing.T) {
 		t.Errorf("expected post-hook-failed in stderr, got %q", got)
 	}
 }
+
+// TestRunPluginPostHookMultiTokenCommand exercises the new
+// `awiki synth-mindmap-validate` shape: PostHook holds a
+// whitespace-separated command, not a script path. The runner must
+// skip the os.Stat existence check (the first token is a binary on
+// PATH, not a regular file at that literal path) and forward the
+// full string to the adapter.
+func TestRunPluginPostHookMultiTokenCommand(t *testing.T) {
+	hook := &fakePostHook{code: 0}
+	r := &Runner{
+		Config:   map[string]string{"ALLOW_PLUGIN_POST_HOOKS": "1"},
+		PostHook: hook,
+	}
+	var buf strings.Builder
+	plugin := Plugin{PostHook: "awiki synth-mindmap-validate"}
+	if err := r.RunPluginPostHook(context.Background(), plugin, "/page.md", &buf); err != nil {
+		t.Fatalf("unexpected error: %v (stderr=%q)", err, buf.String())
+	}
+}

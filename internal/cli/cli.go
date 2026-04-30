@@ -20,6 +20,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runLint(args[1:], stdout, stderr)
 	case "synth":
 		return runSynth(args[1:], stdout, stderr)
+	case "synth-mindmap-validate":
+		return runSynthMindmapValidate(args[1:], stdout, stderr)
 	case "dataset":
 		return runDataset(args[1:], stdout, stderr)
 	case "data-init":

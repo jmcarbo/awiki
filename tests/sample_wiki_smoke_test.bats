@@ -35,7 +35,7 @@ teardown() {
 @test "sample-wiki: re-running task-init is a no-op (sample already initialized)" {
   # The committed sample-wiki ships the populated layout. A second
   # task-init pass should detect every artefact and skip.
-  run env AWIKI_TASK_INIT_ASSUME_NO=1 bash scripts/task-init.sh
+  run env AWIKI_TASK_INIT_ASSUME_NO=1 "$AWIKI_BIN" task-init
   [ "$status" -eq 0 ]
   # Inbox content survives.
   run grep -F 'reread chapter 3' content/inbox.md
@@ -65,7 +65,7 @@ teardown() {
   sha="$(printf '%s' "$raw" | shasum | awk '{print substr($1,1,10)}')"
   id="inbox-${sha}-${lineno}"
 
-  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone "lineno=${lineno}"
+  run "$AWIKI_BIN" triage-apply "$id" act project_slug=_loose context_slug=phone "lineno=${lineno}"
   [ "$status" -eq 0 ]
   run grep -F 'call dentist about crown @phone' content/projects/_loose.md
   [ "$status" -eq 0 ]
@@ -75,9 +75,9 @@ teardown() {
 }
 
 @test "sample-wiki: agenda regenerates managed regions and surfaces sample actions" {
-  run bash scripts/action-scan.sh
+  run "$AWIKI_BIN" scan
   [ "$status" -eq 0 ]
-  run bash scripts/agenda.sh
+  run "$AWIKI_BIN" agenda
   [ "$status" -eq 0 ]
   run grep -F '<!-- BEGIN agenda:next-actions -->' content/agenda/next-actions.md
   [ "$status" -eq 0 ]
@@ -97,10 +97,10 @@ teardown() {
   # Inline equivalent of `just review`: scan + agenda regen + lint
   # (best-effort; pre-existing synth lint errors in memex-briefing.md do
   # not block the review chain) + structured review report.
-  bash scripts/action-scan.sh
-  bash scripts/agenda.sh
+  "$AWIKI_BIN" scan
+  "$AWIKI_BIN" agenda
   bash scripts/lint.sh >/dev/null 2>&1 || true
-  run bash scripts/review-status.sh
+  run "$AWIKI_BIN" review-status
   [ "$status" -eq 0 ]
   # The eight REVIEW| lines + summary line must all be present.
   for k in inbox-unprocessed raw-inbox-files projects-no-next-action \

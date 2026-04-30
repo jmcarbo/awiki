@@ -64,6 +64,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runAgenda(args[1:], stdout, stderr)
 	case "review":
 		return runReview(args[1:], stdout, stderr)
+	case "review-status":
+		return runReviewStatus(args[1:], stdout, stderr)
 	case "triage-apply":
 		return runTriageApply(args[1:], stdout, stderr)
 	case "triage":

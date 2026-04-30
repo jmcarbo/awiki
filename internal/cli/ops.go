@@ -66,6 +66,13 @@ func runReview(args []string, stdout, stderr io.Writer) int {
 	return ops.ReviewCLI(args, stdout, stderr)
 }
 
+// runReviewStatus dispatches `awiki review-status` (the eight REVIEW|
+// records + REVIEW-SUMMARY|, no agenda/lint chain). Mirrors
+// scripts/review-status.sh.
+func runReviewStatus(args []string, stdout, stderr io.Writer) int {
+	return ops.ReviewStatusCLI(args, stdout, stderr)
+}
+
 // runTriageApply dispatches `awiki triage-apply <id> <outcome> [k=v ...]`.
 // Mirrors `bash scripts/triage.sh <id> <outcome> ...`.
 func runTriageApply(args []string, stdout, stderr io.Writer) int {

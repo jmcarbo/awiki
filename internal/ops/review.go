@@ -77,6 +77,25 @@ func ReviewCLI(args []string, stdout, stderr io.Writer) int {
 	}, stdout, stderr)
 }
 
+// ReviewStatusCLI parses argv and dispatches just the ReviewStatus
+// emitter (mirrors `bash scripts/review-status.sh`). Useful for callers
+// that want the structured records without the agenda+lint chain that
+// `awiki review` runs.
+func ReviewStatusCLI(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "usage: awiki review-status")
+		return 2
+	}
+	repoRoot := os.Getenv("AWIKI_REPO_ROOT")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	return ReviewStatus(ReviewOptions{
+		RepoRoot: repoRoot,
+		Today:    os.Getenv("AWIKI_TODAY"),
+	}, stdout, stderr)
+}
+
 // ReviewStatus emits the eight REVIEW|... records + REVIEW-SUMMARY|.
 // Mirrors scripts/review-status.sh byte-for-byte.
 func ReviewStatus(opts ReviewOptions, stdout, stderr io.Writer) int {

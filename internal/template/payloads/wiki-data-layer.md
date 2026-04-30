@@ -1,9 +1,9 @@
 <!-- BEGIN data-layer -->
 ## Data Layer (opt-in)
 
-This block is managed by `scripts/data-init.sh`. To remove the layer,
+This block is managed by `awiki data-init`. To remove the layer,
 delete everything between the BEGIN and END markers and run
-`bash scripts/lint.sh` to surface broken references.
+`awiki lint` to surface broken references.
 
 ### Page kinds
 

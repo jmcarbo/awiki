@@ -2,35 +2,60 @@ package adapters
 
 import (
 	"context"
-	"os/exec"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
-// LogAppend writes a journal entry to <repoRoot>/content/log.md by
-// shelling scripts/log-append.sh. The bash form (scripts/ingest.sh:66)
-// best-effort calls the script and ignores errors; this mirrors that.
+// LogAppend writes a journal entry to the awiki log. Historically this
+// shelled scripts/log-append.sh; the bash script has now been deleted and
+// the adapter implements the same byte-level append directly in Go so
+// existing callers (internal/ingest, etc.) keep their interface.
 //
-// Future: a dedicated Go ops/log domain port (see TODO comments in
-// internal/ingest/{bookkeep,capture}.go) will replace the shell-out
-// with a native implementation. Until then, the adapter keeps the
-// shim in one place so tests can fake it.
+// Records mirror scripts/log-append.sh:
+//
+//	## [YYYY-MM-DD HH:MM] <action> | <message>
+//
+// with the same '|' → '_' and '\n','\r' → ' ' sanitisation, and the
+// canonical frontmatter when the file is missing.
 type LogAppend interface {
 	Append(ctx context.Context, repoRoot, action, msg string) error
 }
 
-// ExecLogAppend is the production adapter — shells the bash script.
+// ExecLogAppend is the production adapter — writes the log directly.
 type ExecLogAppend struct{}
 
-func (ExecLogAppend) Append(ctx context.Context, repoRoot, action, msg string) error {
-	script := resolveScript(repoRoot, "log-append.sh")
-	// Bash: bash $SCRIPT_DIR/log-append.sh <action> <msg...>
-	// (scripts/ingest.sh:66 — no `--` separator; log-append.sh
-	// concatenates remaining args with $*).
-	cmd := exec.CommandContext(ctx, "bash", script, action, msg)
-	cmd.Dir = repoRoot
-	// Bash form pipes stderr to /dev/null inside ingest.sh's caller chain.
-	// The adapter swallows the error here so a missing script does not
-	// fail the bookkeep; non-fatal log loss is preferable to a broken
-	// ingest path.
-	_ = cmd.Run()
+func (ExecLogAppend) Append(_ context.Context, repoRoot, action, msg string) error {
+	logFile := os.Getenv("AWIKI_LOG_FILE")
+	if logFile == "" {
+		logFile = filepath.Join(repoRoot, "content", "log.md")
+	}
+	if _, err := os.Stat(logFile); os.IsNotExist(err) {
+		header := "---\ntitle: Log\ntype: log\ndraft: true\n---\n\n"
+		if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+			return nil
+		}
+		if err := os.WriteFile(logFile, []byte(header), 0o644); err != nil {
+			return nil
+		}
+	}
+	f, err := os.OpenFile(logFile, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		// Bash form swallows errors; mirror that.
+		return nil
+	}
+	defer f.Close()
+	stamp := time.Now().Format("2006-01-02 15:04")
+	_, _ = fmt.Fprintf(f, "## [%s] %s | %s\n", stamp, sanitiseLogField(action), sanitiseLogField(msg))
 	return nil
+}
+
+// sanitiseLogField replaces '|' with '_' and CR/LF with space.
+func sanitiseLogField(s string) string {
+	s = strings.ReplaceAll(s, "|", "_")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
 }

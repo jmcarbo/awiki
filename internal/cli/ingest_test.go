@@ -15,11 +15,11 @@ import (
 // in internal/ingest/list_test.go). `ingest-pdf` is removed as of
 // slice 4 (coverage in internal/ingest/formats/pdf_test.go).
 // `ingest-audio` is removed as of slice 5 (coverage in
-// internal/ingest/formats/audio_test.go).
+// internal/ingest/formats/audio_test.go). `ingest-xlsx` is removed as
+// of slice 6 (coverage in internal/ingest/formats/xlsx_test.go).
 func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 	verbs := []string{
 		"ingest",
-		"ingest-xlsx",
 		"ingest-git",
 		"watchdog",
 	}

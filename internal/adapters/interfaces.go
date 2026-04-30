@@ -89,6 +89,7 @@ func (xlsxExtractStub) Slugify(context.Context, string) (string, int, error) { r
 func (xlsxExtractStub) Extract(context.Context, XLSXExtractOptions) (string, int, error) {
 	return "", 0, nil
 }
+func (xlsxExtractStub) CheckDep(context.Context) (bool, error) { return false, nil }
 
 type gitStub struct{}
 

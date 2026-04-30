@@ -1,0 +1,3 @@
+XLSX-SHEET|slug=sheet-1|rows=10|md=raw/inbox/sample-sheet-1.md|csv=raw/processed/_originals/sample/sample-sheet-1.csv
+XLSX-CONVERTED|in=raw/inbox/sample.xlsx|workbook=sample|sheets=1|orig=raw/processed/_originals/sample/sample.xlsx
+XLSX-NEXT|raw/inbox/sample-sheet-1.md

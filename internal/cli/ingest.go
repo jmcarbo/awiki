@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"awiki/internal/adapters"
@@ -89,8 +90,70 @@ func runIngest(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
 	return notYetPorted("ingest", stderr)
 }
 
-func runIngestXLSX(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-xlsx", stderr)
+// runIngestXLSX parses `awiki ingest-xlsx <path> [--preview-rows N]`
+// and delegates to formats.IngestXLSX. Mirrors the bash flag parser in
+// scripts/ingest-xlsx.sh:14-29 — supports `--preview-rows N`,
+// `--preview-rows=N`, the `--` end-of-options marker, and `-h|--help`.
+func runIngestXLSX(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	previewRows := 50
+	if v := os.Getenv("AWIKI_XLSX_PREVIEW_ROWS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			previewRows = n
+		}
+	}
+	var positional []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		switch {
+		case a == "--preview-rows":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			previewRows = n
+			i += 2
+		case strings.HasPrefix(a, "--preview-rows="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--preview-rows="))
+			if err != nil || n <= 0 {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			previewRows = n
+			i++
+		case a == "-h" || a == "--help":
+			fmt.Fprintln(stdout, "usage: ingest-xlsx.sh <path-under-raw/inbox/> [--preview-rows N]")
+			return 0
+		case a == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		default:
+			positional = append(positional, a)
+			i++
+		}
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+		return 2
+	}
+	_, err := formats.IngestXLSX(context.Background(), r, formats.XLSXOptions{
+		SourcePath:  positional[0],
+		PreviewRows: previewRows,
+	}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-xlsx: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runIngestGit(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -56,6 +57,10 @@ type XLSXExtractOptions struct {
 type XLSXExtract interface {
 	Slugify(ctx context.Context, stem string) (slug string, code int, err error)
 	Extract(ctx context.Context, opts XLSXExtractOptions) (manifestJSON string, code int, err error)
+	// CheckDep verifies the python_calamine module is importable.
+	// Mirrors the bash preflight at scripts/ingest-xlsx.sh:62-67. Tests
+	// honour AWIKI_FAKE_MISSING=python_calamine to force the miss path.
+	CheckDep(ctx context.Context) (ok bool, err error)
 }
 
 // ExecXLSXExtract is the production adapter. It shells
@@ -73,6 +78,21 @@ type ExecXLSXExtract struct {
 // helperPath returns the absolute path to scripts/lib/xlsx-extract.py.
 func (e ExecXLSXExtract) helperPath() string {
 	return filepath.Join(e.RepoRoot, "scripts", "lib", "xlsx-extract.py")
+}
+
+// CheckDep returns true when `python3 -c "import python_calamine"`
+// succeeds. The AWIKI_FAKE_MISSING shortcut lets tests force the
+// missing-dep code path without touching the real python install.
+// Mirrors scripts/ingest-xlsx.sh:62-67.
+func (e ExecXLSXExtract) CheckDep(ctx context.Context) (bool, error) {
+	if os.Getenv("AWIKI_FAKE_MISSING") == "python_calamine" {
+		return false, nil
+	}
+	cmd := exec.CommandContext(ctx, "python3", "-c", "import python_calamine")
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // Slugify shells `python3 <helper> --slugify <stem>` and returns the

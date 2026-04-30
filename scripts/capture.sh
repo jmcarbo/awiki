@@ -6,6 +6,20 @@ set -euo pipefail
 # Exit codes: 0 OK; 1 usage; 4 hard-rejection (control-char / checkbox-prefix);
 #             other non-zero unexpected.
 
+# Slice 2 of the Go ingest port: when bin/awiki is built and the user has
+# not opted into the legacy bash path, exec the Go implementation.
+# Mirrors scripts/synth.sh:9-26. Set AWIKI_CAPTURE_LEGACY=1 to force the
+# original bash path (used by the bats oracle and parity smoke tests
+# until cleanup in slice 10).
+AWIKI_CAPTURE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_CAPTURE_REPO_ROOT="$(cd "$AWIKI_CAPTURE_SCRIPT_DIR/.." && pwd)"
+AWIKI_CAPTURE_GO_BIN="$AWIKI_CAPTURE_REPO_ROOT/bin/awiki"
+
+if [[ "${AWIKI_CAPTURE_LEGACY:-0}" != "1" && -x "$AWIKI_CAPTURE_GO_BIN" ]]; then
+  cd "$AWIKI_CAPTURE_REPO_ROOT" || exit 1
+  exec "$AWIKI_CAPTURE_GO_BIN" capture "$@"
+fi
+
 INBOX="${AWIKI_INBOX_FILE:-content/inbox.md}"
 
 usage() {

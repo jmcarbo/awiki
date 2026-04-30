@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"awiki/internal/adapters"
 	"awiki/internal/config"
@@ -101,8 +103,51 @@ func runIngestAudio(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
 	return notYetPorted("ingest-audio", stderr)
 }
 
-func runCapture(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("capture", stderr)
+// runCapture parses the `awiki capture -- <text...>` argument shape
+// (mirrors scripts/capture.sh) and delegates to ingest.Runner.Capture.
+// Argument grammar:
+//   - args[0] == "--help" / "-h" -> print usage on stdout, exit 0.
+//   - first arg must be "--"; remaining args are joined with spaces.
+//   - missing "--" -> exit 1 with the bash-compat error.
+func runCapture(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		captureUsage(stderr)
+		return 1
+	}
+	if args[0] == "--help" || args[0] == "-h" {
+		captureUsage(stdout)
+		return 0
+	}
+	if args[0] != "--" {
+		fmt.Fprintln(stderr, "ERROR|missing '--' separator (use: capture.sh -- \"<text>\")")
+		return 1
+	}
+	rest := args[1:]
+	if len(rest) == 0 {
+		fmt.Fprintln(stderr, "ERROR|empty: no text after '--'")
+		return 4
+	}
+	opts := ingest.CaptureOptions{
+		Text:         strings.Join(rest, " "),
+		Presanitized: os.Getenv("AWIKI_CAPTURE_PRESANITIZED") == "1",
+		InboxPath:    os.Getenv("AWIKI_INBOX_FILE"),
+	}
+	if err := r.Capture(opts, stdout, stderr); err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "capture: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func captureUsage(w io.Writer) {
+	fmt.Fprintln(w, `usage: awiki capture -- "<text>"`)
+	fmt.Fprintln(w, "  Appends a sanitized capture line to content/inbox.md.")
+	fmt.Fprintln(w, "  Set AWIKI_INBOX_FILE to override the destination.")
+	fmt.Fprintln(w, "  Set AWIKI_CAPTURE_PRESANITIZED=1 if upstream already sanitized.")
 }
 
 func runWatchdog(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {

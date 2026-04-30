@@ -8,7 +8,9 @@ import (
 
 // TestRunIngestVerbsNotYetPorted asserts every flat ingest verb wired
 // in slice 1 returns the "verb not yet ported" sentinel on stderr.
-// Subsequent slices replace each case as they land.
+// Subsequent slices replace each case as they land. `capture` is removed
+// from this list as of slice 2 (it is now ported and has dedicated
+// coverage in internal/ingest/capture_test.go).
 func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 	verbs := []string{
 		"ingest",
@@ -16,7 +18,6 @@ func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 		"ingest-git",
 		"ingest-pdf",
 		"ingest-audio",
-		"capture",
 		"watchdog",
 		"ingest-batch-list",
 		"ingest-git-list",

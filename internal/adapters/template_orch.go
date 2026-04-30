@@ -182,6 +182,90 @@ func (c TemplateOrchConfirm) Confirm(prompt string) (bool, error) {
 	return c0 == 'y' || c0 == 'Y', nil
 }
 
+// ArchiveTreeToDir shells `git -C <repo> archive --format=tar HEAD |
+// tar -x -C <dst>`. Mirrors the bash oracle (template-init.sh +
+// template-update.sh `git archive ... | tar -x`).
+func (g TemplateOrchGit) ArchiveTreeToDir(repoRoot, dst string) error {
+	if repoRoot == "" {
+		return fmt.Errorf("archive: repoRoot empty")
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	gitCmd := exec.Command("git", "-C", repoRoot, "archive", "--format=tar", "HEAD")
+	tarCmd := exec.Command("tar", "-x", "-C", dst)
+	pipe, err := gitCmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	tarCmd.Stdin = pipe
+	tarCmd.Stderr = g.stderr()
+	gitCmd.Stderr = g.stderr()
+	if err := tarCmd.Start(); err != nil {
+		return err
+	}
+	if err := gitCmd.Run(); err != nil {
+		_ = tarCmd.Wait()
+		return err
+	}
+	return tarCmd.Wait()
+}
+
+// MergeFile shells `git merge-file --diff3 -L current -L base -L new
+// <cur> <base> <new>`. Mirrors scripts/template-merge.sh + sync.py
+// apply-three-way. Returns the merge-file exit code (0 = clean, >0 =
+// conflict count).
+func (g TemplateOrchGit) MergeFile(cur, base, newFile string) (int, error) {
+	cmd := exec.Command("git", "merge-file", "--diff3",
+		"-L", "current", "-L", "base", "-L", "new",
+		cur, base, newFile)
+	cmd.Stdout = g.stdout()
+	cmd.Stderr = g.stderr()
+	err := cmd.Run()
+	if err == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	return 127, err
+}
+
+// LsFilesIn shells `git -C <dir> ls-files`. Mirrors scripts/.../sync.py
+// usage in apply-attributes.
+func (g TemplateOrchGit) LsFilesIn(dir string) (string, int, error) {
+	cmd := exec.Command("git", "-C", dir, "ls-files")
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	return "", 127, err
+}
+
+// CheckAttrAll shells `git -c core.attributesfile=<attrFile>
+// check-attr -a -- <path>` with GIT_ATTR_NOSYSTEM=1. Mirrors the bash
+// oracle in template-attr-audit.sh + sync.py.
+func (g TemplateOrchGit) CheckAttrAll(attrFile, path string) (string, error) {
+	cmd := exec.Command("git",
+		"-c", "core.attributesfile="+attrFile,
+		"check-attr", "-a", "--", path)
+	cmd.Env = append(os.Environ(), "GIT_ATTR_NOSYSTEM=1")
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), nil
+	}
+	return "", err
+}
+
 // captureRun is a small helper that runs cmd and returns combined
 // stderr in the error on non-zero exit. Reused by other adapter
 // methods.

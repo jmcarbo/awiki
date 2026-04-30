@@ -43,6 +43,10 @@ func runTemplate(args []string, stdout, stderr io.Writer) int {
 		return runTemplateLint(rest, stdout, stderr)
 	case "escape":
 		return runTemplateEscape(rest, stdout, stderr)
+	case "retrofit":
+		return runTemplateRetrofit(rest, stdout, stderr)
+	case "merge":
+		return runTemplateMerge(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "template: unknown verb %q\n", verb)
 		return 2
@@ -501,6 +505,67 @@ func runTemplateEscape(args []string, stdout, stderr io.Writer) int {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// --- retrofit ---------------------------------------------------------------
+
+func runTemplateRetrofit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template retrofit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	repo := fs.String("repo", "", "template source URL or path")
+	ref := fs.String("ref", "main", "template ref (default main)")
+	version := fs.String("version", "", "template version")
+	commit := fs.String("commit", "", "template commit SHA")
+	nonInteractive := fs.Bool("non-interactive", false, "skip interactive step confirmation")
+	heuristicsOnly := fs.Bool("heuristics-only", false, "print heuristic detections only; do not seed")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root := templateRepoRoot()
+	g := adapters.TemplateOrchGit{RepoRoot: root, Stdout: stdout, Stderr: stderr}
+
+	res, err := template.Retrofit(g, template.RetrofitInput{
+		RepoRoot:       root,
+		Repo:           *repo,
+		Ref:            *ref,
+		Version:        *version,
+		Commit:         *commit,
+		NonInteractive: *nonInteractive,
+		HeuristicsOnly: *heuristicsOnly,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if res.AlreadyHasProvenance {
+		pj := filepath.Join(root, ".awiki", "template.json")
+		fmt.Fprintf(stdout, "info: %s already exists; nothing to retrofit\n", pj)
+		return 0
+	}
+	for _, l := range res.HeuristicLines {
+		fmt.Fprintln(stdout, l)
+	}
+	if res.InitRan {
+		fmt.Fprintln(stdout, "info: retrofit complete")
+	}
+	return 0
+}
+
+// --- merge ------------------------------------------------------------------
+
+func runTemplateMerge(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 3 {
+		fmt.Fprintln(stderr, "usage: awiki template merge <cur> <base> <new>")
+		return 2
+	}
+	cur, base, newFile := args[0], args[1], args[2]
+	g := adapters.TemplateOrchGit{Stdout: stdout, Stderr: stderr}
+	rc, err := template.MergeFiles(g, cur, base, newFile)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 3
+	}
+	return rc
 }
 
 // --- bootstrap-step (top-level verb) ----------------------------------------

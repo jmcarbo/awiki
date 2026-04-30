@@ -59,3 +59,9 @@ func runRecur(dry bool, args []string, stdout, stderr io.Writer) int {
 func runAgenda(args []string, stdout, stderr io.Writer) int {
 	return ops.AgendaCLI(args, stdout, stderr)
 }
+
+// runReview dispatches `awiki review`. Mirrors the chain
+// agenda → lint → review-status from the bash justfile.
+func runReview(args []string, stdout, stderr io.Writer) int {
+	return ops.ReviewCLI(args, stdout, stderr)
+}

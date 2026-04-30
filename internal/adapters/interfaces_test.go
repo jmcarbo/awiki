@@ -13,5 +13,13 @@ func TestInterfaceShapes(t *testing.T) {
 	var _ Git = (*gitStub)(nil)
 	var _ GPG = (*gpgStub)(nil)
 	var _ FSNotify = (*fsnotifyStub)(nil)
+
+	// Ingest infra slice exec adapter stubs.
+	var _ PDFToText = (*ExecPDFToText)(nil)
+	var _ Whisper = (*ExecWhisper)(nil)
+	var _ XLSX2CSV = (*ExecXLSX2CSV)(nil)
+	var _ FSNotify = (*ExecFSNotify)(nil)
+	var _ GitExt = (*ExecGitExt)(nil)
+
 	t.Log("compile-time interface check ok")
 }

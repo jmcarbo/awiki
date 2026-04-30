@@ -40,10 +40,10 @@ ingest-git-list:
 
 # === maintenance ===
 lint:
-    bash scripts/lint.sh
+    awiki lint
 
 lint-fix:
-    bash scripts/lint.sh --fix
+    awiki lint --fix
 
 reindex:
     bash scripts/qmd-index.sh
@@ -62,25 +62,25 @@ delete slug:
 
 # === synthesis ===
 synth plugin topic *args:
-    bash scripts/synth.sh new -- {{plugin}} {{topic}} {{args}}
+    awiki synth new -- {{plugin}} {{topic}} {{args}}
 
 synth-regen slug *args:
-    bash scripts/synth.sh regen -- {{slug}} {{args}}
+    awiki synth regen -- {{slug}} {{args}}
 
 synth-finalize slug:
-    bash scripts/synth.sh finalize -- {{slug}}
+    awiki synth finalize -- {{slug}}
 
 synth-accept-stage slug:
-    bash scripts/synth.sh accept-stage -- {{slug}}
+    awiki synth accept-stage -- {{slug}}
 
 synth-refine slug *note:
-    bash scripts/synth.sh refine -- {{slug}} "{{note}}"
+    awiki synth refine -- {{slug}} "{{note}}"
 
 synth-list:
-    bash scripts/synth.sh list
+    awiki synth list
 
 synth-resolve slug:
-    bash scripts/synth.sh resolve -- {{slug}}
+    awiki synth resolve -- {{slug}}
 
 # === hugo ===
 serve:
@@ -131,15 +131,15 @@ data-init:
 
 # Scaffold a new dataset page. Use --from=<csv-path> to seed rows.
 dataset-new slug *args:
-    bash scripts/dataset.sh new {{slug}} {{args}}
+    awiki dataset new {{slug}} {{args}}
 
 # Flip inline <-> file based on threshold (.awiki/config). Idempotent.
 dataset-compact slug:
-    bash scripts/dataset.sh compact {{slug}}
+    awiki dataset compact {{slug}}
 
 # Refresh rows + run schema validation if columns: declared.
 dataset-validate slug:
-    bash scripts/dataset.sh validate {{slug}}
+    awiki dataset validate {{slug}}
 
 # Show per-recipe data-layer help.
 data-help:
@@ -147,41 +147,41 @@ data-help:
 
 # Scaffold a type:chart page that references an existing dataset.
 chart-new slug *args:
-    bash scripts/chart.sh new {{slug}} {{args}}
+    awiki chart new {{slug}} {{args}}
 
 # Walk every vega-lite fence + type:chart page; regen stale SVG sidecars
 # under assets/charts/. Uses scripts/lib/vendor-vega.sh if vendored bundle
 # absent. Requires the `vl-convert` Rust binary.
 charts-render:
-    bash scripts/chart.sh render
+    awiki chart render
 
 # Single-chart regen for fast iteration. Argument is the chart-id
 # (`<page-slug>-fig<N>` for inline charts, `<slug>` for type:chart pages).
 charts-render-one chart_id:
-    bash scripts/chart.sh render-one {{chart_id}}
+    awiki chart render-one {{chart_id}}
 
 # === Query layer ===
 
 # Run an ad-hoc SQL query against awiki datasets.
 # Use --out=<slug> to materialize the result as a dataset page.
 query SQL *args:
-    bash scripts/query.sh run "{{SQL}}" {{args}}
+    awiki query run "{{SQL}}" {{args}}
 
 # Scaffold a type:query page that materializes to a sibling dataset.
 query-new slug *args:
-    bash scripts/query.sh new {{slug}} {{args}}
+    awiki query new {{slug}} {{args}}
 
 # Re-run every materialized query and refresh inline awiki-query fences.
 query-render:
-    bash scripts/query.sh render
+    awiki query render
 
 # Single-query regen for fast iteration.
 query-render-one slug:
-    bash scripts/query.sh render-one {{slug}}
+    awiki query render-one {{slug}}
 
 # Re-run every inline awiki-query fence in content/.
 query-fence-render:
-    bash scripts/query.sh fence-render
+    awiki query fence-render
 
 capture *text:
     awiki capture -- {{text}}
@@ -216,7 +216,7 @@ recur-dry:
 # and emit the structured REVIEW|... report on stdout.
 review:
     bash scripts/agenda.sh
-    bash scripts/lint.sh
+    awiki lint
     bash scripts/review-status.sh
 
 # === template ===

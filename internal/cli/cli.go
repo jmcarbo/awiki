@@ -38,6 +38,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		"ingest-batch-list",
 		"ingest-git-list":
 		return runIngestVerb(args[0], args[1:], stdout, stderr)
+	case "template":
+		return runTemplate(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

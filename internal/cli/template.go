@@ -1,0 +1,503 @@
+package cli
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"awiki/internal/template"
+)
+
+// runTemplate dispatches `awiki template <verb> [args...]`. The verbs
+// covered here mirror the Python helpers ported in internal/template/:
+// init, status, gc, source-check, manifest, attr-audit, config, plan,
+// provenance, lint. Each verb is a thin driver around the helper —
+// callers that still want bash semantics can invoke the bash shim.
+func runTemplate(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: awiki template <verb> [args...]")
+		return 2
+	}
+	verb := args[0]
+	rest := args[1:]
+	switch verb {
+	case "status":
+		return runTemplateStatus(rest, stdout, stderr)
+	case "gc":
+		return runTemplateGC(rest, stdout, stderr)
+	case "source-check":
+		return runTemplateSourceCheck(rest, stdout, stderr)
+	case "manifest":
+		return runTemplateManifest(rest, stdout, stderr)
+	case "config":
+		return runTemplateConfig(rest, stdout, stderr)
+	case "provenance":
+		return runTemplateProvenance(rest, stdout, stderr)
+	case "lint":
+		return runTemplateLint(rest, stdout, stderr)
+	case "escape":
+		return runTemplateEscape(rest, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "template: unknown verb %q\n", verb)
+		return 2
+	}
+}
+
+// templateRepoRoot returns the resolved repo root used by the template
+// verbs. It honours AWIKI_REPO_ROOT and falls back to the current
+// directory.
+func templateRepoRoot() string {
+	if env := os.Getenv("AWIKI_REPO_ROOT"); env != "" {
+		if abs, err := filepath.Abs(env); err == nil {
+			return abs
+		}
+		return env
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
+}
+
+// --- status -----------------------------------------------------------------
+
+func runTemplateStatus(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root (defaults to AWIKI_REPO_ROOT or cwd)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	repoRoot := *root
+	if repoRoot == "" {
+		repoRoot = templateRepoRoot()
+	}
+	pj := filepath.Join(repoRoot, ".awiki", "template.json")
+	if _, err := os.Stat(pj); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(stderr, "halt: no .awiki/template.json. Run 'just template-init' or 'just template-retrofit'.")
+			return 1
+		}
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	prov, err := template.LoadProvenance(pj)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "version: %s\n", prov.Version)
+	fmt.Fprintf(stdout, "commit:  %s\n", prov.Commit)
+	fmt.Fprintf(stdout, "repo:    %s\n", prov.Repo)
+	if prov.OriginalRepo != "" && prov.Repo != prov.OriginalRepo {
+		fmt.Fprintf(stdout, "original_repo: %s  (DIFFERS — source was changed)\n", prov.OriginalRepo)
+	}
+	pp := filepath.Join(repoRoot, ".awiki", "pending-prompts")
+	if entries, err := os.ReadDir(pp); err == nil && len(entries) > 0 {
+		fmt.Fprintln(stdout, "pending prompts:")
+		for _, e := range entries {
+			fmt.Fprintln(stdout, e.Name())
+		}
+	}
+	state := filepath.Join(repoRoot, ".awiki", "template-cache", "_fetch", ".update-state.json")
+	if _, err := os.Stat(state); err == nil {
+		phase, _ := template.GetStateField(state, "phase")
+		if phase == "" {
+			phase = "?"
+		}
+		fmt.Fprintf(stdout, "in-progress update: phase=%s\n", phase)
+	}
+	return 0
+}
+
+// --- gc ---------------------------------------------------------------------
+
+func runTemplateGC(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template gc", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	repoRoot := *root
+	if repoRoot == "" {
+		repoRoot = templateRepoRoot()
+	}
+	pj := filepath.Join(repoRoot, ".awiki", "template.json")
+	prov, err := template.LoadProvenance(pj)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	cacheDir := filepath.Join(repoRoot, ".awiki", "template-cache")
+	if err := template.RotateCache(cacheDir, prov.Commit); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "info: cache GC complete (kept current + previous)")
+	return 0
+}
+
+// --- source-check -----------------------------------------------------------
+
+func runTemplateSourceCheck(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template source-check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	provenance := fs.String("provenance", "", ".awiki/template.json path")
+	source := fs.String("source", "", "candidate source URL or path")
+	accept := fs.Bool("accept-source-change", false, "accept the change and continue")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *provenance == "" || !fileExists(*provenance) {
+		fmt.Fprintf(stderr, "provenance not found: %s\n", *provenance)
+		return 2
+	}
+	if *source == "" {
+		fmt.Fprintln(stderr, "--source required")
+		return 2
+	}
+	prov, err := template.LoadProvenance(*provenance)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	pinned := prov.Repo
+	if pinned == *source {
+		return 0
+	}
+	if *accept {
+		fmt.Fprintf(stderr, "info: source change accepted (pinned=%s, new=%s)\n", pinned, *source)
+		return 0
+	}
+	fmt.Fprintf(stderr, "Source change detected:\n  pinned : %s\n  new    : %s\nThis will execute migrations and overwrite tracked files from the new source.\nRe-run with --accept-source-change to proceed.\n", pinned, *source)
+	return 1
+}
+
+// --- manifest ---------------------------------------------------------------
+
+func runTemplateManifest(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: awiki template manifest <subcmd> <path> [args...]")
+		return 2
+	}
+	subcmd := args[0]
+	path := args[1]
+	if !fileExists(path) {
+		fmt.Fprintf(stderr, "manifest not found: %s\n", path)
+		return 1
+	}
+	m, err := template.LoadManifest(path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	switch subcmd {
+	case "load":
+		_, _ = io.WriteString(stdout, m.FormatLoad())
+		return 0
+	case "resolve":
+		if len(args) < 3 {
+			fmt.Fprintln(stderr, "usage: resolve <manifest> <relpath>")
+			return 2
+		}
+		fmt.Fprintln(stdout, m.ResolveStrategy(args[2]))
+		return 0
+	case "bootstrap-ids":
+		for _, id := range m.Bootstrap.OrderedSteps {
+			fmt.Fprintln(stdout, id)
+		}
+		return 0
+	case "dangerous-ids":
+		for _, id := range m.Bootstrap.Dangerous.IDs {
+			fmt.Fprintln(stdout, id)
+		}
+		return 0
+	case "has-glob-overlap":
+		strat, glob, ok := m.HasGlobOverlap()
+		if ok {
+			fmt.Fprintf(stderr, "duplicate glob in %s: %s\n", strat, glob)
+			return 1
+		}
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown subcmd: %s\n", subcmd)
+		return 2
+	}
+}
+
+// --- config -----------------------------------------------------------------
+
+// runTemplateConfig mirrors scripts/template-config.sh. Two subcommands:
+// `get <path> <key> [default]` and `validate <path>`.
+func runTemplateConfig(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage:\n  awiki template config get <path> <key> [default]\n  awiki template config validate <path>")
+		return 2
+	}
+	subcmd := args[0]
+	path := args[1]
+	switch subcmd {
+	case "get":
+		if len(args) < 3 {
+			fmt.Fprintln(stderr, "usage: get <path> <key> [default]")
+			return 2
+		}
+		key := args[2]
+		def := ""
+		if len(args) >= 4 {
+			def = args[3]
+		}
+		val := configGet(path, key, def)
+		fmt.Fprintln(stdout, val)
+		return 0
+	case "validate":
+		return configValidate(path, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown subcmd: %s\n", subcmd)
+		return 2
+	}
+}
+
+var configKnownKeys = map[string]bool{
+	"default_branch":         true,
+	"no_template_check":      true,
+	"require_signature":      true,
+	"ingest_lint_threshold":  true,
+}
+
+func configGet(path, key, def string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return def
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		if line[:idx] == key {
+			val := line[idx+1:]
+			if val == "" {
+				return def
+			}
+			return val
+		}
+	}
+	return def
+}
+
+func configValidate(path string, stderr io.Writer) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0
+		}
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	rc := 0
+	lineno := 0
+	for _, raw := range strings.Split(string(data), "\n") {
+		lineno++
+		// Drop the synthetic empty trailing line produced by a final
+		// "\n" — bash `while read` would not iterate it.
+		if lineno == strings.Count(string(data), "\n")+1 && raw == "" {
+			break
+		}
+		trim := strings.TrimSpace(raw)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		// Same regex as bash: ^[A-Za-z_][A-Za-z0-9_]*=.*$
+		if !validConfigLine(raw) {
+			fmt.Fprintf(stderr, "config error: malformed line %d: %s\n", lineno, raw)
+			rc = 1
+			continue
+		}
+		key := raw[:strings.Index(raw, "=")]
+		if !configKnownKeys[key] {
+			fmt.Fprintf(stderr, "config warning: unknown key %s (line %d)\n", key, lineno)
+		}
+	}
+	return rc
+}
+
+func validConfigLine(line string) bool {
+	idx := strings.Index(line, "=")
+	if idx <= 0 {
+		return false
+	}
+	key := line[:idx]
+	if key == "" {
+		return false
+	}
+	c := key[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_') {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		c := key[i]
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// --- provenance -------------------------------------------------------------
+
+func runTemplateProvenance(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: awiki template provenance <subcmd> <path> [args...]")
+		return 2
+	}
+	subcmd := args[0]
+	path := args[1]
+	rest := args[2:]
+	switch subcmd {
+	case "init":
+		if len(rest) < 4 {
+			fmt.Fprintln(stderr, "usage: init <path> <repo> <ref> <version> <commit>")
+			return 2
+		}
+		if err := template.InitProvenance(path, rest[0], rest[1], rest[2], rest[3]); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	case "get":
+		if len(rest) < 1 {
+			fmt.Fprintln(stderr, "usage: get <path> <field>")
+			return 2
+		}
+		val, err := template.GetProvenanceField(path, rest[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "field not found: %s\n", rest[0])
+			return 1
+		}
+		fmt.Fprintln(stdout, val)
+		return 0
+	case "set":
+		if len(rest) < 2 {
+			fmt.Fprintln(stderr, "usage: set <path> <field> <value>")
+			return 2
+		}
+		if err := template.SetProvenanceField(path, rest[0], rest[1]); err != nil {
+			if errors.Is(err, template.ErrImmutableField) {
+				fmt.Fprintf(stderr, "field is immutable: %s\n", rest[0])
+				return 1
+			}
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	case "append-migration":
+		if len(rest) < 2 {
+			fmt.Fprintln(stderr, "usage: append-migration <path> <id> <status> [reason]")
+			return 2
+		}
+		reason := ""
+		if len(rest) >= 3 {
+			reason = rest[2]
+		}
+		if err := template.AppendProvenanceMigration(path, rest[0], rest[1], reason); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	case "append-bootstrap-step":
+		if len(rest) < 2 {
+			fmt.Fprintln(stderr, "usage: append-bootstrap-step <path> <id> <status> [reason] [content_hash]")
+			return 2
+		}
+		reason, hash := "", ""
+		if len(rest) >= 3 {
+			reason = rest[2]
+		}
+		if len(rest) >= 4 {
+			hash = rest[3]
+		}
+		if err := template.AppendProvenanceBootstrapStep(path, rest[0], rest[1], reason, hash); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	case "has-step-applied":
+		if len(rest) < 2 {
+			fmt.Fprintln(stderr, "usage: has-step-applied <path> <id> <expected_hash>")
+			return 2
+		}
+		ok, err := template.HasStepApplied(path, rest[0], rest[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if ok {
+			return 0
+		}
+		return 1
+	case "list-steps":
+		out, err := template.ListProvenanceSteps(path)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		_, _ = io.WriteString(stdout, out)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown subcmd: %s\n", subcmd)
+		return 2
+	}
+}
+
+// --- lint -------------------------------------------------------------------
+
+func runTemplateLint(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template lint", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	repoRoot := *root
+	if repoRoot == "" {
+		repoRoot = templateRepoRoot()
+	}
+	report, err := template.LintTemplate(repoRoot, time.Now(), os.Getenv("AWIKI_NO_TEMPLATE_CHECK"), nil)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	for _, m := range report.Messages {
+		fmt.Fprintln(stdout, m.Format())
+	}
+	return report.ExitCode()
+}
+
+// --- escape -----------------------------------------------------------------
+
+func runTemplateEscape(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: awiki template escape <string>")
+		return 2
+	}
+	fmt.Fprintln(stdout, template.EscapePlanField(args[0]))
+	return 0
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}

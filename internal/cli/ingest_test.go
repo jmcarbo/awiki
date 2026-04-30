@@ -8,39 +8,24 @@ import (
 	"testing"
 )
 
-// TestRunIngestVerbsNotYetPorted asserts every flat ingest verb wired
-// in slice 1 returns the "verb not yet ported" sentinel on stderr.
-// Subsequent slices replace each case as they land. `capture` is removed
-// from this list as of slice 2 (it is now ported and has dedicated
-// coverage in internal/ingest/capture_test.go). `ingest-batch-list` and
-// `ingest-git-list` are removed as of slice 3 (leaf listers — coverage
-// in internal/ingest/list_test.go). `ingest-pdf` is removed as of
-// slice 4 (coverage in internal/ingest/formats/pdf_test.go).
-// `ingest-audio` is removed as of slice 5 (coverage in
-// internal/ingest/formats/audio_test.go). `ingest-xlsx` is removed as
-// of slice 6 (coverage in internal/ingest/formats/xlsx_test.go).
-// `ingest` is removed as of slice 7 (coverage in
-// internal/ingest/bookkeep_test.go). `ingest-git` is removed as of
-// slice 8 (coverage in internal/ingest/git/run_test.go).
-func TestRunIngestVerbsNotYetPorted(t *testing.T) {
-	verbs := []string{
-		"watchdog",
-	}
-	t.Setenv("AWIKI_REPO_ROOT", t.TempDir())
-	for _, v := range verbs {
-		t.Run(v, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			code := Run([]string{v}, &stdout, &stderr)
-			if code == 0 {
-				t.Fatalf("Run(%q) code = 0, want non-zero", v)
-			}
-			want := "ingest: verb not yet ported: " + v
-			if !strings.Contains(stderr.String(), want) {
-				t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
-			}
-		})
-	}
-}
+// TestRunIngestVerbsNotYetPorted is retired as of slice 9: every flat
+// ingest verb the slice plan listed is now Go-native. The historical
+// not-yet-ported list (capture/listers/pdf/audio/xlsx/ingest/git/
+// watchdog) is fully drained. The placeholder name is preserved as a
+// breadcrumb in the commit log.
+//
+// Per-verb coverage:
+//   - capture            internal/ingest/capture_test.go        (slice 2)
+//   - ingest-batch-list  internal/ingest/list_test.go           (slice 3)
+//   - ingest-git-list    internal/ingest/list_test.go           (slice 3)
+//   - ingest-pdf         internal/ingest/formats/pdf_test.go    (slice 4)
+//   - ingest-audio       internal/ingest/formats/audio_test.go  (slice 5)
+//   - ingest-xlsx        internal/ingest/formats/xlsx_test.go   (slice 6)
+//   - ingest             internal/ingest/bookkeep_test.go       (slice 7)
+//   - ingest-git         internal/ingest/git/run_test.go        (slice 8)
+//   - watchdog           internal/ingest/watchdog_test.go       (slice 9)
+//
+// The test is removed; this comment documents the audit trail.
 
 // TestRunIngestGitNoArgs asserts the ingest-git verb returns the bash-
 // compat usage banner on missing positional arg.

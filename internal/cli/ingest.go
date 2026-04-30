@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"awiki/internal/adapters"
 	"awiki/internal/config"
@@ -388,8 +391,78 @@ func captureUsage(w io.Writer) {
 	fmt.Fprintln(w, "  Set AWIKI_CAPTURE_PRESANITIZED=1 if upstream already sanitized.")
 }
 
-func runWatchdog(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("watchdog", stderr)
+// runWatchdog parses `awiki watchdog [--catchup] [--once]
+// [--poll-interval=<duration>]` and delegates to ingest.Watchdog. The
+// flag set is the strict subset slice 9 ports — fswatch/inotifywait
+// backend selection is dropped because the Go path uses the native
+// fsnotify adapter (with a polling fallback). SIGINT/SIGTERM are
+// translated to ctx cancellation so the watchdog can emit
+// WATCHDOG|event=stop and exit cleanly.
+func runWatchdog(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	opts := ingest.WatchdogOptions{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--catchup":
+			opts.Catchup = true
+		case a == "--once":
+			opts.Once = true
+		case a == "--poll-interval":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "ERROR: --poll-interval requires a duration (e.g. 2s)")
+				return 2
+			}
+			d, err := parseDurationFlag(args[i+1])
+			if err != nil {
+				fmt.Fprintf(stderr, "ERROR: invalid --poll-interval: %v\n", err)
+				return 2
+			}
+			opts.PollInterval = d
+			i++
+		case strings.HasPrefix(a, "--poll-interval="):
+			d, err := parseDurationFlag(strings.TrimPrefix(a, "--poll-interval="))
+			if err != nil {
+				fmt.Fprintf(stderr, "ERROR: invalid --poll-interval: %v\n", err)
+				return 2
+			}
+			opts.PollInterval = d
+		case a == "-h" || a == "--help":
+			fmt.Fprintln(stdout, "usage: awiki watchdog [--catchup] [--once] [--poll-interval=<duration>]")
+			return 0
+		default:
+			fmt.Fprintf(stderr, "ERROR: unknown arg: %s\n", a)
+			fmt.Fprintln(stderr, "usage: awiki watchdog [--catchup] [--once] [--poll-interval=<duration>]")
+			return 2
+		}
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	wr := &ingest.WatchdogRunner{Runner: r}
+	if err := ingest.Watchdog(ctx, wr, opts, stdout, stderr); err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "watchdog: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// parseDurationFlag parses a human-friendly duration flag value. Bare
+// integers (e.g. "2") are accepted as seconds for parity with the bash
+// `--poll-interval 2`. Anything else passes through to time.ParseDuration.
+func parseDurationFlag(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty value")
+	}
+	// Bare integer / float -> treat as seconds.
+	if n, err := strconv.ParseFloat(s, 64); err == nil {
+		return time.Duration(n * float64(time.Second)), nil
+	}
+	return time.ParseDuration(s)
 }
 
 // runIngestBatchList delegates to ingest.Runner.ListBatch. Mirrors the

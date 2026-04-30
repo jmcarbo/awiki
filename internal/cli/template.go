@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"awiki/internal/adapters"
 	"awiki/internal/template"
 )
 
@@ -500,4 +501,70 @@ func runTemplateEscape(args []string, stdout, stderr io.Writer) int {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// --- bootstrap-step (top-level verb) ----------------------------------------
+
+// runBootstrapStep mirrors `awiki bootstrap-step <id>` (alias for
+// `template-update.sh --rerun-bootstrap-step <id>`). The driver is thin
+// — it resolves the repo root + default branch, then delegates to
+// template.RerunBootstrapStep with adapters.
+func runBootstrapStep(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("bootstrap-step", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	nonInteractive := fs.Bool("non-interactive", false, "auto-confirm the replay (CI mode)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(stderr, "usage: awiki bootstrap-step <id>")
+		return 2
+	}
+	stepID := rest[0]
+
+	repoRoot := templateRepoRoot()
+	defaultBranch := configGet(filepath.Join(repoRoot, ".awiki", "config"), "default_branch", "main")
+
+	g := adapters.TemplateOrchGit{RepoRoot: repoRoot, Stdout: stdout, Stderr: stderr}
+	b := adapters.TemplateOrchBash{Stdout: stdout, Stderr: stderr}
+	c := adapters.TemplateOrchConfirm{In: os.Stdin, Out: stderr}
+
+	res, err := template.RerunBootstrapStep(g, b, c, template.BootstrapStepInput{
+		RepoRoot:       repoRoot,
+		StepID:         stepID,
+		NonInteractive: *nonInteractive,
+		DefaultBranch:  defaultBranch,
+		PathEnv:        os.Getenv("PATH"),
+		HomeEnv:        os.Getenv("HOME"),
+		LangEnv:        os.Getenv("LANG"),
+		LCAllEnv:       os.Getenv("LC_ALL"),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, template.ErrUpdateInProgress):
+			fmt.Fprintln(stderr, "halt: update in progress — run --abort first")
+		case errors.Is(err, template.ErrPendingPrompts):
+			fmt.Fprintln(stderr, "halt: pending-prompts present — resolve first")
+		case errors.Is(err, template.ErrUpdateBranchPresent):
+			fmt.Fprintln(stderr, "halt: existing update branch present — finish or --abort first")
+		case errors.Is(err, template.ErrStepNotFound):
+			fmt.Fprintf(stderr, "step not found: %s\n", stepID)
+		default:
+			fmt.Fprintln(stderr, err)
+		}
+		return 1
+	}
+	if res.Declined {
+		// Bash exits 0 silently; nothing else to print.
+		return 0
+	}
+	// Surface the body to the user (matches the `echo "$BODY"` in bash).
+	if !*nonInteractive {
+		// In interactive mode the confirm prompt already printed the body.
+	} else {
+		fmt.Fprintln(stdout, res.StepBody)
+	}
+	fmt.Fprintf(stdout, "info: rerun-bootstrap-step %s complete on %s\n", stepID, res.Branch)
+	return 0
 }

@@ -40,6 +40,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runIngestVerb(args[0], args[1:], stdout, stderr)
 	case "template":
 		return runTemplate(args[1:], stdout, stderr)
+	case "bootstrap-step":
+		return runBootstrapStep(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

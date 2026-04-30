@@ -372,6 +372,33 @@ func TestTemplate_Escape(t *testing.T) {
 	}
 }
 
+func TestBootstrapStep_NoArgs(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	code := Run([]string{"bootstrap-step"}, &out, &errBuf)
+	if code != 2 {
+		t.Errorf("code=%d want 2", code)
+	}
+	if !strings.Contains(errBuf.String(), "usage: awiki bootstrap-step") {
+		t.Errorf("stderr=%q", errBuf.String())
+	}
+}
+
+func TestBootstrapStep_HaltsOnPendingPrompts(t *testing.T) {
+	root := t.TempDir()
+	pp := filepath.Join(root, ".awiki", "pending-prompts")
+	_ = os.MkdirAll(pp, 0o755)
+	_ = os.WriteFile(filepath.Join(pp, "x.md"), []byte("hi"), 0o644)
+	t.Setenv("AWIKI_REPO_ROOT", root)
+	var out, errBuf bytes.Buffer
+	code := Run([]string{"bootstrap-step", "--non-interactive", "domain"}, &out, &errBuf)
+	if code != 1 {
+		t.Errorf("code=%d want 1", code)
+	}
+	if !strings.Contains(errBuf.String(), "pending-prompts present") {
+		t.Errorf("stderr=%q", errBuf.String())
+	}
+}
+
 func TestTemplate_Lint_MissingManifest(t *testing.T) {
 	root := t.TempDir()
 	var out, errBuf bytes.Buffer

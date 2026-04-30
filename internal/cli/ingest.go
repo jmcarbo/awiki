@@ -75,6 +75,9 @@ func buildIngestRunner() (*ingest.Runner, error) {
 		FSNotify:    adapters.ExecFSNotify{},
 		GitExt:      adapters.ExecGitExt{},
 		Qmd:         adapters.ExecQmd{},
+		Lint:        adapters.ExecIngestLint{},
+		Agent:       adapters.ExecAgent{},
+		LogAppend:   adapters.ExecLogAppend{},
 		Today:       todayDate(),
 	}, nil
 }
@@ -86,8 +89,71 @@ func notYetPorted(verb string, stderr io.Writer) int {
 	return 1
 }
 
-func runIngest(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest", stderr)
+// runIngest parses `awiki ingest [--agent <cli>] <path>` and delegates
+// to ingest.IngestBookkeep. Mirrors the flag parser at
+// scripts/ingest.sh:19-29:
+//
+//   - --agent <cli>     consume the next arg as the CLI name
+//   - --agent=<cli>     equivalent inline form
+//   - --                end of options; remaining args are positional
+//   - default agent CLI comes from $AWIKI_AGENT (resolved here so the
+//     ingest package stays oblivious to the env)
+//   - $AWIKI_AGENT_FLAGS becomes BookkeepOptions.AgentFlags
+//
+// Usage failure (no positional path) emits the bash-compat banner on
+// stderr and exits 1.
+func runIngest(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	agentCLI := os.Getenv("AWIKI_AGENT")
+	if v, ok := r.Config["AWIKI_AGENT"]; ok && v != "" && agentCLI == "" {
+		agentCLI = v
+	}
+	agentFlags := os.Getenv("AWIKI_AGENT_FLAGS")
+	if v, ok := r.Config["AWIKI_AGENT_FLAGS"]; ok && v != "" && agentFlags == "" {
+		agentFlags = v
+	}
+
+	var positional []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		switch {
+		case a == "--agent":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "usage: ingest.sh [--agent <cli>] <path-under-raw/inbox/>")
+				return 1
+			}
+			agentCLI = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--agent="):
+			agentCLI = strings.TrimPrefix(a, "--agent=")
+			i++
+		case a == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		default:
+			positional = append(positional, a)
+			i++
+		}
+	}
+	if len(positional) < 1 {
+		fmt.Fprintln(stderr, "usage: ingest.sh [--agent <cli>] <path-under-raw/inbox/>")
+		return 1
+	}
+
+	err := ingest.IngestBookkeep(context.Background(), r, ingest.BookkeepOptions{
+		SourcePath: positional[0],
+		AgentCLI:   agentCLI,
+		AgentFlags: agentFlags,
+	}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // runIngestXLSX parses `awiki ingest-xlsx <path> [--preview-rows N]`

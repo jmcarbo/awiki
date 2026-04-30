@@ -65,7 +65,7 @@ teardown() {
   cp -R "$REPO_ROOT" "$PHASE17_WORK/awiki"
   cd "$PHASE17_WORK/awiki"
   AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
-  just capture "call dentist about crown"
+  "$REPO_ROOT/bin/awiki" capture -- "call dentist about crown"
 
   mkdir -p content/projects
   cat > content/projects/dentist.md <<'PROJEOM'
@@ -101,7 +101,7 @@ PROJEOM
   cp -R "$REPO_ROOT" "$PHASE18A_WORK/awiki"
   cd "$PHASE18A_WORK/awiki"
   AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
-  just capture "call dentist about crown"
+  "$REPO_ROOT/bin/awiki" capture -- "call dentist about crown"
 
   # Locate the captured line and synthesize its inbox-<sha>-<lineno> id.
   local lineno

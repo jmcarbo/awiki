@@ -28,6 +28,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runChart(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "ingest",
+		"ingest-xlsx",
+		"ingest-git",
+		"ingest-pdf",
+		"ingest-audio",
+		"capture",
+		"watchdog",
+		"ingest-batch-list",
+		"ingest-git-list":
+		return runIngestVerb(args[0], args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

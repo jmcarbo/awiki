@@ -57,9 +57,18 @@ _migrate_review_inner() {
 }
 
 if command -v flock >/dev/null 2>&1; then
-  # shellcheck source=lib/lock.sh
-  . "${SCRIPT_DIR}/lib/lock.sh"
-  awiki_lock_with --timeout="${AWIKI_LOCK_TIMEOUT_USER:-30}" -- _migrate_review_inner
+  # Minimal exclusive lock around .awiki/lock. Mirrors what
+  # scripts/lib/lock.sh did before that helper was deleted: open the
+  # lock file on FD 9, take an exclusive lock with a 30s default
+  # timeout, and exit 7 on contention. The Go fsutil port owns the
+  # canonical implementation now; this one-off migration carries its
+  # own copy because it is the last bash caller.
+  mkdir -p "${REPO_ROOT}/.awiki"
+  : > "${REPO_ROOT}/.awiki/lock"
+  (
+    flock -w "${AWIKI_LOCK_TIMEOUT_USER:-30}" -x 9 || exit 7
+    _migrate_review_inner
+  ) 9>>"${REPO_ROOT}/.awiki/lock"
 else
   _migrate_review_inner
 fi

@@ -12,7 +12,7 @@ git -c user.email=ci@example.com -c user.name=ci add -A
 git -c user.email=ci@example.com -c user.name=ci commit -q -m "fixture v0"
 COMMIT_OLD=$(git rev-parse HEAD)
 
-bash "$REPO_ROOT/scripts/template-init.sh" \
+"$REPO_ROOT/bin/awiki" template init \
   --repo "$REPO_ROOT/tests/fixtures/template-update/v1" \
   --ref main --version 0.1.0 --commit "$COMMIT_OLD" >/dev/null
 
@@ -20,7 +20,7 @@ bash "$REPO_ROOT/scripts/template-init.sh" \
 git -c user.email=ci@example.com -c user.name=ci add -A
 git -c user.email=ci@example.com -c user.name=ci commit -q -m "chore: template-init"
 
-bash "$REPO_ROOT/scripts/template-update.sh" \
+"$REPO_ROOT/bin/awiki" template update \
   --source "$REPO_ROOT/tests/fixtures/template-update/v1" \
   --accept-source-change --apply --non-interactive --print-migrations
 

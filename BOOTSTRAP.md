@@ -158,7 +158,7 @@ git commit -m "chore: initialize wiki '$WIKI_NAME'"
 ### Step 12: Seed template provenance
 <!-- bootstrap-step: template-init -->
 
-Run `bash scripts/template-init.sh --repo <upstream-url> --ref main --version <version> --commit <commit>` to write `.awiki/template.json`, snapshot the template tree to `.awiki/template-cache/<commit>/`, and record `bootstrap_steps_done[]` with content_hash for all completed steps. This wires the wiki up for `just template-update` going forward.
+Run `awiki template init --repo <upstream-url> --ref main --version <version> --commit <commit>` to write `.awiki/template.json`, snapshot the template tree to `.awiki/template-cache/<commit>/`, and record `bootstrap_steps_done[]` with content_hash for all completed steps. This wires the wiki up for `just template-update` going forward.
 
 ### Step 13: Smoke test prompt
 <!-- bootstrap-step: smoke-test -->

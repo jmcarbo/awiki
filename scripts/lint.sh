@@ -1128,9 +1128,8 @@ fi
 # checks. Output is LINT|<level>|<file>|<msg>; we tally lower-cased levels so
 # the summary line stays consistent. Non-zero exit from the helper is non-fatal
 # at the wrapper level (we already counted via parsed output).
-if [[ -x "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" ]] \
-   || [[ -f "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" ]]; then
-  TEMPLATE_LINT_OUT="$(python3 "$AWIKI_SCRIPTS_DIR/_template_helpers/lint_template.py" --root "$AWIKI_REPO_ROOT" 2>&1 || true)"
+if command -v awiki >/dev/null 2>&1; then
+  TEMPLATE_LINT_OUT="$(awiki template lint --root "$AWIKI_REPO_ROOT" 2>&1 || true)"
   if [[ -n "$TEMPLATE_LINT_OUT" ]]; then
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue

@@ -19,3 +19,9 @@ func runLog(args []string, stdout, stderr io.Writer) int {
 func runReindex(args []string, stdout, stderr io.Writer) int {
 	return ops.ReindexCLI(args, stdout, stderr)
 }
+
+// runCheckDeps dispatches `awiki check-deps`. Mirrors
+// scripts/check-deps.sh.
+func runCheckDeps(args []string, stdout, stderr io.Writer) int {
+	return ops.CheckDepsCLI(args, stdout, stderr)
+}

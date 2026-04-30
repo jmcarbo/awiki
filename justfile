@@ -9,31 +9,31 @@ default:
 # WIKI.md §4.1 ingest workflow (read source, write summary, update
 # entity/concept pages, update catalog).
 ingest path:
-    bash scripts/ingest.sh {{path}}
+    awiki ingest {{path}}
 
 # Same, plus shells the emitted prompt to an agent CLI for non-
 # interactive `batch` queue processing. Skips invocation for interactive/
 # checkpoint queues (human-in-the-loop). Default CLI: claude. Override
 # via AWIKI_AGENT in .awiki/config or pass explicitly.
 ingest-with-agent path agent="claude":
-    bash scripts/ingest.sh --agent {{agent}} {{path}}
+    awiki ingest --agent {{agent}} {{path}}
 
 ingest-xlsx path *flags:
-    bash scripts/ingest-xlsx.sh {{path}} {{flags}}
+    awiki ingest-xlsx {{path}} {{flags}}
 
 ingest-batch-list:
     @awiki ingest-batch-list
 
 # Auto-ingest documents landing in raw/inbox/batch/. Foreground daemon —
-# Ctrl-C to stop. Uses fswatch (mac) / inotifywait (linux); falls back to
-# polling when neither is available. `--catchup` drains existing files at
-# startup. Failed ingests are quarantined to raw/inbox/batch/_failed/.
+# Ctrl-C to stop. Uses fsnotify; falls back to polling when fsnotify
+# init fails. `--catchup` drains existing files at startup. Failed
+# ingests are quarantined to raw/inbox/batch/_failed/.
 watchdog *args:
-    bash scripts/watchdog.sh {{args}}
+    awiki watchdog {{args}}
 
 # === git-docs ingest (phase 20) ===
 ingest-git spec *flags:
-    bash scripts/ingest-git.sh {{spec}} {{flags}}
+    awiki ingest-git {{spec}} {{flags}}
 
 ingest-git-list:
     @awiki ingest-git-list
@@ -184,7 +184,7 @@ query-fence-render:
     bash scripts/query.sh fence-render
 
 capture *text:
-    bash scripts/capture.sh -- {{text}}
+    awiki capture -- {{text}}
 
 scan:
     bash scripts/action-scan.sh

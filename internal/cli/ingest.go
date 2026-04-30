@@ -121,8 +121,27 @@ func runIngestPDF(r *ingest.Runner, args []string, stdout, stderr io.Writer) int
 	return 0
 }
 
-func runIngestAudio(_ *ingest.Runner, _ []string, _, stderr io.Writer) int {
-	return notYetPorted("ingest-audio", stderr)
+// runIngestAudio parses `awiki ingest-audio <path>` and delegates to
+// formats.IngestAudio. Mirrors bash usage at scripts/ingest-audio.sh:4.
+func runIngestAudio(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: awiki ingest-audio <audio-path-under-raw/inbox/>")
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: ingest-audio.sh <audio-path-under-raw/inbox/>")
+		return 1
+	}
+	_, err := formats.IngestAudio(context.Background(), r, formats.AudioOptions{SourcePath: args[0]}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-audio: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // runCapture parses the `awiki capture -- <text...>` argument shape

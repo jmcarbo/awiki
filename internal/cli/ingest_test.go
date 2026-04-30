@@ -14,12 +14,13 @@ import (
 // `ingest-git-list` are removed as of slice 3 (leaf listers — coverage
 // in internal/ingest/list_test.go). `ingest-pdf` is removed as of
 // slice 4 (coverage in internal/ingest/formats/pdf_test.go).
+// `ingest-audio` is removed as of slice 5 (coverage in
+// internal/ingest/formats/audio_test.go).
 func TestRunIngestVerbsNotYetPorted(t *testing.T) {
 	verbs := []string{
 		"ingest",
 		"ingest-xlsx",
 		"ingest-git",
-		"ingest-audio",
 		"watchdog",
 	}
 	t.Setenv("AWIKI_REPO_ROOT", t.TempDir())

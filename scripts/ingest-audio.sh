@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Slice 5 of the Go ingest port: when bin/awiki is built and the user
+# has not opted into the legacy bash path, exec the Go implementation.
+# Mirrors scripts/ingest-pdf.sh:9-16. Set AWIKI_INGEST_AUDIO_LEGACY=1 to
+# force the original bash path (used by the bats oracle and parity
+# smoke tests until cleanup in slice 10).
+AWIKI_INGEST_AUDIO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_INGEST_AUDIO_REPO_ROOT="$(cd "$AWIKI_INGEST_AUDIO_SCRIPT_DIR/.." && pwd)"
+AWIKI_INGEST_AUDIO_GO_BIN="$AWIKI_INGEST_AUDIO_REPO_ROOT/bin/awiki"
+
+if [[ "${AWIKI_INGEST_AUDIO_LEGACY:-0}" != "1" && -x "$AWIKI_INGEST_AUDIO_GO_BIN" ]]; then
+  cd "$AWIKI_INGEST_AUDIO_REPO_ROOT" || exit 1
+  exec "$AWIKI_INGEST_AUDIO_GO_BIN" ingest-audio "$@"
+fi
+
 [[ $# -eq 1 ]] || { echo "usage: ingest-audio.sh <audio-path-under-raw/inbox/>" >&2; exit 1; }
 AUDIO="$1"
 

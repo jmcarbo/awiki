@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -264,6 +265,260 @@ func (g TemplateOrchGit) CheckAttrAll(attrFile, path string) (string, error) {
 		return string(out), nil
 	}
 	return "", err
+}
+
+// TemplateOrchPreflight implements PreflightGit using `os/exec` against
+// the host git/git-crypt binaries. Mirrors the bash + Python oracle.
+type TemplateOrchPreflight struct {
+	RepoRoot string
+}
+
+// NewTemplateOrchPreflight returns an adapter rooted at repoRoot.
+func NewTemplateOrchPreflight(repoRoot string) TemplateOrchPreflight {
+	return TemplateOrchPreflight{RepoRoot: repoRoot}
+}
+
+// DiffIndexQuiet shells `git -C <repo> diff-index --quiet HEAD --`.
+// Returns 0 on clean tree, non-zero on staged/unstaged changes.
+func (p TemplateOrchPreflight) DiffIndexQuiet() (int, error) {
+	cmd := exec.Command("git", "-C", p.RepoRoot, "diff-index", "--quiet", "HEAD", "--")
+	err := cmd.Run()
+	if err == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	return 127, err
+}
+
+// LsFilesUntracked shells `git -C <repo> ls-files --others --exclude-standard`.
+func (p TemplateOrchPreflight) LsFilesUntracked() (string, int, error) {
+	cmd := exec.Command("git", "-C", p.RepoRoot, "ls-files", "--others", "--exclude-standard")
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	return "", 127, err
+}
+
+// SubmoduleStatus shells `git -C <repo> submodule status`.
+func (p TemplateOrchPreflight) SubmoduleStatus() (string, int, error) {
+	cmd := exec.Command("git", "-C", p.RepoRoot, "submodule", "status")
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	return "", 127, err
+}
+
+// CurrentBranch shells `git -C <repo> rev-parse --abbrev-ref HEAD`.
+func (p TemplateOrchPreflight) CurrentBranch() (string, int, error) {
+	cmd := exec.Command("git", "-C", p.RepoRoot, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	return "", 127, err
+}
+
+// GitCryptStatusEncrypted shells `git -C <repo> -c <conf> ... git-crypt
+// status -e`. We invoke `git-crypt` directly with cwd set; missing
+// binary returns code 127.
+func (p TemplateOrchPreflight) GitCryptStatusEncrypted() (string, int, error) {
+	cmd := exec.Command("git-crypt", "status", "-e")
+	cmd.Dir = p.RepoRoot
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	// Binary missing.
+	return "", 127, nil
+}
+
+// GitCryptStatus shells `git-crypt status`.
+func (p TemplateOrchPreflight) GitCryptStatus() (string, int, error) {
+	cmd := exec.Command("git-crypt", "status")
+	cmd.Dir = p.RepoRoot
+	out, err := cmd.Output()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), nil
+	}
+	return "", 127, nil
+}
+
+// FetchClone shells `git clone --depth 50 <source> <dest>`. When source
+// is a non-git local path, falls back to copy + git init + commit (the
+// snapshot path the bash oracle uses for fixture-tree sources).
+func (g TemplateOrchGit) FetchClone(source, dest string) error {
+	// Snapshot path: local dir without .git.
+	if isLocalNonGit(source) {
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			return err
+		}
+		// Recursive copy via tar to preserve modes.
+		copyCmd := exec.Command("sh", "-c", fmt.Sprintf("cp -R %q/. %q/", source, dest))
+		copyCmd.Stderr = g.stderr()
+		if err := copyCmd.Run(); err != nil {
+			return err
+		}
+		init := exec.Command("git", "-C", dest, "init", "-q")
+		init.Stderr = g.stderr()
+		if err := init.Run(); err != nil {
+			return err
+		}
+		add := exec.Command("git", "-C", dest, "add", "-A")
+		add.Stderr = g.stderr()
+		if err := add.Run(); err != nil {
+			return err
+		}
+		commit := exec.Command("git", "-C", dest,
+			"-c", "user.email=fetch@local",
+			"-c", "user.name=fetch",
+			"commit", "-q", "-m", "snapshot: "+source)
+		commit.Stderr = g.stderr()
+		return commit.Run()
+	}
+	cmd := exec.Command("git", "clone", "--depth", "50", source, dest)
+	cmd.Stderr = g.stderr()
+	return cmd.Run()
+}
+
+func isLocalNonGit(p string) bool {
+	if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") || strings.HasPrefix(p, "git@") {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(p, ".git")); err == nil {
+		return false
+	}
+	if _, err := os.Stat(p); err == nil {
+		return true
+	}
+	return false
+}
+
+// FetchUpdate shells `git -C <dir> fetch --depth 50 origin`. Best-
+// effort.
+func (g TemplateOrchGit) FetchUpdate(dir string) error {
+	cmd := exec.Command("git", "-C", dir, "fetch", "--depth", "50", "origin")
+	cmd.Stderr = g.stderr()
+	_ = cmd.Run()
+	return nil
+}
+
+// RevParseHEAD returns the SHA at HEAD in dir.
+func (g TemplateOrchGit) RevParseHEAD(dir string) (string, error) {
+	return revParse(dir, "HEAD")
+}
+
+// RevParseRef returns the SHA the ref resolves to in dir.
+func (g TemplateOrchGit) RevParseRef(dir, ref string) (string, error) {
+	return revParse(dir, ref)
+}
+
+func revParse(dir, ref string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", ref)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// CurrentBranchName returns `git rev-parse --abbrev-ref HEAD` in
+// RepoRoot.
+func (g TemplateOrchGit) CurrentBranchName() (string, error) {
+	cmd := exec.Command("git", "-C", g.RepoRoot, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// VerifyTag shells `git -C <dir> verify-tag <target>`.
+func (g TemplateOrchGit) VerifyTag(dir, target string) error {
+	cmd := exec.Command("git", "-C", dir, "verify-tag", target)
+	return cmd.Run()
+}
+
+// VerifyCommit shells `git -C <dir> verify-commit <target>`.
+func (g TemplateOrchGit) VerifyCommit(dir, target string) error {
+	cmd := exec.Command("git", "-C", dir, "verify-commit", target)
+	return cmd.Run()
+}
+
+// ResetHard shells `git -C <repo> reset --hard <ref>`.
+func (g TemplateOrchGit) ResetHard(ref string) error {
+	cmd := exec.Command("git", "-C", g.RepoRoot, "reset", "--hard", ref)
+	cmd.Stderr = g.stderr()
+	return cmd.Run()
+}
+
+// HasBranch reports whether refs/heads/<branch> exists.
+func (g TemplateOrchGit) HasBranch(branch string) (bool, error) {
+	cmd := exec.Command("git", "-C", g.RepoRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
+}
+
+// MergeFileDryRun shells `git merge-file --diff3 -p <cur> <base> <new>`
+// against scratch copies. Returns the exit code (0 = clean, >0 =
+// conflict count).
+func (g TemplateOrchGit) MergeFileDryRun(curBytes, baseBytes, newBytes []byte) (int, error) {
+	tmp, err := os.MkdirTemp("", "awiki-mergedry-")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	cur := filepath.Join(tmp, "cur")
+	base := filepath.Join(tmp, "base")
+	newF := filepath.Join(tmp, "new")
+	for _, w := range []struct {
+		path string
+		data []byte
+	}{{cur, curBytes}, {base, baseBytes}, {newF, newBytes}} {
+		if err := os.WriteFile(w.path, w.data, 0o644); err != nil {
+			return 0, err
+		}
+	}
+	cmd := exec.Command("git", "merge-file", "--diff3", "-p", cur, base, newF)
+	if err := cmd.Run(); err == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	return 127, err
 }
 
 // captureRun is a small helper that runs cmd and returns combined

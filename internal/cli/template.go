@@ -47,6 +47,10 @@ func runTemplate(args []string, stdout, stderr io.Writer) int {
 		return runTemplateRetrofit(rest, stdout, stderr)
 	case "merge":
 		return runTemplateMerge(rest, stdout, stderr)
+	case "update":
+		return runTemplateUpdate(rest, stdout, stderr)
+	case "init":
+		return runTemplateInit(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "template: unknown verb %q\n", verb)
 		return 2
@@ -505,6 +509,94 @@ func runTemplateEscape(args []string, stdout, stderr io.Writer) int {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// --- init -------------------------------------------------------------------
+
+// runTemplateInit mirrors scripts/template-init.sh.
+func runTemplateInit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	repo := fs.String("repo", "", "template repo URL or path")
+	ref := fs.String("ref", "", "template ref (e.g. main)")
+	version := fs.String("version", "", "template version")
+	commit := fs.String("commit", "", "template commit SHA")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *repo == "" || *ref == "" || *version == "" || *commit == "" {
+		fmt.Fprintln(stderr, "usage: awiki template init --repo <url> --ref <ref> --version <v> --commit <sha>")
+		return 2
+	}
+	root := templateRepoRoot()
+	g := adapters.TemplateOrchGit{RepoRoot: root, Stdout: stdout, Stderr: stderr}
+
+	// Print preserve message if provenance exists.
+	pj := filepath.Join(root, ".awiki", "template.json")
+	if fileExists(pj) {
+		fmt.Fprintln(stderr, template.InitTemplatePreserveMessage(pj))
+	}
+
+	if _, err := template.InitTemplate(g, template.InitInput{
+		RepoRoot: root,
+		Repo:     *repo,
+		Ref:      *ref,
+		Version:  *version,
+		Commit:   *commit,
+	}); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "template-init: pinned %s @ %s (version %s)\n", *repo, *commit, *version)
+	return 0
+}
+
+// --- update -----------------------------------------------------------------
+
+// runTemplateUpdate mirrors scripts/template-update.sh.
+func runTemplateUpdate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("template update", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	opts := template.UpdateOptions{}
+	fs.StringVar(&opts.Ref, "ref", "", "pin a specific upstream ref")
+	fs.StringVar(&opts.Source, "source", "", "override repo source")
+	fs.BoolVar(&opts.Apply, "apply", false, "execute the update")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "force dry-run even with --apply")
+	fs.BoolVar(&opts.Continue, "continue", false, "resume after conflicts / migration failure")
+	fs.BoolVar(&opts.Abort, "abort", false, "discard in-progress update branch")
+	fs.BoolVar(&opts.Status, "status", false, "print current pin + pending state")
+	fs.BoolVar(&opts.SchemaUpgrade, "schema-upgrade", false, "allow schema-version bump")
+	fs.BoolVar(&opts.AcceptSourceChange, "accept-source-change", false, "confirm --source differs from pin")
+	fs.BoolVar(&opts.AcceptAttributeChanges, "accept-attribute-changes", false, "confirm .gitattributes filter changes")
+	fs.BoolVar(&opts.AcceptManualCommits, "accept-manual-commits", false, "allow --continue past manual commits")
+	fs.BoolVar(&opts.PersistSource, "persist-source", false, "save --source to template.json on success")
+	fs.BoolVar(&opts.PrintMigrations, "print-migrations", false, "include migration bodies in plan")
+	fs.BoolVar(&opts.NonInteractive, "non-interactive", false, "auto-resolve prompts to safe defaults")
+	fs.BoolVar(&opts.VerifySignature, "verify-signature", false, "require git verify-tag/verify-commit on the fetched ref")
+	fs.BoolVar(&opts.GC, "gc", false, "prune orphaned cache dirs and exit")
+	fs.StringVar(&opts.RePin, "re-pin", "", "set pin without running an update (rollback)")
+	fs.StringVar(&opts.RerunBootstrapStep, "rerun-bootstrap-step", "", "re-run a single bootstrap step")
+	fs.StringVar(&opts.SkipMigration, "skip-migration", "", "skip a specific migration during apply")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	root := templateRepoRoot()
+	deps := template.UpdateDeps{
+		Stdout:    stdout,
+		Stderr:    stderr,
+		Stdin:     os.Stdin,
+		Git:       adapters.TemplateOrchGit{RepoRoot: root, Stdout: stdout, Stderr: stderr},
+		Bash:      adapters.TemplateOrchBash{Stdout: stdout, Stderr: stderr},
+		Confirm:   adapters.TemplateOrchConfirm{In: os.Stdin, Out: stderr},
+		Preflight: adapters.NewTemplateOrchPreflight(root),
+	}
+	code, err := template.RunUpdate(deps, root, opts)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return code
 }
 
 // --- retrofit ---------------------------------------------------------------

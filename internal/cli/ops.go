@@ -37,3 +37,9 @@ func runRename(args []string, stdout, stderr io.Writer) int {
 func runDelete(args []string, stdout, stderr io.Writer) int {
 	return ops.DeleteCLI(args, stdout, stderr)
 }
+
+// runUpdateCatalog dispatches `awiki update-catalog`. Mirrors
+// scripts/update-catalog.sh.
+func runUpdateCatalog(args []string, stdout, stderr io.Writer) int {
+	return ops.UpdateCatalogCLI(args, stdout, stderr)
+}

@@ -52,6 +52,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runRename(args[1:], stdout, stderr)
 	case "delete":
 		return runDelete(args[1:], stdout, stderr)
+	case "update-catalog":
+		return runUpdateCatalog(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

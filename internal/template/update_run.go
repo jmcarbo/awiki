@@ -560,8 +560,13 @@ func (r *UpdateRunner) runApply(plan []PlanLine, man *Manifest) error {
 	if err := r.deps.Git.AddAll(); err != nil {
 		return err
 	}
-	if err := r.deps.Git.Commit(fmt.Sprintf("chore(template): sync to %s (%s)", man.TemplateVersion, shortSHA(r.commitNew))); err != nil {
-		return err
+	cleanA, _ := r.deps.Git.DiffCachedQuiet()
+	if !cleanA {
+		if err := r.deps.Git.Commit(fmt.Sprintf("chore(template): sync to %s (%s)", man.TemplateVersion, shortSHA(r.commitNew))); err != nil {
+			return err
+		}
+	} else {
+		r.out().infof("info: Commit A skipped — working tree clean (already applied)")
 	}
 	_ = SetStatePhase(r.statePath, "commit-a", "committed")
 

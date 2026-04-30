@@ -44,6 +44,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runBootstrapStep(args[1:], stdout, stderr)
 	case "log":
 		return runLog(args[1:], stdout, stderr)
+	case "reindex":
+		return runReindex(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

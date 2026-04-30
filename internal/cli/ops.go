@@ -14,3 +14,8 @@ import (
 func runLog(args []string, stdout, stderr io.Writer) int {
 	return ops.LogCLI(args, stdout, stderr)
 }
+
+// runReindex dispatches `awiki reindex`. Mirrors scripts/qmd-index.sh.
+func runReindex(args []string, stdout, stderr io.Writer) int {
+	return ops.ReindexCLI(args, stdout, stderr)
+}

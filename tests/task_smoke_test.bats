@@ -7,6 +7,7 @@ setup() {
   mkdir -p "$WORK/content" "$WORK/.awiki"
   printf -- "AWIKI_LINT_AFTER_N=5\n" > "$WORK/.awiki/config"
   printf -- "---\ntitle: \"WIKI\"\n---\n\n# WIKI\n" > "$WORK/WIKI.md"
+  AWIKI_BIN="$REPO_ROOT/bin/awiki"
   pushd "$WORK" >/dev/null
 }
 
@@ -20,7 +21,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f content/inbox.md ]
 
-  run bash scripts/capture.sh -- "pick up groceries"
+  run "$AWIKI_BIN" capture -- "pick up groceries"
   [ "$status" -eq 0 ]
 
   run grep -E '^- 20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} pick up groceries$' content/inbox.md
@@ -42,7 +43,7 @@ teardown() {
 
 @test "smoke: capture's sanitization fires when needed" {
   bash scripts/task-init.sh >/dev/null
-  run bash scripts/capture.sh -- "see [[s-as-we-may-think]] later"
+  run "$AWIKI_BIN" capture -- "see [[s-as-we-may-think]] later"
   [ "$status" -eq 0 ]
   [[ "$output" == *"wikilink-neutralized"* ]]
   run grep -F "[ [s-as-we-may-think] ]" content/inbox.md
@@ -52,8 +53,8 @@ teardown() {
 @test "smoke: idempotent task-init followed by capture twice" {
   bash scripts/task-init.sh >/dev/null
   bash scripts/task-init.sh >/dev/null
-  bash scripts/capture.sh -- "first"  >/dev/null
-  bash scripts/capture.sh -- "second" >/dev/null
+  "$AWIKI_BIN" capture -- "first"  >/dev/null
+  "$AWIKI_BIN" capture -- "second" >/dev/null
   run grep -c '^- ' content/inbox.md
   [[ "$output" == "2" ]]
 }

@@ -13,6 +13,7 @@ setup() {
   # scripts live in $REPO).
   mkdir -p "$TMP/wiki/scripts"
   cp -R "$REPO/scripts/." "$TMP/wiki/scripts/"
+  AWIKI_BIN="$REPO/bin/awiki"
   cd "$TMP/wiki"
   git init -q
   git add -A >/dev/null 2>&1
@@ -46,7 +47,7 @@ teardown() {
 
 @test "sample-wiki: capture appends an inbox line" {
   before="$(wc -l < content/inbox.md | tr -d ' ')"
-  run bash scripts/capture.sh -- "test capture from smoke"
+  run "$AWIKI_BIN" capture -- "test capture from smoke"
   [ "$status" -eq 0 ]
   after="$(wc -l < content/inbox.md | tr -d ' ')"
   [ "$((after - before))" -eq 1 ]
@@ -55,7 +56,7 @@ teardown() {
 }
 
 @test "sample-wiki: triage walk via triage.sh act lands action in _loose" {
-  bash scripts/capture.sh -- "call dentist about crown" >/dev/null
+  "$AWIKI_BIN" capture -- "call dentist about crown" >/dev/null
   # Locate the captured line and synthesize its inbox-<sha>-<lineno> id.
   local lineno raw sha id
   lineno="$(awk '/^- /{n=NR} END{print n}' content/inbox.md)"

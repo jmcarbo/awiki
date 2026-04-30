@@ -1,0 +1,2 @@
+PDF-CONVERTED|in=raw/inbox/source.pdf|out=raw/inbox/source.md|orig=raw/processed/_originals/source.pdf
+Now run: just ingest raw/inbox/source.md

@@ -1,0 +1,495 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"awiki/internal/adapters"
+	"awiki/internal/config"
+	"awiki/internal/ingest"
+	"awiki/internal/ingest/formats"
+	gitingest "awiki/internal/ingest/git"
+)
+
+// runIngestVerb dispatches the flat ingest verbs (`awiki ingest`,
+// `awiki ingest-xlsx`, etc.). Each verb maps to a single sub-runner;
+// during the infra slice every sub-runner returns the "not yet ported"
+// sentinel so subsequent slices can wire one verb at a time without
+// touching the dispatcher.
+func runIngestVerb(verb string, args []string, stdout, stderr io.Writer) int {
+	r, err := buildIngestRunner()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", verb, err)
+		return 1
+	}
+	switch verb {
+	case "ingest":
+		return runIngest(r, args, stdout, stderr)
+	case "ingest-xlsx":
+		return runIngestXLSX(r, args, stdout, stderr)
+	case "ingest-git":
+		return runIngestGit(r, args, stdout, stderr)
+	case "ingest-pdf":
+		return runIngestPDF(r, args, stdout, stderr)
+	case "ingest-audio":
+		return runIngestAudio(r, args, stdout, stderr)
+	case "capture":
+		return runCapture(r, args, stdout, stderr)
+	case "watchdog":
+		return runWatchdog(r, args, stdout, stderr)
+	case "ingest-batch-list":
+		return runIngestBatchList(r, args, stdout, stderr)
+	case "ingest-git-list":
+		return runIngestGitList(r, args, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "ingest: unknown verb %q\n", verb)
+		return 1
+	}
+}
+
+func buildIngestRunner() (*ingest.Runner, error) {
+	repoRoot := os.Getenv("AWIKI_REPO_ROOT")
+	if repoRoot == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		repoRoot = wd
+	}
+	if abs, err := filepath.Abs(repoRoot); err == nil {
+		repoRoot = abs
+	}
+	cfg, _ := config.Load(filepath.Join(repoRoot, ".awiki", "config"))
+	return &ingest.Runner{
+		RepoRoot:    repoRoot,
+		ContentDir:  filepath.Join(repoRoot, "content"),
+		Config:      cfg,
+		PDFToText:   adapters.ExecPDFToText{},
+		Whisper:     adapters.ExecWhisper{},
+		XLSXExtract: adapters.ExecXLSXExtract{RepoRoot: repoRoot},
+		FSNotify:    adapters.ExecFSNotify{},
+		GitExt:      adapters.ExecGitExt{},
+		Qmd:         adapters.ExecQmd{},
+		Lint:        adapters.ExecIngestLint{},
+		Agent:       adapters.ExecAgent{},
+		LogAppend:   adapters.ExecLogAppend{},
+		Today:       todayDate(),
+	}, nil
+}
+
+// notYetPorted emits the standard sentinel error that each verb sub-runner
+// returns until its slice lands.
+func notYetPorted(verb string, stderr io.Writer) int {
+	fmt.Fprintf(stderr, "ingest: verb not yet ported: %s\n", verb)
+	return 1
+}
+
+// runIngest parses `awiki ingest [--agent <cli>] <path>` and delegates
+// to ingest.IngestBookkeep. Mirrors the flag parser at
+// scripts/ingest.sh:19-29:
+//
+//   - --agent <cli>     consume the next arg as the CLI name
+//   - --agent=<cli>     equivalent inline form
+//   - --                end of options; remaining args are positional
+//   - default agent CLI comes from $AWIKI_AGENT (resolved here so the
+//     ingest package stays oblivious to the env)
+//   - $AWIKI_AGENT_FLAGS becomes BookkeepOptions.AgentFlags
+//
+// Usage failure (no positional path) emits the bash-compat banner on
+// stderr and exits 1.
+func runIngest(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	agentCLI := os.Getenv("AWIKI_AGENT")
+	if v, ok := r.Config["AWIKI_AGENT"]; ok && v != "" && agentCLI == "" {
+		agentCLI = v
+	}
+	agentFlags := os.Getenv("AWIKI_AGENT_FLAGS")
+	if v, ok := r.Config["AWIKI_AGENT_FLAGS"]; ok && v != "" && agentFlags == "" {
+		agentFlags = v
+	}
+
+	var positional []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		switch {
+		case a == "--agent":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "usage: ingest.sh [--agent <cli>] <path-under-raw/inbox/>")
+				return 1
+			}
+			agentCLI = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--agent="):
+			agentCLI = strings.TrimPrefix(a, "--agent=")
+			i++
+		case a == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		default:
+			positional = append(positional, a)
+			i++
+		}
+	}
+	if len(positional) < 1 {
+		fmt.Fprintln(stderr, "usage: ingest.sh [--agent <cli>] <path-under-raw/inbox/>")
+		return 1
+	}
+
+	err := ingest.IngestBookkeep(context.Background(), r, ingest.BookkeepOptions{
+		SourcePath: positional[0],
+		AgentCLI:   agentCLI,
+		AgentFlags: agentFlags,
+	}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIngestXLSX parses `awiki ingest-xlsx <path> [--preview-rows N]`
+// and delegates to formats.IngestXLSX. Mirrors the bash flag parser in
+// scripts/ingest-xlsx.sh:14-29 — supports `--preview-rows N`,
+// `--preview-rows=N`, the `--` end-of-options marker, and `-h|--help`.
+func runIngestXLSX(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	previewRows := 50
+	if v := os.Getenv("AWIKI_XLSX_PREVIEW_ROWS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			previewRows = n
+		}
+	}
+	var positional []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		switch {
+		case a == "--preview-rows":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			previewRows = n
+			i += 2
+		case strings.HasPrefix(a, "--preview-rows="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--preview-rows="))
+			if err != nil || n <= 0 {
+				fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+				return 2
+			}
+			previewRows = n
+			i++
+		case a == "-h" || a == "--help":
+			fmt.Fprintln(stdout, "usage: ingest-xlsx.sh <path-under-raw/inbox/> [--preview-rows N]")
+			return 0
+		case a == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		default:
+			positional = append(positional, a)
+			i++
+		}
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "XLSX-ERROR|reason=usage")
+		return 2
+	}
+	_, err := formats.IngestXLSX(context.Background(), r, formats.XLSXOptions{
+		SourcePath:  positional[0],
+		PreviewRows: previewRows,
+	}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-xlsx: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIngestGit parses `awiki ingest-git <repo-spec> [flags]` and
+// delegates to git.Run. Mirrors the bash flag parser in
+// scripts/ingest-git.sh:17-55:
+//
+//   - --paths=<csv>        override include paths
+//   - --private            force private routing
+//   - --protect-edits      stage conflicts under raw/inbox/checkpoint/.staged/
+//   - --summarize          (reserved; not implemented v1)
+//   - --dry-run            print PLAN + exit 0
+//   - --repo-name=<name>   override derived name for slug prefix + entity page
+//   - -h | --help          print usage and exit 0
+func runIngestGit(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: ingest-git.sh <repo-spec> [flags]")
+		return 1
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		fmt.Fprintln(stdout, "usage: ingest-git.sh <repo-spec> [flags]")
+		fmt.Fprintln(stdout, "")
+		fmt.Fprintln(stdout, "  <repo-spec>          local path | https URL | git@ URL | config alias")
+		fmt.Fprintln(stdout, "  --paths=<csv>        override include paths (default README.md,docs/,rfcs/,adr/)")
+		fmt.Fprintln(stdout, "  --private            force private routing")
+		fmt.Fprintln(stdout, "  --protect-edits      stage conflicts under raw/inbox/checkpoint/.staged/")
+		fmt.Fprintln(stdout, "  --summarize          (reserved; not implemented v1)")
+		fmt.Fprintln(stdout, "  --dry-run            print plan + exit 0; no writes")
+		fmt.Fprintln(stdout, "  --repo-name=<name>   override derived name for slug prefix + entity page")
+		return 0
+	}
+
+	opts := gitingest.RunOptions{Spec: args[0]}
+	for _, a := range args[1:] {
+		switch {
+		case strings.HasPrefix(a, "--paths="):
+			opts.PathsOverride = strings.TrimPrefix(a, "--paths=")
+		case a == "--private":
+			opts.Private = true
+		case a == "--protect-edits":
+			opts.ProtectEdits = true
+		case a == "--summarize":
+			opts.Summarize = true
+		case a == "--dry-run":
+			opts.DryRun = true
+		case strings.HasPrefix(a, "--repo-name="):
+			opts.RepoNameOverride = strings.TrimPrefix(a, "--repo-name=")
+		case a == "-h" || a == "--help":
+			// Already handled above when first arg.
+			fmt.Fprintln(stdout, "usage: ingest-git.sh <repo-spec> [flags]")
+			return 0
+		default:
+			fmt.Fprintf(stderr, "ERROR: unknown flag: %s\n", a)
+			fmt.Fprintln(stderr, "usage: ingest-git.sh <repo-spec> [flags]")
+			return 1
+		}
+	}
+
+	err := gitingest.Run(context.Background(), r.RepoRoot, r.GitExt, opts, stdout, stderr)
+	if err != nil {
+		var re *gitingest.RunError
+		if errors.As(err, &re) {
+			return re.ExitCode()
+		}
+		var rer *gitingest.ResolveError
+		if errors.As(err, &rer) {
+			return rer.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-git: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIngestPDF parses `awiki ingest-pdf <path>` and delegates to
+// formats.IngestPDF. Mirrors the bash usage at scripts/ingest-pdf.sh:4
+// — exactly one positional arg; --help prints usage and exits 0.
+func runIngestPDF(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: awiki ingest-pdf <pdf-path-under-raw/inbox/>")
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: ingest-pdf.sh <pdf-path-under-raw/inbox/>")
+		return 1
+	}
+	_, err := formats.IngestPDF(context.Background(), r, formats.PDFOptions{SourcePath: args[0]}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-pdf: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIngestAudio parses `awiki ingest-audio <path>` and delegates to
+// formats.IngestAudio. Mirrors bash usage at scripts/ingest-audio.sh:4.
+func runIngestAudio(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: awiki ingest-audio <audio-path-under-raw/inbox/>")
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: ingest-audio.sh <audio-path-under-raw/inbox/>")
+		return 1
+	}
+	_, err := formats.IngestAudio(context.Background(), r, formats.AudioOptions{SourcePath: args[0]}, stdout, stderr)
+	if err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "ingest-audio: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runCapture parses the `awiki capture -- <text...>` argument shape
+// (mirrors scripts/capture.sh) and delegates to ingest.Runner.Capture.
+// Argument grammar:
+//   - args[0] == "--help" / "-h" -> print usage on stdout, exit 0.
+//   - first arg must be "--"; remaining args are joined with spaces.
+//   - missing "--" -> exit 1 with the bash-compat error.
+func runCapture(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		captureUsage(stderr)
+		return 1
+	}
+	if args[0] == "--help" || args[0] == "-h" {
+		captureUsage(stdout)
+		return 0
+	}
+	if args[0] != "--" {
+		fmt.Fprintln(stderr, "ERROR|missing '--' separator (use: capture.sh -- \"<text>\")")
+		return 1
+	}
+	rest := args[1:]
+	if len(rest) == 0 {
+		fmt.Fprintln(stderr, "ERROR|empty: no text after '--'")
+		return 4
+	}
+	opts := ingest.CaptureOptions{
+		Text:         strings.Join(rest, " "),
+		Presanitized: os.Getenv("AWIKI_CAPTURE_PRESANITIZED") == "1",
+		InboxPath:    os.Getenv("AWIKI_INBOX_FILE"),
+	}
+	if err := r.Capture(opts, stdout, stderr); err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "capture: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func captureUsage(w io.Writer) {
+	fmt.Fprintln(w, `usage: awiki capture -- "<text>"`)
+	fmt.Fprintln(w, "  Appends a sanitized capture line to content/inbox.md.")
+	fmt.Fprintln(w, "  Set AWIKI_INBOX_FILE to override the destination.")
+	fmt.Fprintln(w, "  Set AWIKI_CAPTURE_PRESANITIZED=1 if upstream already sanitized.")
+}
+
+// runWatchdog parses `awiki watchdog [--catchup] [--once]
+// [--poll-interval=<duration>]` and delegates to ingest.Watchdog. The
+// flag set is the strict subset slice 9 ports — fswatch/inotifywait
+// backend selection is dropped because the Go path uses the native
+// fsnotify adapter (with a polling fallback). SIGINT/SIGTERM are
+// translated to ctx cancellation so the watchdog can emit
+// WATCHDOG|event=stop and exit cleanly.
+func runWatchdog(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	opts := ingest.WatchdogOptions{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--catchup":
+			opts.Catchup = true
+		case a == "--once":
+			opts.Once = true
+		case a == "--poll-interval":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "ERROR: --poll-interval requires a duration (e.g. 2s)")
+				return 2
+			}
+			d, err := parseDurationFlag(args[i+1])
+			if err != nil {
+				fmt.Fprintf(stderr, "ERROR: invalid --poll-interval: %v\n", err)
+				return 2
+			}
+			opts.PollInterval = d
+			i++
+		case strings.HasPrefix(a, "--poll-interval="):
+			d, err := parseDurationFlag(strings.TrimPrefix(a, "--poll-interval="))
+			if err != nil {
+				fmt.Fprintf(stderr, "ERROR: invalid --poll-interval: %v\n", err)
+				return 2
+			}
+			opts.PollInterval = d
+		case a == "-h" || a == "--help":
+			fmt.Fprintln(stdout, "usage: awiki watchdog [--catchup] [--once] [--poll-interval=<duration>]")
+			return 0
+		default:
+			fmt.Fprintf(stderr, "ERROR: unknown arg: %s\n", a)
+			fmt.Fprintln(stderr, "usage: awiki watchdog [--catchup] [--once] [--poll-interval=<duration>]")
+			return 2
+		}
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	wr := &ingest.WatchdogRunner{Runner: r}
+	if err := ingest.Watchdog(ctx, wr, opts, stdout, stderr); err != nil {
+		var ee *ingest.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "watchdog: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// parseDurationFlag parses a human-friendly duration flag value. Bare
+// integers (e.g. "2") are accepted as seconds for parity with the bash
+// `--poll-interval 2`. Anything else passes through to time.ParseDuration.
+func parseDurationFlag(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty value")
+	}
+	// Bare integer / float -> treat as seconds.
+	if n, err := strconv.ParseFloat(s, 64); err == nil {
+		return time.Duration(n * float64(time.Second)), nil
+	}
+	return time.ParseDuration(s)
+}
+
+// runIngestBatchList delegates to ingest.Runner.ListBatch. Mirrors the
+// inline justfile recipe `find raw/inbox/batch -type f | sort`. Accepts
+// no flags or args; emits a usage hint on stderr if any are supplied.
+func runIngestBatchList(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "usage: awiki ingest-batch-list")
+		return 1
+	}
+	if err := r.ListBatch(stdout); err != nil {
+		fmt.Fprintf(stderr, "ingest-batch-list: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIngestGitList delegates to ingest.Runner.ListGit. Mirrors the inline
+// justfile recipe `ls -1 .awiki/git-state/ 2>/dev/null | sed 's/\.json$//'`.
+func runIngestGitList(r *ingest.Runner, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		fmt.Fprintln(stderr, "usage: awiki ingest-git-list")
+		return 1
+	}
+	if err := r.ListGit(stdout); err != nil {
+		fmt.Fprintf(stderr, "ingest-git-list: %v\n", err)
+		return 1
+	}
+	return 0
+}

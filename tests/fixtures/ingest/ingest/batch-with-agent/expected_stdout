@@ -1,0 +1,3 @@
+INGEST-OK|src=raw/inbox/batch/agent-test.md|dest=raw/processed/batch/agent-test.md|mode=batch|count=1
+AGENT-PROMPT|Process the source at raw/processed/batch/agent-test.md per WIKI.md §4.1 ingest workflow steps 3-9 (mode=batch). Read it, write content/sources/<slug>.md, update affected entity/concept/topic pages, update content/catalog.md, update section indexes if section purpose changed. Run `just lint` afterward.
+AGENT-INVOKE|cli=claude|mode=batch

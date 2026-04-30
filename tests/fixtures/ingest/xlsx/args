@@ -1,0 +1,1 @@
+ingest-xlsx raw/inbox/sample.xlsx --preview-rows 25

@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Slice 6 of the Go ingest port: when bin/awiki is built and the user
+# has not opted into the legacy bash path, exec the Go implementation.
+# Mirrors scripts/ingest-audio.sh:9-16. Set AWIKI_INGEST_XLSX_LEGACY=1
+# to force the original bash path (used by the bats oracle and parity
+# smoke tests until cleanup in slice 10).
+AWIKI_INGEST_XLSX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AWIKI_INGEST_XLSX_REPO_ROOT="$(cd "$AWIKI_INGEST_XLSX_SCRIPT_DIR/.." && pwd)"
+AWIKI_INGEST_XLSX_GO_BIN="$AWIKI_INGEST_XLSX_REPO_ROOT/bin/awiki"
+
+if [[ "${AWIKI_INGEST_XLSX_LEGACY:-0}" != "1" && -x "$AWIKI_INGEST_XLSX_GO_BIN" ]]; then
+  cd "$AWIKI_INGEST_XLSX_REPO_ROOT" || exit 1
+  exec "$AWIKI_INGEST_XLSX_GO_BIN" ingest-xlsx "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${AWIKI_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"

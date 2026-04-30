@@ -1,0 +1,4 @@
+Hello audio.
+
+This is the canned transcript the FakeWhisper returns.
+It stands in for whatever whisper-cpp -otxt would produce.

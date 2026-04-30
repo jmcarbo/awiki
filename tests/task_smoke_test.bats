@@ -17,7 +17,7 @@ teardown() {
 }
 
 @test "smoke: task-init then capture writes a line into inbox" {
-  run bash scripts/task-init.sh
+  run "$AWIKI_BIN" task-init
   [ "$status" -eq 0 ]
   [ -f content/inbox.md ]
 
@@ -42,7 +42,7 @@ teardown() {
 }
 
 @test "smoke: capture's sanitization fires when needed" {
-  bash scripts/task-init.sh >/dev/null
+  "$AWIKI_BIN" task-init >/dev/null
   run "$AWIKI_BIN" capture -- "see [[s-as-we-may-think]] later"
   [ "$status" -eq 0 ]
   [[ "$output" == *"wikilink-neutralized"* ]]
@@ -51,8 +51,8 @@ teardown() {
 }
 
 @test "smoke: idempotent task-init followed by capture twice" {
-  bash scripts/task-init.sh >/dev/null
-  bash scripts/task-init.sh >/dev/null
+  "$AWIKI_BIN" task-init >/dev/null
+  "$AWIKI_BIN" task-init >/dev/null
   "$AWIKI_BIN" capture -- "first"  >/dev/null
   "$AWIKI_BIN" capture -- "second" >/dev/null
   run grep -c '^- ' content/inbox.md
@@ -64,7 +64,7 @@ teardown() {
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$BATS_TEST_DIRNAME/.." && pwd)"
   cp -R "$REPO_ROOT" "$PHASE17_WORK/awiki"
   cd "$PHASE17_WORK/awiki"
-  AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
+  AWIKI_TASK_INIT_ASSUME_NO=1 PATH="$REPO_ROOT/bin:$PATH" just task-init
   "$REPO_ROOT/bin/awiki" capture -- "call dentist about crown"
 
   mkdir -p content/projects
@@ -84,7 +84,7 @@ PROJEOM
   awk '!/call dentist about crown/' content/inbox.md > content/inbox.md.tmp \
     && mv content/inbox.md.tmp content/inbox.md
 
-  just agenda
+  PATH="$REPO_ROOT/bin:$PATH" just agenda
 
   run grep -F '### @phone' content/agenda/next-actions.md
   [ -n "$output" ]
@@ -100,7 +100,7 @@ PROJEOM
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$BATS_TEST_DIRNAME/.." && pwd)"
   cp -R "$REPO_ROOT" "$PHASE18A_WORK/awiki"
   cd "$PHASE18A_WORK/awiki"
-  AWIKI_TASK_INIT_ASSUME_NO=1 just task-init
+  AWIKI_TASK_INIT_ASSUME_NO=1 PATH="$REPO_ROOT/bin:$PATH" just task-init
   "$REPO_ROOT/bin/awiki" capture -- "call dentist about crown"
 
   # Locate the captured line and synthesize its inbox-<sha>-<lineno> id.
@@ -114,7 +114,7 @@ PROJEOM
   local id="inbox-${sha}-${lineno}"
 
   # Apply act outcome to _loose with @phone context via the bash CLI form.
-  run bash scripts/triage.sh "$id" act project_slug=_loose context_slug=phone "lineno=${lineno}"
+  run "$REPO_ROOT/bin/awiki" triage-apply "$id" act project_slug=_loose context_slug=phone "lineno=${lineno}"
   [ "$status" -eq 0 ]
   [ -f content/projects/_loose.md ]
   run grep -E '^- \[ \] call dentist about crown @phone \^[a-z0-9]{8}' content/projects/_loose.md
@@ -125,7 +125,7 @@ PROJEOM
   [ "$status" -ne 0 ]
 
   # First agenda regen — action should appear under @phone in next-actions.
-  just agenda
+  PATH="$REPO_ROOT/bin:$PATH" just agenda
   run grep -F '### @phone' content/agenda/next-actions.md
   [ -n "$output" ]
   run grep -F 'call dentist about crown' content/agenda/next-actions.md
@@ -147,7 +147,7 @@ PROJEOM
   ' content/agenda/next-actions.md > content/agenda/next-actions.md.tmp \
     && mv content/agenda/next-actions.md.tmp content/agenda/next-actions.md
 
-  just agenda
+  PATH="$REPO_ROOT/bin:$PATH" just agenda
   run grep -F 'call dentist about crown' content/agenda/next-actions.md
   [ -z "$output" ]
 

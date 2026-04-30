@@ -9,4 +9,4 @@ if [[ -d .git/git-crypt ]]; then
   fi
 fi
 
-bash scripts/build.sh --full
+awiki build --full

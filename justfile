@@ -46,19 +46,22 @@ lint-fix:
     awiki lint --fix
 
 reindex:
-    bash scripts/qmd-index.sh
+    awiki reindex
 
 search query:
     qmd --index .qmd/index.sqlite search "{{query}}"
 
 log action *message:
-    bash scripts/log-append.sh {{action}} {{message}}
+    awiki log {{action}} {{message}}
 
 rename old new:
-    bash scripts/rename.sh {{old}} {{new}}
+    awiki rename {{old}} {{new}}
 
 delete slug:
-    bash scripts/delete-page.sh {{slug}}
+    awiki delete {{slug}}
+
+update-catalog:
+    awiki update-catalog
 
 # === synthesis ===
 synth plugin topic *args:
@@ -84,26 +87,26 @@ synth-resolve slug:
 
 # === hugo ===
 serve:
-    bash scripts/serve.sh
+    awiki serve
 
 build:
-    bash scripts/build.sh --full
+    awiki build --full
 
 # === bootstrap / setup ===
 init:
     @echo "Open agent. Say: 'init wiki'. Agent reads BOOTSTRAP.md."
 
 install-hooks:
-    bash scripts/install-hooks.sh
+    awiki install-hooks
 
 install-qmd:
-    bash scripts/install-qmd.sh
+    awiki install-qmd
 
 encrypt-init:
     bash scripts/encrypt-init.sh
 
 check-deps:
-    bash scripts/check-deps.sh
+    awiki check-deps
 
 # === git ===
 status:
@@ -122,12 +125,12 @@ help:
 
 # === task layer (phases 16-17) ===
 task-init:
-    bash scripts/task-init.sh
+    awiki task-init
 
 # === data layer (opt-in) ===
 # Per-step idempotent enabler for datasets + charts. Mirrors task-init.
 data-init:
-    bash scripts/data-init.sh
+    awiki data-init
 
 # Scaffold a new dataset page. Use --from=<csv-path> to seed rows.
 dataset-new slug *args:
@@ -187,37 +190,35 @@ capture *text:
     awiki capture -- {{text}}
 
 scan:
-    bash scripts/action-scan.sh
+    awiki scan
 
 agenda:
-    bash scripts/action-scan.sh
-    bash scripts/agenda.sh
+    awiki scan
+    awiki agenda
 
 # === task layer (phase 18a) ===
 # Run the triage walker over content/inbox.md and raw/inbox/interactive/.
 # For non-interactive single-item application, use:
 #   just triage-apply <id> <outcome> [k=v ...]
 triage:
-    bash scripts/triage.sh --interactive
+    awiki triage
 
 triage-apply *args:
-    bash scripts/triage.sh {{args}}
+    awiki triage-apply {{args}}
 
 # Re-emit open copies for any [x] every:... lines whose next-due is missing.
 recur:
-    bash scripts/action-recur.sh --all
+    awiki recur
 
 # Dry-run variant — prints unified diff, makes no changes.
 recur-dry:
-    bash scripts/action-recur.sh --dry-run --all
+    awiki recur-dry
 
 # === task layer (phase 19) ===
 # Run the weekly-review chain: rebuild agenda regions, lint the wiki,
 # and emit the structured REVIEW|... report on stdout.
 review:
-    bash scripts/agenda.sh
-    awiki lint
-    bash scripts/review-status.sh
+    awiki review
 
 # === template ===
 template-init:

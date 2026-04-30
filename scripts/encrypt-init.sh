@@ -64,7 +64,7 @@ case "$MODE" in
 
     add_task_layer_patterns_if_enabled
 
-    bash scripts/log-append.sh encrypt "git-crypt initialized; key at secrets/.git-crypt-key"
+    awiki log encrypt "git-crypt initialized; key at secrets/.git-crypt-key" 2>/dev/null || true
     echo "ENCRYPT-OK|mode=git-crypt|key=secrets/.git-crypt-key"
     echo "STORE the key securely (password manager). Anyone with this key can read encrypted paths."
     ;;
@@ -82,7 +82,7 @@ case "$MODE" in
     grep '^# public key:' secrets/age.key | sed 's/^# public key: //' > secrets/age.pub
     chmod 600 secrets/age.key
 
-    bash scripts/log-append.sh encrypt "age keypair generated"
+    awiki log encrypt "age keypair generated" 2>/dev/null || true
     echo "ENCRYPT-OK|mode=age|key=secrets/age.key|pub=secrets/age.pub"
     echo "Encrypt sensitive files: age -R secrets/age.pub -o file.age file"
     echo "Decrypt: age -d -i secrets/age.key file.age"

@@ -26,7 +26,7 @@ func (r *Runner) DataInit(stdout, stderr io.Writer) error {
 	if err := r.ensureConfig(stdout); err != nil {
 		return err
 	}
-	fmt.Fprintln(stderr, "DATA-INIT|encryption-skipped|run 'bash scripts/data-init.sh' for interactive setup")
+	fmt.Fprintln(stderr, "DATA-INIT|encryption-skipped|run 'awiki encrypt-init' (TODO) or 'bash scripts/encrypt-init.sh' for interactive setup")
 	return nil
 }
 

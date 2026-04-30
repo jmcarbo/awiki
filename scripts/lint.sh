@@ -84,11 +84,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fast pre-commit shortcut: rebuild only the alias / slug / title maps under
-# .awiki/maps/ and exit. Delegates to scripts/build.sh --maps-only so the
+# .awiki/maps/ and exit. Delegates to `awiki build --maps-only` so the
 # canonical map-building logic stays in one place.
 if [[ "$ALIAS_BUILD_ONLY" -eq 1 ]]; then
-  AWIKI_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  exec bash "$AWIKI_SCRIPTS_DIR/build.sh" --maps-only
+  exec awiki build --maps-only
 fi
 
 # Resolve repo root + scripts dir for task-rule helpers.

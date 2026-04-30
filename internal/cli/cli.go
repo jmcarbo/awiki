@@ -42,6 +42,48 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runTemplate(args[1:], stdout, stderr)
 	case "bootstrap-step":
 		return runBootstrapStep(args[1:], stdout, stderr)
+	case "log":
+		return runLog(args[1:], stdout, stderr)
+	case "reindex":
+		return runReindex(args[1:], stdout, stderr)
+	case "check-deps":
+		return runCheckDeps(args[1:], stdout, stderr)
+	case "rename":
+		return runRename(args[1:], stdout, stderr)
+	case "delete":
+		return runDelete(args[1:], stdout, stderr)
+	case "update-catalog":
+		return runUpdateCatalog(args[1:], stdout, stderr)
+	case "scan":
+		return runScan(args[1:], stdout, stderr)
+	case "recur":
+		return runRecur(false, args[1:], stdout, stderr)
+	case "recur-dry":
+		return runRecur(true, args[1:], stdout, stderr)
+	case "agenda":
+		return runAgenda(args[1:], stdout, stderr)
+	case "review":
+		return runReview(args[1:], stdout, stderr)
+	case "review-status":
+		return runReviewStatus(args[1:], stdout, stderr)
+	case "triage-apply":
+		return runTriageApply(args[1:], stdout, stderr)
+	case "triage":
+		return runTriage(args[1:], os.Stdin, stdout, stderr)
+	case "build":
+		return runBuild(args[1:], stdout, stderr)
+	case "serve":
+		return runServe(args[1:], stdout, stderr)
+	case "install-hooks":
+		return runInstallHooks(args[1:], stdout, stderr)
+	case "install-qmd":
+		return runInstallQmd(args[1:], stdout, stderr)
+	case "wire-awiki-mcp":
+		return runWireAwikiMCP(args[1:], stdout, stderr)
+	case "wire-qmd-mcp":
+		return runWireQmdMCP(args[1:], stdout, stderr)
+	case "task-init":
+		return runTaskInit(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 1

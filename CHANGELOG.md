@@ -1,3 +1,69 @@
+## Unreleased
+
+Ports the ingest domain to the `awiki` Go binary (slices 1-9, merged
+2026-04-30) and removes the bash + Python originals (slice 10).
+Continues the Go-port roadmap started in v1.2.0.
+
+### Added
+- **Ingest domain**: `awiki {ingest, ingest-pdf, ingest-audio,
+  ingest-xlsx, ingest-git, capture, watchdog, ingest-batch-list,
+  ingest-git-list}` — every ingest verb ported. Adapters: `Pdftotext`,
+  `Whisper`, `Xlsx2csv`, `GitExt` (clone/init/fetch), `FSNotify`.
+  Helpers: format auto-detect, AGENT-PROMPT byte-format pinned by
+  golden fixture, watchdog with fsnotify + polling fallback, 500 ms
+  debounce, quarantine to `raw/inbox/batch/_failed/` on ingest error,
+  per-repo state JSON read/write under `.awiki/git-state/`, markdown
+  transformer with frontmatter strip + link rewrite + image copy.
+
+### Removed
+- `scripts/ingest.sh` (bash bookkeep flow) — ported to `awiki ingest`.
+- `scripts/ingest-pdf.sh`, `scripts/ingest-audio.sh`,
+  `scripts/ingest-xlsx.sh` — ported to `awiki ingest-<format>`.
+- `scripts/ingest-git.sh`, `scripts/lib/git-clone.sh`,
+  `scripts/lib/git-state.sh`, `scripts/lib/git-config.sh`,
+  `scripts/ingest-git-transform.py` — ported to
+  `internal/ingest/git/{run,clone,state,config,transform}.go`.
+- `scripts/watchdog.sh` — ported to `awiki watchdog` (fsnotify +
+  polling fallback replace fswatch/inotifywait shellouts).
+- `scripts/capture.sh` — ported to `awiki capture`.
+- Corresponding bats files (`capture_test`, `ingest_pdf_test`,
+  `ingest_test`, `ingest_xlsx_test`, `ingest_git_lib_test`,
+  `ingest_git_test`, `ingest_git_transform_test`, `watchdog_test`,
+  `watchdog_xlsx_test`) dropped — Go tests under
+  `internal/ingest/...` cover the same scenarios.
+
+### Changed
+- Justfile recipes for `ingest`, `ingest-with-agent`, `ingest-xlsx`,
+  `watchdog`, `ingest-git`, and `capture` now call `awiki` directly
+  (no `bash scripts/...sh` shim layer). Recipe names, parameter
+  shapes, and pass-through flags preserved.
+- Cross-domain smoke tests (`tests/task_smoke_test.bats`,
+  `tests/sample_wiki_smoke_test.bats`) updated to invoke the `awiki`
+  binary directly in place of the deleted `scripts/capture.sh`.
+
+### Caller impact
+External consumers of `AGENT-PROMPT|...`, `INGEST-OK|...`,
+`INGEST|...`, `WATCHDOG|...`, `XLSX-CONVERTED|...`, `XLSX-NEXT|...`,
+`AUDIO-TRANSCRIBED|...`, `PDF-CONVERTED|...`, `OK|appended|...`, and
+other ingest-domain stdout records: the Go ports preserve byte-for-byte
+parity with the bash scripts they replaced (pinned by golden fixtures
+in slices 2-9 and verified during the v1.2.0 release window). No
+record format changes. The `--agent <cli>` and `--agent=<cli>` shell-
+out semantics (stdin = AGENT-PROMPT line, exit status = agent's) are
+unchanged.
+
+### Notes
+- `scripts/lib/xlsx-extract.py` retained — still exec'd by the Go
+  xlsx adapter (`internal/adapters/xlsx2csv.go`) per the v1 pin
+  (xlsx2csv stays exec; no `excelize/v2`).
+- `scripts/log-append.sh`, `scripts/lint.sh`, `scripts/qmd-index.sh`
+  retained — exec'd by other adapters and other domains.
+- The `awiki` binary must be on `PATH` for the justfile recipes to
+  resolve (build via `go build -o bin/awiki ./cmd/awiki` and add
+  `./bin/` to `PATH`, or symlink to `/usr/local/bin/awiki`).
+
+---
+
 ## [1.2.0] - 2026-04-29
 
 Begins the awiki Go-port roadmap. Lifts shared helpers from

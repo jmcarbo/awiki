@@ -77,3 +77,13 @@ func runTriageApply(args []string, stdout, stderr io.Writer) int {
 func runTriage(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return ops.TriageCLI(args, stdin, stdout, stderr)
 }
+
+// runBuild dispatches `awiki build`. Mirrors scripts/build.sh.
+func runBuild(args []string, stdout, stderr io.Writer) int {
+	return ops.BuildCLI(args, stdout, stderr)
+}
+
+// runServe dispatches `awiki serve`. Mirrors scripts/serve.sh.
+func runServe(args []string, stdout, stderr io.Writer) int {
+	return ops.ServeCLI(args, stdout, stderr)
+}

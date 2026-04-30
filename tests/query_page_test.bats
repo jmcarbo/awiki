@@ -9,7 +9,7 @@ setup() {
   mkdir -p "$WORK/content/datasets" "$WORK/content/queries" "$WORK/.awiki"
   printf -- "AWIKI_DATA_LAYER=on\nAWIKI_QUERY_LAYER=on\n" > "$WORK/.awiki/config"
   pushd "$WORK" >/dev/null
-  bash scripts/dataset.sh new trades --format=csv --from=trades.csv >/dev/null
+  "$REPO_ROOT/bin/awiki" dataset new --format=csv --from=trades.csv trades >/dev/null
 }
 teardown() { popd >/dev/null; rm -rf "$WORK"; }
 

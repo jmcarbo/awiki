@@ -9,7 +9,7 @@ setup() {
   mkdir -p "$WORK/content/concepts" "$WORK/content/datasets" "$WORK/.awiki"
   printf -- "AWIKI_DATA_LAYER=on\nAWIKI_QUERY_LAYER=on\n" > "$WORK/.awiki/config"
   pushd "$WORK" >/dev/null
-  bash scripts/dataset.sh new trades --format=csv --from=trades.csv >/dev/null
+  "$REPO_ROOT/bin/awiki" dataset new --format=csv --from=trades.csv trades >/dev/null
   cat > content/concepts/cashflow.md <<'MD'
 ---
 title: cashflow

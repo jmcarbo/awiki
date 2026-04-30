@@ -131,15 +131,15 @@ data-init:
 
 # Scaffold a new dataset page. Use --from=<csv-path> to seed rows.
 dataset-new slug *args:
-    bash scripts/dataset.sh new {{slug}} {{args}}
+    awiki dataset new {{slug}} {{args}}
 
 # Flip inline <-> file based on threshold (.awiki/config). Idempotent.
 dataset-compact slug:
-    bash scripts/dataset.sh compact {{slug}}
+    awiki dataset compact {{slug}}
 
 # Refresh rows + run schema validation if columns: declared.
 dataset-validate slug:
-    bash scripts/dataset.sh validate {{slug}}
+    awiki dataset validate {{slug}}
 
 # Show per-recipe data-layer help.
 data-help:

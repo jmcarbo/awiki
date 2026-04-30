@@ -10,8 +10,8 @@ setup() {
   mkdir -p "$WORK/content/datasets" "$WORK/.awiki" "$WORK/.cache/duckdb"
   printf -- "AWIKI_DATA_LAYER=on\nAWIKI_QUERY_LAYER=on\n" > "$WORK/.awiki/config"
   pushd "$WORK" >/dev/null
-  bash scripts/dataset.sh new trades --format=csv --from=trades.csv >/dev/null
-  bash scripts/dataset.sh new regions --format=csv --from=regions.csv >/dev/null
+  "$REPO_ROOT/bin/awiki" dataset new --format=csv --from=trades.csv trades >/dev/null
+  "$REPO_ROOT/bin/awiki" dataset new --format=csv --from=regions.csv regions >/dev/null
 }
 teardown() { popd >/dev/null; rm -rf "$WORK"; }
 

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"path/filepath"
+	"time"
 
 	"awiki/internal/adapters"
 )
@@ -39,6 +40,10 @@ type Runner struct {
 	Qmd       adapters.Qmd
 
 	Today string // injected for tests; defaults to time.Now date
+
+	// NowFn lets tests inject a deterministic clock (used by `capture`
+	// to format the timestamped line). Defaults to time.Now.
+	NowFn func() time.Time
 }
 
 // InboxDir returns the canonical inbox directory under RepoRoot.

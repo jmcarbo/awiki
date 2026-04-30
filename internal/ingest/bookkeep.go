@@ -43,6 +43,17 @@ var modeRe = regexp.MustCompile(`^raw/inbox/(interactive|batch|checkpoint)/(.+)$
 // drift" risk).
 const agentPromptFormat = "Process the source at %s per WIKI.md §4.1 ingest workflow steps 3-9 (mode=%s). Read it, write content/sources/<slug>.md, update affected entity/concept/topic pages, update content/catalog.md, update section indexes if section purpose changed. Run `just lint` afterward."
 
+// IngestSingle is the single-file ingest entry point used by the
+// watchdog loop and any other in-process caller that already has a
+// concrete source path. It is a thin wrapper around IngestBookkeep
+// that fixes the SourcePath and lets the caller default the agent
+// fields (most callers leave them empty). Watchdog never invokes the
+// agent CLI directly — the orchestrator's batch-mode auto-agent path
+// is reached only via `awiki ingest <path>`.
+func (r *Runner) IngestSingle(ctx context.Context, path string, stdout, stderr io.Writer) error {
+	return IngestBookkeep(ctx, r, BookkeepOptions{SourcePath: path}, stdout, stderr)
+}
+
 // IngestBookkeep ports the bash bookkeeping flow at scripts/ingest.sh
 // to Go. Steps:
 //

@@ -469,6 +469,12 @@ func buildMigrationEnv(in MigrationRunInput) []string {
 	if pathEnv == "" {
 		pathEnv = "/usr/bin:/bin"
 	}
+	if in.RepoRoot != "" {
+		binDir := filepath.Join(in.RepoRoot, "bin")
+		if !strings.Contains(":"+pathEnv+":", ":"+binDir+":") {
+			pathEnv = binDir + ":" + pathEnv
+		}
+	}
 	homeEnv := in.HomeEnv
 	if homeEnv == "" {
 		// Python falls back to Path.home(); mirror that by leaving

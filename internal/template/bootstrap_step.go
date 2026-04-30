@@ -278,6 +278,10 @@ func buildBootstrapStepEnv(repoRoot string, in BootstrapStepInput) []string {
 	if pathEnv == "" {
 		pathEnv = "/usr/bin:/bin"
 	}
+	binDir := filepath.Join(repoRoot, "bin")
+	if !strings.Contains(":"+pathEnv+":", ":"+binDir+":") {
+		pathEnv = binDir + ":" + pathEnv
+	}
 	homeEnv := in.HomeEnv
 	langEnv := in.LangEnv
 	if langEnv == "" {

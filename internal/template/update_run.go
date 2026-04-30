@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -564,6 +565,13 @@ func (r *UpdateRunner) runApply(plan []PlanLine, man *Manifest) error {
 	}
 	_ = SetStatePhase(r.statePath, "commit-a", "committed")
 
+	// Rebuild bin/awiki so subsequent migrations + bootstrap steps see
+	// the just-synced binary. Best-effort: warn and continue if `go` is
+	// not on PATH (e.g. end-user with a prebuilt binary).
+	if err := r.rebuildAwikiBinary(); err != nil {
+		r.out().infof("warn: skipped awiki rebuild: %v", err)
+	}
+
 	// Commit B: migrations.
 	_ = SetStatePhase(r.statePath, "commit-b", "started")
 	if err := r.runMigrations(man); err != nil {
@@ -688,6 +696,35 @@ func (r *UpdateRunner) runMigrations(man *Manifest) error {
 		// a MigrationRunner adapter wiring; see task scope notes).
 		_ = AddMigrationPending(r.statePath, mid, "applied", "")
 	}
+	return nil
+}
+
+// rebuildAwikiBinary compiles cmd/awiki into <repoRoot>/bin/awiki so
+// migrations + bootstrap steps invoke the just-synced binary. Returns
+// an error if `go` is unavailable or the build fails; callers treat
+// this as best-effort.
+func (r *UpdateRunner) rebuildAwikiBinary() error {
+	if _, err := exec.LookPath("go"); err != nil {
+		return fmt.Errorf("`go` not on PATH (%w)", err)
+	}
+	if err := os.MkdirAll(filepath.Join(r.root, "bin"), 0o755); err != nil {
+		return err
+	}
+	script := `set -e
+cd "$AWIKI_REPO_ROOT"
+go build -o bin/awiki ./cmd/awiki
+`
+	bf, err := writeTempBody(script)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(bf)
+	env := append(os.Environ(), "AWIKI_REPO_ROOT="+r.root)
+	code, _ := r.deps.Bash.RunBashScript(bf, env)
+	if code != 0 {
+		return fmt.Errorf("go build exited %d", code)
+	}
+	r.out().infof("info: rebuilt bin/awiki")
 	return nil
 }
 

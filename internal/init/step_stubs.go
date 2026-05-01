@@ -12,34 +12,6 @@ package initverb
 // All stubs intentionally have zero size so they cost nothing at
 // runtime. They're declared in dependency order (Step 0 → Step 13).
 
-type stepTrackProcessed struct{}
-
-func (stepTrackProcessed) ID() string                                       { return "track-processed" }
-func (stepTrackProcessed) Description() string                              { return "track ingested sources?" }
-func (stepTrackProcessed) Kind() Kind                                       { return KindHybrid }
-func (stepTrackProcessed) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepTheme struct{}
-
-func (stepTheme) ID() string                                       { return "theme" }
-func (stepTheme) Description() string                              { return "Hugo theme" }
-func (stepTheme) Kind() Kind                                       { return KindHybrid }
-func (stepTheme) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepPublishLog struct{}
-
-func (stepPublishLog) ID() string                                       { return "publish-log" }
-func (stepPublishLog) Description() string                              { return "publish log to rendered site?" }
-func (stepPublishLog) Kind() Kind                                       { return KindHybrid }
-func (stepPublishLog) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepPatchIdentity struct{}
-
-func (stepPatchIdentity) ID() string                                       { return "patch-identity" }
-func (stepPatchIdentity) Description() string                              { return "patch identity files" }
-func (stepPatchIdentity) Kind() Kind                                       { return KindHybrid }
-func (stepPatchIdentity) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
 type stepInstallQmd struct{}
 
 func (stepInstallQmd) ID() string                                       { return "install-qmd" }

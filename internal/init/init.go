@@ -49,6 +49,9 @@ type StepContext struct {
 	RepoRoot       string
 	Now            time.Time
 	Agent          AgentRunner
+	// AgentCLI is the binary name the AgentRunner shells (claude /
+	// codex / opencode / gemini / ...). Empty when --agent is unset.
+	AgentCLI       string
 	Git            GitInit
 	Bash           BashRunner
 	NPM            NPMRunner
@@ -84,6 +87,9 @@ func Run(opts Options, deps StepContext) (int, error) {
 	deps.RepoRoot = opts.RepoRoot
 	deps.Now = opts.Now
 	deps.NonInteractive = opts.NonInteractive
+	if deps.AgentCLI == "" {
+		deps.AgentCLI = opts.Agent
+	}
 
 	skipSet := map[string]bool{}
 	for _, s := range opts.SkipSteps {

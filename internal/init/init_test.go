@@ -126,8 +126,9 @@ agent: claude
 }
 
 // TestRunStubHonorsSkipAndContinue verifies the orchestrator wires
-// --skip-step + --continue + --reset against the stub steps. Real
-// step impls are exercised in their dedicated tests.
+// --skip-step + --continue + --reset against the step list. Real
+// step impls are exercised in their dedicated tests; here we skip
+// every step so the orchestrator's flow is the only thing under test.
 func TestRunStubHonorsSkipAndContinue(t *testing.T) {
 	dir := t.TempDir()
 	stdout := &bytes.Buffer{}
@@ -137,10 +138,16 @@ func TestRunStubHonorsSkipAndContinue(t *testing.T) {
 		Stdout: stdout,
 		Stderr: stderr,
 	}
+	allSkipped := []string{
+		"dep-check", "domain", "wiki-name", "privacy", "track-processed",
+		"theme", "publish-log", "patch-identity", "install-qmd",
+		"wire-qmd-mcp", "wire-awiki-mcp", "log-init", "stage-commit",
+		"template-init", "smoke-test",
+	}
 	rc, err := Run(Options{
 		RepoRoot:       dir,
 		NonInteractive: true,
-		SkipSteps:      []string{"dep-check"},
+		SkipSteps:      allSkipped,
 		Now:            time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
 	}, deps)
 	if err != nil {
@@ -170,13 +177,12 @@ func TestRunStubHonorsSkipAndContinue(t *testing.T) {
 	if _, err := Run(Options{
 		RepoRoot:       dir,
 		NonInteractive: true,
+		SkipSteps:      allSkipped,
 		Continue:       true,
 		Now:            time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC),
 	}, deps); err != nil {
 		t.Fatalf("rerun: %v", err)
 	}
-	// Stub steps return Skipped, so the second run will not see
-	// "applied" — but the orchestrator should still print INIT|done.
 	if !strings.Contains(stdout2.String(), "INIT|done") {
 		t.Errorf("rerun stdout missing done marker: %s", stdout2)
 	}
@@ -191,11 +197,17 @@ func TestRunReset(t *testing.T) {
 		Stdout: stdout,
 		Stderr: &bytes.Buffer{},
 	}
-	if _, err := Run(Options{RepoRoot: dir, NonInteractive: true, Now: time.Now()}, deps); err != nil {
+	allSkipped := []string{
+		"dep-check", "domain", "wiki-name", "privacy", "track-processed",
+		"theme", "publish-log", "patch-identity", "install-qmd",
+		"wire-qmd-mcp", "wire-awiki-mcp", "log-init", "stage-commit",
+		"template-init", "smoke-test",
+	}
+	if _, err := Run(Options{RepoRoot: dir, NonInteractive: true, SkipSteps: allSkipped, Now: time.Now()}, deps); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	stdout.Reset()
-	if _, err := Run(Options{RepoRoot: dir, NonInteractive: true, Reset: true, Now: time.Now()}, deps); err != nil {
+	if _, err := Run(Options{RepoRoot: dir, NonInteractive: true, SkipSteps: allSkipped, Reset: true, Now: time.Now()}, deps); err != nil {
 		t.Fatalf("reset run: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "INIT|reset") {

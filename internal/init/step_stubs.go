@@ -12,34 +12,6 @@ package initverb
 // All stubs intentionally have zero size so they cost nothing at
 // runtime. They're declared in dependency order (Step 0 → Step 13).
 
-type stepDepCheck struct{}
-
-func (stepDepCheck) ID() string                                       { return "dep-check" }
-func (stepDepCheck) Description() string                              { return "submodules + dependency check" }
-func (stepDepCheck) Kind() Kind                                       { return KindMechanical }
-func (stepDepCheck) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepDomain struct{}
-
-func (stepDomain) ID() string                                       { return "domain" }
-func (stepDomain) Description() string                              { return "pick wiki domain" }
-func (stepDomain) Kind() Kind                                       { return KindInteractive }
-func (stepDomain) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepWikiName struct{}
-
-func (stepWikiName) ID() string                                       { return "wiki-name" }
-func (stepWikiName) Description() string                              { return "wiki name + purpose" }
-func (stepWikiName) Kind() Kind                                       { return KindInteractive }
-func (stepWikiName) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
-type stepPrivacy struct{}
-
-func (stepPrivacy) ID() string                                       { return "privacy" }
-func (stepPrivacy) Description() string                              { return "encryption decision" }
-func (stepPrivacy) Kind() Kind                                       { return KindHybrid }
-func (stepPrivacy) Execute(StepContext, *Answers) (Result, error)    { return stub(), nil }
-
 type stepTrackProcessed struct{}
 
 func (stepTrackProcessed) ID() string                                       { return "track-processed" }

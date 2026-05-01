@@ -107,6 +107,12 @@ build:
 init:
     @echo "Open agent. Say: 'init wiki'. Agent reads BOOTSTRAP.md."
 
+# Same as `init` but launches the agent CLI directly with the prompt.
+# Example: `just init-agent claude` → `claude -p "init wiki"`.
+# Default agent: claude. Override: `just init-agent codex`.
+init-agent agent="claude" *flags:
+    {{agent}} -p "init wiki" {{flags}}
+
 install-hooks:
     awiki install-hooks
 

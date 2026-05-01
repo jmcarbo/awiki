@@ -1,3 +1,9 @@
+## [1.3.4] - 2026-05-01
+
+Add `just init-agent [agent]` recipe that launches the agent CLI
+with the `"init wiki"` prompt. Default agent: `claude`. Example:
+`just init-agent claude` → `claude -p "init wiki"`.
+
 ## [1.3.3] - 2026-04-30
 
 Justfile prepends `<repoRoot>/bin` to PATH so `awiki <verb>` resolves

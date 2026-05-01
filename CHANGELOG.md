@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.4.0] - 2026-05-01
 
 Add `awiki init` — a deterministic Go verb that fuses the manual
 `just init` agent prose flow and the `just init-agent` shell

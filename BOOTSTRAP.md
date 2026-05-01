@@ -1,5 +1,22 @@
 # Bootstrap
 
+> **Canonical entry point:** `awiki init` runs all 14 steps below
+> deterministically, persists answers + per-step status to
+> `.awiki/init-state.json`, and is idempotent across re-runs (use
+> `--continue` to resume after a halt).
+>
+> - Plain interactive use: `just init` (or `awiki init`).
+> - Agent-delegated landing paragraph: `just init-agent claude`
+>   (or `awiki init --agent codex`, etc.).
+> - CI / scripted setup: `awiki init --non-interactive --config <yaml>`.
+> - Skip a specific step: `awiki init --skip-step <id>` (repeatable).
+> - Reset state: `awiki init --reset`.
+>
+> The per-step prose below remains the authoritative spec. Agents
+> that want to walk the flow manually can read each step here and
+> apply it themselves; `awiki init` calls the same Go ports under the
+> hood and writes the same provenance entries.
+
 Run this once when the user first opens an agent in a fresh clone of the awiki template. Walk through each step in order. Do NOT skip steps; later steps depend on earlier ones.
 
 ### Step 0: Submodules + dependency check

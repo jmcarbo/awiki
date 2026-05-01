@@ -1,3 +1,39 @@
+## [Unreleased]
+
+Add `awiki init` — a deterministic Go verb that fuses the manual
+`just init` agent prose flow and the `just init-agent` shell
+delegation into a single idempotent state machine.
+
+The verb walks the 14 BOOTSTRAP.md steps in order, persists answers
++ per-step status to `.awiki/init-state.json`, and re-runs pick up
+where left off via `--continue`. Steps fall into four kinds: pure
+mechanical (dep-check, log-init, install-qmd, template-init,
+smoke-test), interactive (domain, wiki-name), hybrid (privacy,
+track-processed, theme, publish-log, patch-identity, wire-qmd-mcp,
+wire-awiki-mcp, stage-commit), and agent-delegated (patch-identity
+landing paragraph when `--agent <cli>` is set).
+
+Flags:
+- `--agent <cli>` — delegate Step 7 landing-paragraph generation
+  to the named binary (claude/codex/opencode/gemini/...).
+- `--non-interactive` — skip every prompt and use safe defaults.
+  Stub answers (wiki-name=repo dir, domain=other, theme=hugo-book,
+  privacy=none) get written to state so the user can edit later.
+- `--config <yaml>` — load answers from a flat YAML-ish config file.
+- `--skip-step <id>` — repeatable; skip the named step.
+- `--continue` — resume from `.awiki/init-state.json`.
+- `--reset` — wipe init state and start over.
+
+Justfile gains `init` (`awiki init`), `init-agent`
+(`awiki init --agent ...`), and `init-non-interactive` recipes.
+The old prose-only `init` recipe is replaced; users who prefer the
+manual / agent-driven flow can still walk BOOTSTRAP.md by hand.
+
+The verb only mutates files via Go domain code + adapter
+interfaces; production wires `os/exec` for git, bash
+(scripts/encrypt-init.sh), npm install, and the agent CLI. Tests
+inject fakes for every adapter.
+
 ## [1.3.4] - 2026-05-01
 
 Add `just init-agent [agent]` recipe that launches the agent CLI

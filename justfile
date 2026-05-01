@@ -104,14 +104,23 @@ build:
     awiki build --full
 
 # === bootstrap / setup ===
-init:
-    @echo "Open agent. Say: 'init wiki'. Agent reads BOOTSTRAP.md."
+# Run the deterministic 14-step bootstrap flow. Idempotent: re-runs
+# pick up where left off via `.awiki/init-state.json`. See `awiki init
+# --help` for flags. Manual / agent-driven flows still work — see
+# BOOTSTRAP.md for the underlying step prose.
+init *flags:
+    awiki init {{flags}}
 
-# Same as `init` but launches the agent CLI directly with the prompt.
-# Example: `just init-agent claude` → `claude -p "init wiki"`.
+# Same as `init` but with --agent set so Step 7 (patch-identity) can
+# delegate the landing-paragraph generation to the named CLI.
 # Default agent: claude. Override: `just init-agent codex`.
 init-agent agent="claude" *flags:
-    {{agent}} -p "init wiki" {{flags}}
+    awiki init --agent {{agent}} {{flags}}
+
+# CI / scripted setup: skip every prompt and accept defaults. Use
+# --config <yaml> for full control over answers.
+init-non-interactive *flags:
+    awiki init --non-interactive {{flags}}
 
 install-hooks:
     awiki install-hooks

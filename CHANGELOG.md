@@ -1,3 +1,19 @@
+## [1.4.1] - 2026-05-01
+
+E2E hardening of `awiki init` against a fake-wiki fixture:
+
+- `wiki-name` step now sanitizes the non-interactive fallback (and any
+  prior bad value persisted to state) to a kebab-valid form. Repo dirs
+  with `.` or uppercase letters (e.g. `tmp.cEb9ebv7M5`) no longer
+  block the init flow.
+- Default re-run is now idempotent: applied steps are skipped without
+  needing `--continue`. Use `--reset` to force a fresh run. Stops the
+  log-init step from appending duplicate entries on every re-invocation.
+- `internal/adapters.ExecQmd.Reindex` ported native to Go (was still
+  shelling deleted `scripts/qmd-index.sh`). Same `QMD-INDEX|ok` /
+  `QMD-INDEX|skip|reason=...` contract; same v0.5.0 collection-rebuild
+  workaround for the upstream constraint-failed bug.
+
 ## [1.4.0] - 2026-05-01
 
 Add `awiki init` — a deterministic Go verb that fuses the manual

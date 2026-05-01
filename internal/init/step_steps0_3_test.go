@@ -213,10 +213,23 @@ func TestStepWikiNameValid(t *testing.T) {
 }
 
 func TestStepWikiNameInvalidKebab(t *testing.T) {
+	// Interactive mode rejects bad input (user must retype).
+	ans := &Answers{WikiName: "Has Spaces"}
+	ctx := StepContext{Stdout: &bytes.Buffer{}, NonInteractive: false,
+		Prompt: func(string, string) (string, error) { return "Has Spaces", nil }}
+	if _, err := (stepWikiName{}).Execute(ctx, ans); err == nil {
+		t.Fatal("expected error for non-kebab name in interactive mode")
+	}
+}
+
+func TestStepWikiNameSanitizesNonInteractive(t *testing.T) {
 	ans := &Answers{WikiName: "Has Spaces"}
 	ctx := StepContext{Stdout: &bytes.Buffer{}, NonInteractive: true}
-	if _, err := (stepWikiName{}).Execute(ctx, ans); err == nil {
-		t.Fatal("expected error for non-kebab name")
+	if _, err := (stepWikiName{}).Execute(ctx, ans); err != nil {
+		t.Fatalf("non-interactive sanitize should not error: %v", err)
+	}
+	if ans.WikiName != "has-spaces" {
+		t.Fatalf("wiki_name = %q, want %q", ans.WikiName, "has-spaces")
 	}
 }
 

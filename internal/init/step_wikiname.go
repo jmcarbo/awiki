@@ -25,7 +25,7 @@ const maxPurposeLen = 120
 func (stepWikiName) Execute(ctx StepContext, ans *Answers) (Result, error) {
 	if ans.WikiName == "" {
 		if ctx.NonInteractive {
-			ans.WikiName = filepath.Base(ctx.RepoRoot)
+			ans.WikiName = sanitizeKebab(filepath.Base(ctx.RepoRoot))
 		} else {
 			if ctx.Prompt == nil {
 				return Result{Status: StatusFailed}, fmt.Errorf("wiki-name: Prompt is nil")
@@ -38,8 +38,13 @@ func (stepWikiName) Execute(ctx StepContext, ans *Answers) (Result, error) {
 		}
 	}
 	if !kebabRe.MatchString(ans.WikiName) {
-		return Result{Status: StatusFailed},
-			fmt.Errorf("wiki-name: %q is not kebab-case (use lowercase letters, digits, single hyphens)", ans.WikiName)
+		if ctx.NonInteractive {
+			ans.WikiName = sanitizeKebab(ans.WikiName)
+		}
+		if !kebabRe.MatchString(ans.WikiName) {
+			return Result{Status: StatusFailed},
+				fmt.Errorf("wiki-name: %q is not kebab-case (use lowercase letters, digits, single hyphens)", ans.WikiName)
+		}
 	}
 
 	if ans.Purpose == "" && !ctx.NonInteractive {
@@ -67,4 +72,30 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// sanitizeKebab maps an arbitrary string into a kebabRe-valid form.
+// Lowercases ASCII letters, replaces runs of non-[a-z0-9] with a
+// single hyphen, trims leading/trailing hyphens. Returns "wiki" if
+// the result would be empty.
+func sanitizeKebab(s string) string {
+	var b strings.Builder
+	prevDash := true
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "wiki"
+	}
+	return out
 }

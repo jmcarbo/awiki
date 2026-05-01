@@ -161,7 +161,9 @@ func Run(opts Options, deps StepContext) (int, error) {
 			fmt.Fprintf(deps.Stdout, "INIT|skip|%s\n", id)
 			continue
 		}
-		if opts.Continue && state.IsApplied(id) {
+		// Idempotent resume by default: skip steps already marked
+		// applied. Use --reset to force a fresh run.
+		if state.IsApplied(id) {
 			fmt.Fprintf(deps.Stdout, "INIT|resume|%s already applied\n", id)
 			continue
 		}
